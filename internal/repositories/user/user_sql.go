@@ -19,8 +19,15 @@ func NewUserRepo(db *gorm.DB) interfaceuser.RepoUserInterface {
 }
 
 func (r *repo) Store(ctx context.Context, user domainuser.Users) error {
+	var omit []string
 	if user.Phone == "" {
-		return r.DB.WithContext(ctx).Omit("phone").Create(&user).Error
+		omit = append(omit, "phone")
+	}
+	if user.HermesProfileID == nil {
+		omit = append(omit, "hermes_profile_id")
+	}
+	if len(omit) > 0 {
+		return r.DB.WithContext(ctx).Omit(omit...).Create(&user).Error
 	}
 	return r.GenericRepository.Store(ctx, user)
 }
