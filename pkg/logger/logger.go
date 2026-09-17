@@ -12,7 +12,7 @@ import (
 	"sync"
 	"time"
 
-	"starter-kit/utils"
+	"family-assistant/utils"
 
 	"log/slog"
 

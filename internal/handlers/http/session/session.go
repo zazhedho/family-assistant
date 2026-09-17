@@ -1,17 +1,17 @@
 package handlersession
 
 import (
+	"family-assistant/internal/authscope"
+	domainaudit "family-assistant/internal/domain/audit"
+	handlercommon "family-assistant/internal/handlers/http/common"
+	interfaceaudit "family-assistant/internal/interfaces/audit"
+	interfacesession "family-assistant/internal/interfaces/session"
+	"family-assistant/pkg/logger"
+	"family-assistant/pkg/messages"
+	"family-assistant/pkg/response"
+	"family-assistant/utils"
 	"fmt"
 	"net/http"
-	"starter-kit/internal/authscope"
-	domainaudit "starter-kit/internal/domain/audit"
-	handlercommon "starter-kit/internal/handlers/http/common"
-	interfaceaudit "starter-kit/internal/interfaces/audit"
-	interfacesession "starter-kit/internal/interfaces/session"
-	"starter-kit/pkg/logger"
-	"starter-kit/pkg/messages"
-	"starter-kit/pkg/response"
-	"starter-kit/utils"
 
 	"github.com/gin-gonic/gin"
 )

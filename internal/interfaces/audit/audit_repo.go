@@ -1,8 +1,8 @@
 package interfaceaudit
 
 import (
-	domainaudit "starter-kit/internal/domain/audit"
-	interfacegeneric "starter-kit/internal/interfaces/generic"
+	domainaudit "family-assistant/internal/domain/audit"
+	interfacegeneric "family-assistant/internal/interfaces/generic"
 )
 
 type RepoAuditInterface interface {

@@ -1,19 +1,19 @@
 package handlerpermission
 
 import (
+	"family-assistant/internal/authscope"
+	domainaudit "family-assistant/internal/domain/audit"
+	"family-assistant/internal/dto"
+	handlercommon "family-assistant/internal/handlers/http/common"
+	interfaceaudit "family-assistant/internal/interfaces/audit"
+	interfacepermission "family-assistant/internal/interfaces/permission"
+	"family-assistant/pkg/filter"
+	"family-assistant/pkg/logger"
+	"family-assistant/pkg/messages"
+	"family-assistant/pkg/response"
+	"family-assistant/utils"
 	"fmt"
 	"net/http"
-	"starter-kit/internal/authscope"
-	domainaudit "starter-kit/internal/domain/audit"
-	"starter-kit/internal/dto"
-	handlercommon "starter-kit/internal/handlers/http/common"
-	interfaceaudit "starter-kit/internal/interfaces/audit"
-	interfacepermission "starter-kit/internal/interfaces/permission"
-	"starter-kit/pkg/filter"
-	"starter-kit/pkg/logger"
-	"starter-kit/pkg/messages"
-	"starter-kit/pkg/response"
-	"starter-kit/utils"
 
 	"github.com/gin-gonic/gin"
 )

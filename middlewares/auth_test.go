@@ -3,13 +3,13 @@ package middlewares
 import (
 	"context"
 	"errors"
+	domainauth "family-assistant/internal/domain/auth"
+	domainpermission "family-assistant/internal/domain/permission"
+	domainuser "family-assistant/internal/domain/user"
+	"family-assistant/pkg/filter"
+	"family-assistant/utils"
 	"net/http"
 	"net/http/httptest"
-	domainauth "starter-kit/internal/domain/auth"
-	domainpermission "starter-kit/internal/domain/permission"
-	domainuser "starter-kit/internal/domain/user"
-	"starter-kit/pkg/filter"
-	"starter-kit/utils"
 	"testing"
 	"time"
 

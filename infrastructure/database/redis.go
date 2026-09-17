@@ -2,9 +2,9 @@ package database
 
 import (
 	"context"
+	"family-assistant/pkg/logger"
+	"family-assistant/utils"
 	"fmt"
-	"starter-kit/pkg/logger"
-	"starter-kit/utils"
 	"time"
 
 	"github.com/redis/go-redis/v9"

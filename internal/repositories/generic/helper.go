@@ -1,11 +1,11 @@
 package repositorygeneric
 
 import (
+	"family-assistant/pkg/filter"
+	"family-assistant/utils"
 	"fmt"
 	"reflect"
 	"slices"
-	"starter-kit/pkg/filter"
-	"starter-kit/utils"
 	"strings"
 
 	"gorm.io/gorm"

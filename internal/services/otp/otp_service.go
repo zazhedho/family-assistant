@@ -3,12 +3,12 @@ package serviceotp
 import (
 	"context"
 	"errors"
+	interfaceotp "family-assistant/internal/interfaces/otp"
+	"family-assistant/pkg/config"
+	"family-assistant/pkg/logger"
+	"family-assistant/pkg/mailer"
+	"family-assistant/utils"
 	"fmt"
-	interfaceotp "starter-kit/internal/interfaces/otp"
-	"starter-kit/pkg/config"
-	"starter-kit/pkg/logger"
-	"starter-kit/pkg/mailer"
-	"starter-kit/utils"
 	"strings"
 	"time"
 

@@ -2,9 +2,9 @@ package interfaceuser
 
 import (
 	"context"
-	domainuser "starter-kit/internal/domain/user"
-	"starter-kit/internal/dto"
-	"starter-kit/pkg/filter"
+	domainuser "family-assistant/internal/domain/user"
+	"family-assistant/internal/dto"
+	"family-assistant/pkg/filter"
 )
 
 type ServiceUserInterface interface {

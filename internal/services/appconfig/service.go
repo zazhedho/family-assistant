@@ -3,12 +3,12 @@ package serviceappconfig
 import (
 	"context"
 	"errors"
-	domainappconfig "starter-kit/internal/domain/appconfig"
-	"starter-kit/internal/dto"
-	interfaceappconfig "starter-kit/internal/interfaces/appconfig"
-	"starter-kit/pkg/configvalue"
-	"starter-kit/pkg/filter"
-	"starter-kit/utils"
+	domainappconfig "family-assistant/internal/domain/appconfig"
+	"family-assistant/internal/dto"
+	interfaceappconfig "family-assistant/internal/interfaces/appconfig"
+	"family-assistant/pkg/configvalue"
+	"family-assistant/pkg/filter"
+	"family-assistant/utils"
 	"time"
 
 	"gorm.io/gorm"

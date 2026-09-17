@@ -1,9 +1,9 @@
 package repositorymedia
 
 import (
-	domainmedia "starter-kit/internal/domain/media"
-	interfacemedia "starter-kit/internal/interfaces/media"
-	repositorygeneric "starter-kit/internal/repositories/generic"
+	domainmedia "family-assistant/internal/domain/media"
+	interfacemedia "family-assistant/internal/interfaces/media"
+	repositorygeneric "family-assistant/internal/repositories/generic"
 
 	"gorm.io/gorm"
 )

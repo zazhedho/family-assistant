@@ -2,8 +2,8 @@ package interfacepermission
 
 import (
 	"context"
-	domainpermission "starter-kit/internal/domain/permission"
-	interfacegeneric "starter-kit/internal/interfaces/generic"
+	domainpermission "family-assistant/internal/domain/permission"
+	interfacegeneric "family-assistant/internal/interfaces/generic"
 )
 
 type RepoPermissionInterface interface {

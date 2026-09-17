@@ -2,10 +2,10 @@ package repositoryappconfig
 
 import (
 	"context"
-	domainappconfig "starter-kit/internal/domain/appconfig"
-	interfaceappconfig "starter-kit/internal/interfaces/appconfig"
-	repositorygeneric "starter-kit/internal/repositories/generic"
-	"starter-kit/pkg/filter"
+	domainappconfig "family-assistant/internal/domain/appconfig"
+	interfaceappconfig "family-assistant/internal/interfaces/appconfig"
+	repositorygeneric "family-assistant/internal/repositories/generic"
+	"family-assistant/pkg/filter"
 
 	"gorm.io/gorm"
 )

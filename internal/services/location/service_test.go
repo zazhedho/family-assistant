@@ -7,9 +7,9 @@ import (
 	"net/http"
 	"reflect"
 
-	"starter-kit/internal/authscope"
-	domainlocation "starter-kit/internal/domain/location"
-	"starter-kit/internal/dto"
+	"family-assistant/internal/authscope"
+	domainlocation "family-assistant/internal/domain/location"
+	"family-assistant/internal/dto"
 	"strings"
 	"testing"
 	"time"

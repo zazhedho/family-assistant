@@ -1,11 +1,11 @@
 package main
 
 import (
+	"family-assistant/pkg/moduleseed"
 	"flag"
 	"fmt"
 	"log"
 	"os"
-	"starter-kit/pkg/moduleseed"
 	"strings"
 )
 

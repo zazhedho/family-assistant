@@ -3,13 +3,13 @@ package servicerole
 import (
 	"context"
 	"errors"
-	"starter-kit/internal/authscope"
-	domainmenu "starter-kit/internal/domain/menu"
-	domainpermission "starter-kit/internal/domain/permission"
-	domainrole "starter-kit/internal/domain/role"
-	"starter-kit/internal/dto"
-	"starter-kit/pkg/filter"
-	"starter-kit/utils"
+	"family-assistant/internal/authscope"
+	domainmenu "family-assistant/internal/domain/menu"
+	domainpermission "family-assistant/internal/domain/permission"
+	domainrole "family-assistant/internal/domain/role"
+	"family-assistant/internal/dto"
+	"family-assistant/pkg/filter"
+	"family-assistant/utils"
 	"testing"
 )
 

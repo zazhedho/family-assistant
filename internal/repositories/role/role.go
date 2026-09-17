@@ -2,11 +2,11 @@ package repositoryrole
 
 import (
 	"context"
-	domainrole "starter-kit/internal/domain/role"
-	interfacerole "starter-kit/internal/interfaces/role"
-	repositorygeneric "starter-kit/internal/repositories/generic"
-	"starter-kit/pkg/filter"
-	"starter-kit/utils"
+	domainrole "family-assistant/internal/domain/role"
+	interfacerole "family-assistant/internal/interfaces/role"
+	repositorygeneric "family-assistant/internal/repositories/generic"
+	"family-assistant/pkg/filter"
+	"family-assistant/utils"
 
 	"gorm.io/gorm"
 )

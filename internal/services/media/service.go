@@ -13,11 +13,11 @@ import (
 
 	"github.com/google/uuid"
 
-	"starter-kit/internal/authscope"
-	domainmedia "starter-kit/internal/domain/media"
-	interfacemedia "starter-kit/internal/interfaces/media"
-	"starter-kit/pkg/storage"
-	"starter-kit/utils"
+	"family-assistant/internal/authscope"
+	domainmedia "family-assistant/internal/domain/media"
+	interfacemedia "family-assistant/internal/interfaces/media"
+	"family-assistant/pkg/storage"
+	"family-assistant/utils"
 )
 
 const (

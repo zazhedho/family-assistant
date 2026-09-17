@@ -2,10 +2,10 @@ package mailer
 
 import (
 	"bytes"
+	"family-assistant/utils"
 	"fmt"
 	"html"
 	"net/smtp"
-	"starter-kit/utils"
 	"strconv"
 	"strings"
 	"time"

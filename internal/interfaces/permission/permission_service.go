@@ -2,9 +2,9 @@ package interfacepermission
 
 import (
 	"context"
-	domainpermission "starter-kit/internal/domain/permission"
-	"starter-kit/internal/dto"
-	"starter-kit/pkg/filter"
+	domainpermission "family-assistant/internal/domain/permission"
+	"family-assistant/internal/dto"
+	"family-assistant/pkg/filter"
 )
 
 type ServicePermissionInterface interface {

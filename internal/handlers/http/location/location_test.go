@@ -8,10 +8,10 @@ import (
 	"net/http"
 	"net/http/httptest"
 
-	"starter-kit/internal/authscope"
-	"starter-kit/internal/dto"
-	servicelocation "starter-kit/internal/services/location"
-	"starter-kit/utils"
+	"family-assistant/internal/authscope"
+	"family-assistant/internal/dto"
+	servicelocation "family-assistant/internal/services/location"
+	"family-assistant/utils"
 	"testing"
 
 	"github.com/gin-gonic/gin"

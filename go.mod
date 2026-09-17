@@ -1,4 +1,4 @@
-module starter-kit
+module family-assistant
 
 go 1.27
 

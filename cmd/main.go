@@ -2,16 +2,16 @@ package main
 
 import (
 	"database/sql"
+	"family-assistant/infrastructure/database"
+	"family-assistant/internal/router"
+	"family-assistant/pkg/config"
+	"family-assistant/pkg/logger"
+	"family-assistant/utils"
 	"flag"
 	"fmt"
 	"log"
 	"net"
 	"os"
-	"starter-kit/infrastructure/database"
-	"starter-kit/internal/router"
-	"starter-kit/pkg/config"
-	"starter-kit/pkg/logger"
-	"starter-kit/utils"
 	"strings"
 	"time"
 

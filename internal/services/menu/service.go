@@ -2,12 +2,12 @@ package servicemenu
 
 import (
 	"context"
-	domainmenu "starter-kit/internal/domain/menu"
-	"starter-kit/internal/dto"
-	interfacemenu "starter-kit/internal/interfaces/menu"
-	interfacepermission "starter-kit/internal/interfaces/permission"
-	serviceshared "starter-kit/internal/services/shared"
-	"starter-kit/pkg/filter"
+	domainmenu "family-assistant/internal/domain/menu"
+	"family-assistant/internal/dto"
+	interfacemenu "family-assistant/internal/interfaces/menu"
+	interfacepermission "family-assistant/internal/interfaces/permission"
+	serviceshared "family-assistant/internal/services/shared"
+	"family-assistant/pkg/filter"
 	"time"
 )
 

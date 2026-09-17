@@ -3,12 +3,12 @@ package serviceuser
 import (
 	"context"
 	"errors"
+	domainuser "family-assistant/internal/domain/user"
+	"family-assistant/internal/dto"
+	interfacerole "family-assistant/internal/interfaces/role"
+	"family-assistant/utils"
 	"net/mail"
 	"regexp"
-	domainuser "starter-kit/internal/domain/user"
-	"starter-kit/internal/dto"
-	interfacerole "starter-kit/internal/interfaces/role"
-	"starter-kit/utils"
 	"strings"
 )
 

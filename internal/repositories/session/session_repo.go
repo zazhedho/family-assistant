@@ -4,9 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	domainsession "family-assistant/internal/domain/session"
+	"family-assistant/pkg/logger"
 	"fmt"
-	domainsession "starter-kit/internal/domain/session"
-	"starter-kit/pkg/logger"
 	"time"
 
 	"github.com/redis/go-redis/v9"

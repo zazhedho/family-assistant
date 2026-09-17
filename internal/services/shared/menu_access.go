@@ -2,10 +2,10 @@ package serviceshared
 
 import (
 	"context"
-	"starter-kit/internal/authscope"
-	domainmenu "starter-kit/internal/domain/menu"
-	domainpermission "starter-kit/internal/domain/permission"
-	interfacepermission "starter-kit/internal/interfaces/permission"
+	"family-assistant/internal/authscope"
+	domainmenu "family-assistant/internal/domain/menu"
+	domainpermission "family-assistant/internal/domain/permission"
+	interfacepermission "family-assistant/internal/interfaces/permission"
 	"strings"
 )
 

@@ -1,11 +1,11 @@
 package middlewares
 
 import (
+	"family-assistant/pkg/logger"
+	"family-assistant/pkg/response"
+	"family-assistant/utils"
 	"fmt"
 	"net/http"
-	"starter-kit/pkg/logger"
-	"starter-kit/pkg/response"
-	"starter-kit/utils"
 
 	"github.com/gin-gonic/gin"
 )

@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"starter-kit/internal/dto"
+	"family-assistant/internal/dto"
 
 	redismock "github.com/go-redis/redismock/v9"
 )

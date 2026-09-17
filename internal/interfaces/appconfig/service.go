@@ -2,9 +2,9 @@ package interfaceappconfig
 
 import (
 	"context"
-	domainappconfig "starter-kit/internal/domain/appconfig"
-	"starter-kit/internal/dto"
-	"starter-kit/pkg/filter"
+	domainappconfig "family-assistant/internal/domain/appconfig"
+	"family-assistant/internal/dto"
+	"family-assistant/pkg/filter"
 	"time"
 )
 

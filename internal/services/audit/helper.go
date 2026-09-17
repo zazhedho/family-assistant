@@ -2,10 +2,10 @@ package serviceaudit
 
 import (
 	"encoding/json"
+	domainaudit "family-assistant/internal/domain/audit"
+	"family-assistant/internal/dto"
+	"family-assistant/utils"
 	"fmt"
-	domainaudit "starter-kit/internal/domain/audit"
-	"starter-kit/internal/dto"
-	"starter-kit/utils"
 	"strings"
 )
 

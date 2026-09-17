@@ -2,7 +2,7 @@ package interfaceauth
 
 import (
 	"context"
-	domainauth "starter-kit/internal/domain/auth"
+	domainauth "family-assistant/internal/domain/auth"
 	"time"
 )
 

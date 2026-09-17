@@ -11,10 +11,10 @@ import (
 
 	"github.com/google/uuid"
 
-	"starter-kit/internal/authscope"
-	domainmedia "starter-kit/internal/domain/media"
-	"starter-kit/pkg/storage"
-	"starter-kit/utils"
+	"family-assistant/internal/authscope"
+	domainmedia "family-assistant/internal/domain/media"
+	"family-assistant/pkg/storage"
+	"family-assistant/utils"
 )
 
 type mediaTestFile struct {

@@ -3,9 +3,9 @@ package servicepermission
 import (
 	"context"
 	"errors"
-	domainpermission "starter-kit/internal/domain/permission"
-	"starter-kit/internal/dto"
-	"starter-kit/pkg/filter"
+	domainpermission "family-assistant/internal/domain/permission"
+	"family-assistant/internal/dto"
+	"family-assistant/pkg/filter"
 	"testing"
 )
 

@@ -2,8 +2,8 @@ package utils
 
 import (
 	"errors"
+	domainuser "family-assistant/internal/domain/user"
 	"fmt"
-	domainuser "starter-kit/internal/domain/user"
 	"strings"
 	"time"
 

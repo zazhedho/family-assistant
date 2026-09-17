@@ -4,10 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"family-assistant/internal/dto"
+	"family-assistant/pkg/logger"
+	"family-assistant/utils"
 	"fmt"
-	"starter-kit/internal/dto"
-	"starter-kit/pkg/logger"
-	"starter-kit/utils"
 	"time"
 
 	"github.com/redis/go-redis/v9"

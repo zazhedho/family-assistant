@@ -3,8 +3,8 @@ package repositorysession
 import (
 	"context"
 	"encoding/json"
+	domainsession "family-assistant/internal/domain/session"
 	"fmt"
-	domainsession "starter-kit/internal/domain/session"
 	"testing"
 	"time"
 

@@ -1,7 +1,7 @@
 package mailer
 
 import (
-	"starter-kit/utils"
+	"family-assistant/utils"
 	"strings"
 	"testing"
 	"time"

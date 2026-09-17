@@ -10,10 +10,10 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/redis/go-redis/v9"
 
-	"starter-kit/pkg/logger"
-	"starter-kit/pkg/messages"
-	"starter-kit/pkg/response"
-	"starter-kit/utils"
+	"family-assistant/pkg/logger"
+	"family-assistant/pkg/messages"
+	"family-assistant/pkg/response"
+	"family-assistant/utils"
 )
 
 // IPRateLimitMiddleware applies a simple Redis-backed rate limit per client IP

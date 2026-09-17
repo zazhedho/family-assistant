@@ -2,7 +2,7 @@ package interfacesession
 
 import (
 	"context"
-	domainsession "starter-kit/internal/domain/session"
+	domainsession "family-assistant/internal/domain/session"
 	"time"
 )
 

@@ -2,9 +2,9 @@ package database
 
 import (
 	"database/sql"
+	"family-assistant/pkg/logger"
+	"family-assistant/utils"
 	"fmt"
-	"starter-kit/pkg/logger"
-	"starter-kit/utils"
 	"time"
 
 	"gorm.io/driver/postgres"

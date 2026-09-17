@@ -1,10 +1,10 @@
 package media
 
 import (
+	"family-assistant/pkg/logger"
+	"family-assistant/pkg/storage"
+	"family-assistant/utils"
 	"fmt"
-	"starter-kit/pkg/logger"
-	"starter-kit/pkg/storage"
-	"starter-kit/utils"
 	"strconv"
 )
 

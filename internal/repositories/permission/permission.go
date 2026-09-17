@@ -2,11 +2,11 @@ package repositorypermission
 
 import (
 	"context"
-	domainpermission "starter-kit/internal/domain/permission"
-	interfacepermission "starter-kit/internal/interfaces/permission"
-	repositorygeneric "starter-kit/internal/repositories/generic"
-	"starter-kit/pkg/filter"
-	"starter-kit/utils"
+	domainpermission "family-assistant/internal/domain/permission"
+	interfacepermission "family-assistant/internal/interfaces/permission"
+	repositorygeneric "family-assistant/internal/repositories/generic"
+	"family-assistant/pkg/filter"
+	"family-assistant/utils"
 
 	"gorm.io/gorm"
 )

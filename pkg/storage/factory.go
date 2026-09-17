@@ -1,8 +1,8 @@
 package storage
 
 import (
+	"family-assistant/utils"
 	"fmt"
-	"starter-kit/utils"
 )
 
 // NewStorageProvider creates a new storage provider based on the configuration

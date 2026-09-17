@@ -1,10 +1,10 @@
 package middlewares
 
 import (
+	"family-assistant/internal/authscope"
+	"family-assistant/pkg/logger"
 	"fmt"
 	"net/http"
-	"starter-kit/internal/authscope"
-	"starter-kit/pkg/logger"
 	"time"
 
 	"github.com/gin-gonic/gin"

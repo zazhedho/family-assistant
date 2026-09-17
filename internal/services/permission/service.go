@@ -3,12 +3,12 @@ package servicepermission
 import (
 	"context"
 	"errors"
-	permissioncache "starter-kit/internal/cache/permission"
-	domainpermission "starter-kit/internal/domain/permission"
-	"starter-kit/internal/dto"
-	interfacepermission "starter-kit/internal/interfaces/permission"
-	"starter-kit/pkg/filter"
-	"starter-kit/utils"
+	permissioncache "family-assistant/internal/cache/permission"
+	domainpermission "family-assistant/internal/domain/permission"
+	"family-assistant/internal/dto"
+	interfacepermission "family-assistant/internal/interfaces/permission"
+	"family-assistant/pkg/filter"
+	"family-assistant/utils"
 	"time"
 )
 

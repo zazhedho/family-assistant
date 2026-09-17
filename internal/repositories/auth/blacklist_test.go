@@ -3,7 +3,7 @@ package repositoryauth
 import (
 	"context"
 	"errors"
-	domainauth "starter-kit/internal/domain/auth"
+	domainauth "family-assistant/internal/domain/auth"
 	"testing"
 	"time"
 )

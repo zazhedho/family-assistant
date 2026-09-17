@@ -3,11 +3,11 @@ package handleruser
 import (
 	"context"
 	"errors"
+	domainappconfig "family-assistant/internal/domain/appconfig"
+	"family-assistant/internal/dto"
+	"family-assistant/pkg/filter"
 	"net/http"
 	"net/http/httptest"
-	domainappconfig "starter-kit/internal/domain/appconfig"
-	"starter-kit/internal/dto"
-	"starter-kit/pkg/filter"
 	"testing"
 	"time"
 

@@ -2,9 +2,9 @@ package repositorylocation
 
 import (
 	"context"
-	domainlocation "starter-kit/internal/domain/location"
-	interfacelocation "starter-kit/internal/interfaces/location"
-	"starter-kit/utils"
+	domainlocation "family-assistant/internal/domain/location"
+	interfacelocation "family-assistant/internal/interfaces/location"
+	"family-assistant/utils"
 	"time"
 
 	"gorm.io/gorm"

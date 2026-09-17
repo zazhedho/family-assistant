@@ -1,14 +1,14 @@
 package handleraudit
 
 import (
+	interfaceaudit "family-assistant/internal/interfaces/audit"
+	"family-assistant/pkg/filter"
+	"family-assistant/pkg/logger"
+	"family-assistant/pkg/messages"
+	"family-assistant/pkg/response"
+	"family-assistant/utils"
 	"fmt"
 	"net/http"
-	interfaceaudit "starter-kit/internal/interfaces/audit"
-	"starter-kit/pkg/filter"
-	"starter-kit/pkg/logger"
-	"starter-kit/pkg/messages"
-	"starter-kit/pkg/response"
-	"starter-kit/utils"
 
 	"github.com/gin-gonic/gin"
 )

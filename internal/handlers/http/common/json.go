@@ -5,10 +5,10 @@ import (
 	"net/http"
 	"reflect"
 
-	"starter-kit/pkg/logger"
-	"starter-kit/pkg/messages"
-	"starter-kit/pkg/response"
-	"starter-kit/utils"
+	"family-assistant/pkg/logger"
+	"family-assistant/pkg/messages"
+	"family-assistant/pkg/response"
+	"family-assistant/utils"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
