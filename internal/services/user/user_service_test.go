@@ -198,6 +198,12 @@ func (m *permissionRepoUserMock) GetUserPermissions(ctx context.Context, userId 
 	}
 	return append([]domainpermission.Permission{}, m.userPermissions...), nil
 }
+func (m *permissionRepoUserMock) GetRolePermissions(ctx context.Context, roleID string) ([]domainpermission.Permission, error) {
+	if m.err != nil {
+		return nil, m.err
+	}
+	return append([]domainpermission.Permission{}, m.userPermissions...), nil
+}
 
 func TestAdminCreateUserRequiresAssignRolePermissionForNonViewer(t *testing.T) {
 	service := &ServiceUser{

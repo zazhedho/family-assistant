@@ -73,6 +73,12 @@ func (m *permissionRepoTestDouble) GetUserPermissions(ctx context.Context, userI
 	}
 	return append([]domainpermission.Permission{}, m.permissions...), nil
 }
+func (m *permissionRepoTestDouble) GetRolePermissions(ctx context.Context, roleID string) ([]domainpermission.Permission, error) {
+	if m.err != nil {
+		return nil, m.err
+	}
+	return append([]domainpermission.Permission{}, m.permissions...), nil
+}
 
 func performMiddlewareRequest(token string, handlers ...gin.HandlerFunc) *httptest.ResponseRecorder {
 	gin.SetMode(gin.TestMode)

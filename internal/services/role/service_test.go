@@ -107,6 +107,9 @@ func (m *permissionRepoMock) GetByResource(ctx context.Context, resource string)
 func (m *permissionRepoMock) GetUserPermissions(ctx context.Context, userId string) ([]domainpermission.Permission, error) {
 	return append([]domainpermission.Permission{}, m.userPermissions...), nil
 }
+func (m *permissionRepoMock) GetRolePermissions(ctx context.Context, roleID string) ([]domainpermission.Permission, error) {
+	return append([]domainpermission.Permission{}, m.userPermissions...), nil
+}
 
 type menuRepoMock struct {
 	activeMenus []domainmenu.MenuItem

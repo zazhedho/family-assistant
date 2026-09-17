@@ -75,6 +75,12 @@ func (m *permissionRepoSharedTestDouble) GetUserPermissions(ctx context.Context,
 	}
 	return append([]domainpermission.Permission{}, m.permissions...), nil
 }
+func (m *permissionRepoSharedTestDouble) GetRolePermissions(ctx context.Context, roleID string) ([]domainpermission.Permission, error) {
+	if m.err != nil {
+		return nil, m.err
+	}
+	return append([]domainpermission.Permission{}, m.permissions...), nil
+}
 
 func TestHasPermissionUsesScopeAndRepositoryFallback(t *testing.T) {
 	ctx := authscope.WithContext(context.Background(), authscope.New("user-1", "Jane", "staff", []string{"users:list"}))

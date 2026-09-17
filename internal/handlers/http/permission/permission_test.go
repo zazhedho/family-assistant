@@ -58,6 +58,12 @@ func (m *permissionServiceTestDouble) GetUserPermissions(ctx context.Context, us
 	}
 	return m.userPermissions, nil
 }
+func (m *permissionServiceTestDouble) GetRolePermissions(ctx context.Context, roleID string) ([]domainpermission.Permission, error) {
+	if m.err != nil {
+		return nil, m.err
+	}
+	return m.permissions, nil
+}
 func (m *permissionServiceTestDouble) Update(ctx context.Context, id string, req dto.PermissionUpdate) (domainpermission.Permission, error) {
 	m.updateReq = req
 	if m.err != nil {

@@ -63,6 +63,10 @@ func (s *PermissionService) GetByResource(ctx context.Context, resource string) 
 	return s.PermissionRepo.GetByResource(ctx, resource)
 }
 
+func (s *PermissionService) GetRolePermissions(ctx context.Context, roleID string) ([]domainpermission.Permission, error) {
+	return s.PermissionRepo.GetRolePermissions(ctx, roleID)
+}
+
 func (s *PermissionService) GetUserPermissions(ctx context.Context, userId string) ([]domainpermission.Permission, error) {
 	return s.PermissionRepo.GetUserPermissions(ctx, userId)
 }

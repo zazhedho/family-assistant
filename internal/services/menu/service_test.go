@@ -79,6 +79,9 @@ func (m *permissionRepoMenuTestDouble) GetByResource(ctx context.Context, resour
 func (m *permissionRepoMenuTestDouble) GetUserPermissions(ctx context.Context, userId string) ([]domainpermission.Permission, error) {
 	return append([]domainpermission.Permission{}, m.userPermissions...), nil
 }
+func (m *permissionRepoMenuTestDouble) GetRolePermissions(ctx context.Context, roleID string) ([]domainpermission.Permission, error) {
+	return append([]domainpermission.Permission{}, m.userPermissions...), nil
+}
 
 func TestGetUserMenusDerivesMenusFromPermissionResources(t *testing.T) {
 	svc := NewMenuService(

@@ -12,6 +12,8 @@ import (
 type permissionRepoTestDouble struct {
 	permission      domainpermission.Permission
 	permissionByKey map[string]domainpermission.Permission
+	rolePermissions []domainpermission.Permission
+	roleID          string
 	stored          domainpermission.Permission
 	updated         domainpermission.Permission
 	deletedID       string
@@ -54,6 +56,29 @@ func (m *permissionRepoTestDouble) GetByResource(ctx context.Context, resource s
 }
 func (m *permissionRepoTestDouble) GetUserPermissions(ctx context.Context, userId string) ([]domainpermission.Permission, error) {
 	return []domainpermission.Permission{m.permission}, nil
+}
+
+func (m *permissionRepoTestDouble) GetRolePermissions(_ context.Context, roleID string) ([]domainpermission.Permission, error) {
+	m.roleID = roleID
+	return m.rolePermissions, nil
+}
+
+func TestPermissionServiceGetRolePermissionsDelegates(t *testing.T) {
+	repo := &permissionRepoTestDouble{rolePermissions: []domainpermission.Permission{{
+		Id: "perm-1", Resource: "reminders", Action: "create",
+	}}}
+	svc := NewPermissionService(repo)
+
+	got, err := svc.GetRolePermissions(context.Background(), "role-parent")
+	if err != nil {
+		t.Fatalf("get role permissions: %v", err)
+	}
+	if len(got) != 1 || got[0].Id != "perm-1" {
+		t.Fatalf("unexpected permissions: %#v", got)
+	}
+	if repo.roleID != "role-parent" {
+		t.Fatalf("expected role lookup, got %q", repo.roleID)
+	}
 }
 
 func TestCreateRejectsDuplicatePermissionName(t *testing.T) {
