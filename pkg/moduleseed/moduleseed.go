@@ -5,21 +5,23 @@ import (
 	"fmt"
 	"github.com/zazhedho/family-assistant/utils"
 	"slices"
+	"sort"
 	"strings"
 )
 
 var defaultActions = []string{"list", "view", "create", "update", "delete"}
 
 type Definition struct {
-	Name        string
-	DisplayName string
-	Path        string
-	Icon        string
-	OrderIndex  int
-	ParentName  string
-	Resource    string
-	Actions     []string
-	GrantRoles  []string
+	Name             string
+	DisplayName      string
+	Path             string
+	Icon             string
+	OrderIndex       int
+	ParentName       string
+	Resource         string
+	Actions          []string
+	GrantRoles       []string
+	GrantRoleActions map[string][]string
 }
 
 func (d Definition) Normalize() Definition {
@@ -56,6 +58,27 @@ func (d Definition) Normalize() Definition {
 		normalizedRoles = append(normalizedRoles, role)
 	}
 	d.GrantRoles = normalizedRoles
+
+	normalizedRoleActions := make(map[string][]string, len(d.GrantRoleActions))
+	for role, actions := range d.GrantRoleActions {
+		role = utils.NormalizeKey(role)
+		if role == "" {
+			continue
+		}
+
+		normalizedActions := make([]string, 0, len(actions))
+		for _, action := range actions {
+			action = utils.NormalizeKey(action)
+			if action == "" || slices.Contains(normalizedActions, action) {
+				continue
+			}
+			normalizedActions = append(normalizedActions, action)
+		}
+		if len(normalizedActions) > 0 {
+			normalizedRoleActions[role] = normalizedActions
+		}
+	}
+	d.GrantRoleActions = normalizedRoleActions
 
 	return d
 }
@@ -95,7 +118,7 @@ func RenderSQL(input Definition) (string, error) {
 	var sections []string
 	sections = append(sections, renderMenuInsert(def))
 	sections = append(sections, renderPermissionInsert(def))
-	if len(def.GrantRoles) > 0 {
+	if len(def.GrantRoles) > 0 || len(def.GrantRoleActions) > 0 {
 		sections = append(sections, renderRolePermissionInsert(def))
 	}
 
@@ -129,7 +152,7 @@ func renderMenuInsert(def Definition) string {
 	}
 
 	return fmt.Sprintf(
-		"INSERT INTO menu_items (%s)\nVALUES\n    (%s)\nON CONFLICT (name) DO NOTHING;",
+		"INSERT INTO menu_items (%s)\nVALUES\n    (%s)\nON CONFLICT (name) DO UPDATE SET\n    display_name = EXCLUDED.display_name,\n    path = EXCLUDED.path,\n    icon = EXCLUDED.icon,\n    order_index = EXCLUDED.order_index,\n    is_active = EXCLUDED.is_active,\n    deleted_at = NULL,\n    updated_at = CURRENT_TIMESTAMP;",
 		strings.Join(columns, ", "),
 		strings.Join(values, ", "),
 	)
@@ -148,20 +171,44 @@ func renderPermissionInsert(def Definition) string {
 	}
 
 	return fmt.Sprintf(
-		"INSERT INTO permissions (id, name, display_name, resource, action) VALUES\n%s\nON CONFLICT (name) DO NOTHING;",
+		"INSERT INTO permissions (id, name, display_name, resource, action) VALUES\n%s\nON CONFLICT (name) DO UPDATE SET\n    display_name = EXCLUDED.display_name,\n    resource = EXCLUDED.resource,\n    action = EXCLUDED.action,\n    deleted_at = NULL,\n    updated_at = CURRENT_TIMESTAMP;",
 		strings.Join(values, ",\n"),
 	)
 }
 
 func renderRolePermissionInsert(def Definition) string {
-	quotedRoles := make([]string, 0, len(def.GrantRoles))
-	for _, role := range def.GrantRoles {
+	sections := make([]string, 0, 1+len(def.GrantRoleActions))
+	if len(def.GrantRoles) > 0 {
+		sections = append(sections, renderRolePermissionInsertForRoles(def, def.GrantRoles, def.Actions))
+	}
+
+	roles := make([]string, 0, len(def.GrantRoleActions))
+	for role := range def.GrantRoleActions {
+		roles = append(roles, role)
+	}
+	sort.Strings(roles)
+	for _, role := range roles {
+		sections = append(sections, renderRolePermissionInsertForRoles(def, []string{role}, def.GrantRoleActions[role]))
+	}
+
+	return strings.Join(sections, "\n\n")
+}
+
+func renderRolePermissionInsertForRoles(def Definition, roles, actions []string) string {
+	quotedRoles := make([]string, 0, len(roles))
+	for _, role := range roles {
 		quotedRoles = append(quotedRoles, quote(role))
 	}
 
+	quotedNames := make([]string, 0, len(actions))
+	for _, action := range actions {
+		quotedNames = append(quotedNames, quote(permissionName(action, def.Name)))
+	}
+	permissionJoin := fmt.Sprintf("p.resource = %s AND p.name IN (%s) AND p.deleted_at IS NULL", quote(def.Resource), strings.Join(quotedNames, ", "))
+
 	return fmt.Sprintf(
-		"INSERT INTO role_permissions (role_id, permission_id)\nSELECT r.id, p.id\nFROM roles r\nJOIN permissions p ON p.resource = %s\nWHERE r.name IN (%s)\nON CONFLICT DO NOTHING;",
-		quote(def.Resource),
+		"INSERT INTO role_permissions (role_id, permission_id)\nSELECT r.id, p.id\nFROM roles r\nJOIN permissions p ON %s\nWHERE r.name IN (%s) AND r.deleted_at IS NULL\nON CONFLICT DO NOTHING;",
+		permissionJoin,
 		strings.Join(quotedRoles, ", "),
 	)
 }
