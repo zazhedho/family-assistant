@@ -1,0 +1,64 @@
+version: "2"
+
+run:
+  timeout: 5m
+  tests: true
+  modules-download-mode: readonly
+  relative-path-mode: gomod
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+
+linters:
+  default: none
+  enable:
+    - bodyclose
+    - dupl
+    - errorlint
+    - errcheck
+    - gosec
+    - govet
+    - ineffassign
+    - misspell
+    - nilerr
+    - noctx
+    - prealloc
+    - rowserrcheck
+    - sqlclosecheck
+    - staticcheck
+    - unconvert
+    - unused
+  settings:
+    dupl:
+      threshold: 200
+    misspell:
+      locale: US
+  exclusions:
+    rules:
+      - linters:
+          - misspell
+        text: "`thn` is a misspelling of `then`"
+      - path: pkg/messages/message.go
+        linters:
+          - gosec
+        text: "G101: Potential hardcoded credentials"
+      - path: internal/repositories/session/
+        linters:
+          - gosec
+        text: "G117:"
+      - path: internal/services/location/service.go
+        linters:
+          - gosec
+        text: "G118:"
+      - path: internal/services/reset/reset_service_test.go
+        linters:
+          - gosec
+        text: "G101: Potential hardcoded credentials"
+      - path: _test\.go
+        linters:
+          - noctx
+
+formatters:
+  enable:
+    - gofmt

@@ -1,0 +1,2124 @@
+{
+  "info": {
+    "_postman_id": "8a22c5f4-87f9-4c31-a3b5-8f7c6d1cf7f1",
+    "name": "Starter Kit API",
+    "description": "Full Postman collection for the starter-kit service. Login first to populate access_token and refresh_token collection variables. Auth responses use access_token; there is no legacy data.token field.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{access_token}}",
+        "type": "string"
+      }
+    ]
+  },
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          ""
+        ]
+      }
+    },
+    {
+      "listen": "test",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          ""
+        ]
+      }
+    }
+  ],
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://localhost:8080"
+    },
+    {
+      "key": "access_token",
+      "value": ""
+    },
+    {
+      "key": "refresh_token",
+      "value": ""
+    },
+    {
+      "key": "impersonation_token",
+      "value": ""
+    },
+    {
+      "key": "user_id",
+      "value": ""
+    },
+    {
+      "key": "role_id",
+      "value": ""
+    },
+    {
+      "key": "permission_id",
+      "value": ""
+    },
+    {
+      "key": "menu_id",
+      "value": ""
+    },
+    {
+      "key": "config_id",
+      "value": ""
+    },
+    {
+      "key": "audit_id",
+      "value": ""
+    },
+    {
+      "key": "media_id",
+      "value": ""
+    },
+    {
+      "key": "session_id",
+      "value": ""
+    },
+    {
+      "key": "location_sync_job_id",
+      "value": ""
+    },
+    {
+      "key": "reset_token",
+      "value": ""
+    },
+    {
+      "key": "google_id_token",
+      "value": ""
+    }
+  ],
+  "item": [
+    {
+      "name": "Health",
+      "item": [
+        {
+          "name": "Healthcheck",
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/healthcheck",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "healthcheck"
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Auth",
+      "item": [
+        {
+          "name": "Get Register Status",
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/user/register/status",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "user",
+                "register",
+                "status"
+              ]
+            },
+            "description": "Use this first to check whether public self-registration is enabled. When disabled, Register, Send Register OTP, and first-time Google auto-registration should be rejected."
+          },
+          "response": []
+        },
+        {
+          "name": "Register Without OTP",
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Jane Doe\",\n  \"email\": \"jane.doe@example.com\",\n  \"phone\": \"08123456789\",\n  \"password\": \"Password1!\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/user/register",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "user",
+                "register"
+              ]
+            },
+            "description": "Use this when auth.public_registration_enabled=true and auth.register_otp_enabled=false. If public registration is disabled, this request should return 403."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.json();",
+                  "if (json && json.data && json.data.id) pm.collectionVariables.set('user_id', json.data.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Send Register OTP",
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"jane.doe@example.com\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/user/register/otp/send",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "user",
+                "register",
+                "otp",
+                "send"
+              ]
+            },
+            "description": "Only use this when auth.public_registration_enabled=true and auth.register_otp_enabled=true. If public registration is disabled, this request should return 403."
+          },
+          "response": []
+        },
+        {
+          "name": "Register With OTP",
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Jane OTP\",\n  \"email\": \"jane.otp@example.com\",\n  \"phone\": \"08123456790\",\n  \"password\": \"Password1!\",\n  \"otp_code\": \"123456\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/user/register",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "user",
+                "register"
+              ]
+            },
+            "description": "Use this when auth.public_registration_enabled=true and auth.register_otp_enabled=true. First call Send Register OTP, then replace otp_code with the code received by email."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.json();",
+                  "if (json && json.data && json.data.id) pm.collectionVariables.set('user_id', json.data.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Login",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.json();",
+                  "if (json && json.data) {",
+                  "  if (json.data.access_token) pm.collectionVariables.set('access_token', json.data.access_token);",
+                  "  if (json.data.refresh_token) pm.collectionVariables.set('refresh_token', json.data.refresh_token);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"identifier\": \"admin@example.com\",\n  \"password\": \"Password1!\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/user/login",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "user",
+                "login"
+              ]
+            },
+            "description": "identifier accepts email or phone."
+          },
+          "response": []
+        },
+        {
+          "name": "Login With Phone",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/user/login",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "user",
+                "login"
+              ]
+            },
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"identifier\": \"08123456789\",\n  \"password\": \"Password1!\"\n}"
+            },
+            "description": "Alternative login flow. identifier accepts phone and will be normalized by the backend."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.json();",
+                  "if (json && json.data) {",
+                  "  if (json.data.access_token) pm.collectionVariables.set('access_token', json.data.access_token);",
+                  "  if (json.data.refresh_token) pm.collectionVariables.set('refresh_token', json.data.refresh_token);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Google Login",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.json();",
+                  "if (json && json.data) {",
+                  "  if (json.data.access_token) pm.collectionVariables.set('access_token', json.data.access_token);",
+                  "  if (json.data.refresh_token) pm.collectionVariables.set('refresh_token', json.data.refresh_token);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"id_token\": \"{{google_id_token}}\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/user/google/login",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "user",
+                "google",
+                "login"
+              ]
+            },
+            "description": "Existing Google-linked users can still log in. If auth.public_registration_enabled=false, first-time Google login must not auto-create a new user."
+          },
+          "response": []
+        },
+        {
+          "name": "Refresh Token",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.json();",
+                  "if (json && json.data) {",
+                  "  if (json.data.access_token) pm.collectionVariables.set('access_token', json.data.access_token);",
+                  "  if (json.data.refresh_token) pm.collectionVariables.set('refresh_token', json.data.refresh_token);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"refresh_token\": \"{{refresh_token}}\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/user/refresh-token",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "user",
+                "refresh-token"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Forgot Password",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.json();",
+                  "if (json && typeof json.data === 'string') pm.collectionVariables.set('reset_token', json.data);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"admin@example.com\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/user/forgot-password",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "user",
+                "forgot-password"
+              ]
+            },
+            "description": "Controlled by auth.password_reset_email_enabled. If false, response data can contain a development reset token and this script stores it as reset_token. If true, the reset token is sent by email in the frontend reset link query param."
+          },
+          "response": []
+        },
+        {
+          "name": "Reset Password",
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"token\": \"{{reset_token}}\",\n  \"new_password\": \"NewPassword1!\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/user/reset-password",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "user",
+                "reset-password"
+              ]
+            },
+            "description": "Use the same token from the email reset link query param, for example /reset-password?token=<token>, as the JSON body token."
+          },
+          "response": []
+        },
+        {
+          "name": "Logout",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/user/logout",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "user",
+                "logout"
+              ]
+            }
+          },
+          "response": []
+        }
+      ],
+      "description": "Public registration is controlled by app_configs key auth.public_registration_enabled. If false, register-related endpoints and first-time Google login registration are blocked. Registration OTP is controlled separately by auth.register_otp_enabled. Password reset email delivery is controlled by auth.password_reset_email_enabled."
+    },
+    {
+      "name": "Users",
+      "item": [
+        {
+          "name": "Get Auth User",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/user",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "user"
+              ]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.json();",
+                  "if (json && json.data && json.data.id) pm.collectionVariables.set('user_id', json.data.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "List Users",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/users?page=1&limit=10&order_by=updated_at&order_direction=desc&search=",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "users"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "limit",
+                  "value": "10"
+                },
+                {
+                  "key": "order_by",
+                  "value": "updated_at"
+                },
+                {
+                  "key": "order_direction",
+                  "value": "desc"
+                },
+                {
+                  "key": "search",
+                  "value": ""
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Admin Create User",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.json();",
+                  "if (json && json.data && json.data.id) pm.collectionVariables.set('user_id', json.data.id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Staff User\",\n  \"email\": \"staff@example.com\",\n  \"phone\": \"08123456788\",\n  \"password\": \"Password1!\",\n  \"role\": \"viewer\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/user",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "user"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get User By ID",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/user/{{user_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "user",
+                "{{user_id}}"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Update Auth User",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Updated Current User\",\n  \"email\": \"current@example.com\",\n  \"phone\": \"08123456780\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/user",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "user"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Update User By ID",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Updated Staff User\",\n  \"email\": \"staff.updated@example.com\",\n  \"phone\": \"08123456781\",\n  \"role\": \"viewer\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/user/{{user_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "user",
+                "{{user_id}}"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Change Password",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"current_password\": \"Password1!\",\n  \"new_password\": \"NewPassword1!\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/user/change/password",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "user",
+                "change",
+                "password"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Impersonate User",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.json();",
+                  "if (json && json.data && json.data.access_token) pm.collectionVariables.set('impersonation_token', json.data.access_token);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/user/{{user_id}}/impersonate",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "user",
+                "{{user_id}}",
+                "impersonate"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Stop Impersonation",
+          "auth": {
+            "type": "bearer",
+            "bearer": [
+              {
+                "key": "token",
+                "value": "{{impersonation_token}}",
+                "type": "string"
+              }
+            ]
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.json();",
+                  "if (json && json.data && json.data.access_token) pm.collectionVariables.set('access_token', json.data.access_token);",
+                  "if (json && json.data && json.data.refresh_token) pm.collectionVariables.set('refresh_token', json.data.refresh_token);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/user/stop-impersonation",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "user",
+                "stop-impersonation"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Delete Auth User",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/user",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "user"
+              ]
+            },
+            "description": "Destructive. Usually use only on a disposable account."
+          },
+          "response": []
+        },
+        {
+          "name": "Delete User By ID",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/user/{{user_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "user",
+                "{{user_id}}"
+              ]
+            },
+            "description": "Destructive. Use with care."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Roles",
+      "item": [
+        {
+          "name": "List Roles",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/roles?page=1&limit=10&order_by=name&order_direction=asc&search=",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "roles"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "limit",
+                  "value": "10"
+                },
+                {
+                  "key": "order_by",
+                  "value": "name"
+                },
+                {
+                  "key": "order_direction",
+                  "value": "asc"
+                },
+                {
+                  "key": "search",
+                  "value": ""
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Create Role",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.json();",
+                  "if (json && json.data && json.data.id) pm.collectionVariables.set('role_id', json.data.id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"operator\",\n  \"display_name\": \"Operator\",\n  \"description\": \"Operator role\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/role",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "role"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get Role By ID",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/role/{{role_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "role",
+                "{{role_id}}"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Update Role",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"display_name\": \"Operator Updated\",\n  \"description\": \"Updated operator role\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/role/{{role_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "role",
+                "{{role_id}}"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Assign Permissions To Role",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"permission_ids\": [\n    \"{{permission_id}}\"\n  ]\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/role/{{role_id}}/permissions",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "role",
+                "{{role_id}}",
+                "permissions"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Delete Role",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/role/{{role_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "role",
+                "{{role_id}}"
+              ]
+            },
+            "description": "Destructive. Use with care."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Permissions",
+      "item": [
+        {
+          "name": "List Permissions",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/permissions?page=1&limit=10&order_by=resource&order_direction=asc&search=",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "permissions"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "limit",
+                  "value": "10"
+                },
+                {
+                  "key": "order_by",
+                  "value": "resource"
+                },
+                {
+                  "key": "order_direction",
+                  "value": "asc"
+                },
+                {
+                  "key": "search",
+                  "value": ""
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get My Permissions",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/permissions/me",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "permissions",
+                "me"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Create Permission",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.json();",
+                  "if (json && json.data && json.data.id) pm.collectionVariables.set('permission_id', json.data.id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"view_reports\",\n  \"display_name\": \"View Reports\",\n  \"description\": \"Allow viewing reports\",\n  \"resource\": \"reports\",\n  \"action\": \"view\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/permission",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "permission"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get Permission By ID",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/permission/{{permission_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "permission",
+                "{{permission_id}}"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Update Permission",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"display_name\": \"View Reports Updated\",\n  \"description\": \"Allow viewing reports\",\n  \"resource\": \"reports\",\n  \"action\": \"view\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/permission/{{permission_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "permission",
+                "{{permission_id}}"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Delete Permission",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/permission/{{permission_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "permission",
+                "{{permission_id}}"
+              ]
+            },
+            "description": "Destructive. Use with care."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Menus",
+      "item": [
+        {
+          "name": "Get Active Menus",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/menus/active",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "menus",
+                "active"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get My Menus",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/menus/me",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "menus",
+                "me"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "List Menus",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/menus?page=1&limit=100&order_by=order_index&order_direction=asc&search=",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "menus"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "limit",
+                  "value": "100"
+                },
+                {
+                  "key": "order_by",
+                  "value": "order_index"
+                },
+                {
+                  "key": "order_direction",
+                  "value": "asc"
+                },
+                {
+                  "key": "search",
+                  "value": ""
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get Menu By ID",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/menu/{{menu_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "menu",
+                "{{menu_id}}"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Update Menu",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"display_name\": \"Configurations\",\n  \"path\": \"/configs\",\n  \"icon\": \"bi-sliders\",\n  \"parent_id\": null,\n  \"order_index\": 903,\n  \"is_active\": true\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/menu/{{menu_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "menu",
+                "{{menu_id}}"
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Configurations",
+      "item": [
+        {
+          "name": "List Configurations",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/configs?page=1&limit=50&order_by=category&order_direction=asc&search=",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "configs"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "limit",
+                  "value": "50"
+                },
+                {
+                  "key": "order_by",
+                  "value": "category"
+                },
+                {
+                  "key": "order_direction",
+                  "value": "asc"
+                },
+                {
+                  "key": "search",
+                  "value": ""
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "List Auth Configurations",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/configs?page=1&limit=50&order_by=config_key&order_direction=asc&filters[category]=auth",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "configs"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "limit",
+                  "value": "50"
+                },
+                {
+                  "key": "order_by",
+                  "value": "config_key"
+                },
+                {
+                  "key": "order_direction",
+                  "value": "asc"
+                },
+                {
+                  "key": "filters[category]",
+                  "value": "auth"
+                }
+              ]
+            },
+            "description": "Use this before testing public registration, OTP, or password reset flows. Copy the id for auth.public_registration_enabled, auth.register_otp_enabled, or auth.password_reset_email_enabled into {{config_id}}, then call Update Configuration."
+          },
+          "response": []
+        },
+        {
+          "name": "Get Configuration By ID",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/config/{{config_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "config",
+                "{{config_id}}"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Update Configuration",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"value\": \"true\",\n  \"is_active\": true\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/config/{{config_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "config",
+                "{{config_id}}"
+              ]
+            },
+            "description": "Update an existing config by id. For auth.public_registration_enabled, auth.register_otp_enabled, or auth.password_reset_email_enabled, set value to \"true\" to enable the flow or \"false\" to disable it, with is_active=true."
+          },
+          "response": []
+        }
+      ],
+      "description": "Runtime configs can be changed without code changes. To test auth flows, list auth configs, copy the config id into {{config_id}}, then update value to \"true\" or \"false\"."
+    },
+    {
+      "name": "Audit Trails",
+      "item": [
+        {
+          "name": "List Audits",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/audits?page=1&limit=20&order_by=occurred_at&order_direction=desc&search=",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "audits"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "limit",
+                  "value": "20"
+                },
+                {
+                  "key": "order_by",
+                  "value": "occurred_at"
+                },
+                {
+                  "key": "order_direction",
+                  "value": "desc"
+                },
+                {
+                  "key": "search",
+                  "value": ""
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get Audit By ID",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/audit/{{audit_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "audit",
+                "{{audit_id}}"
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Sessions",
+      "item": [
+        {
+          "name": "List Active Sessions",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/user/sessions",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "user",
+                "sessions"
+              ]
+            },
+            "description": "Registered only when Redis is available."
+          },
+          "response": []
+        },
+        {
+          "name": "Revoke Session",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/user/session/{{session_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "user",
+                "session",
+                "{{session_id}}"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Revoke Other Sessions",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/user/sessions/revoke-others",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "user",
+                "sessions",
+                "revoke-others"
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Media",
+      "description": "Available only when MEDIA_ENABLED=true. File type is detected from bytes; default maximum size is 10 MB.",
+      "item": [
+        {
+          "name": "Upload Media",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "let jsonData = {};",
+                  "try { jsonData = pm.response.json(); } catch (e) {}",
+                  "if (jsonData && jsonData.data && jsonData.data.id) {",
+                  "  pm.collectionVariables.set('media_id', jsonData.data.id);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "file",
+                  "type": "file",
+                  "src": []
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{base_url}}/api/media",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "media"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Delete Media",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/media/{{media_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "media",
+                "{{media_id}}"
+              ]
+            },
+            "description": "Only media owner or superadmin may delete this object."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Locations",
+      "auth": {
+        "type": "noauth"
+      },
+      "item": [
+        {
+          "name": "Get Provinces",
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/location/province",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "location",
+                "province"
+              ]
+            },
+            "description": "Read provinces from Redis cache first, then PostgreSQL."
+          },
+          "response": []
+        },
+        {
+          "name": "Get Cities",
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/location/city?province_code=11",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "location",
+                "city"
+              ],
+              "query": [
+                {
+                  "key": "province_code",
+                  "value": "11"
+                }
+              ]
+            },
+            "description": "Read cities by province_code from Redis cache first, then PostgreSQL."
+          },
+          "response": []
+        },
+        {
+          "name": "Get Districts",
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/location/district?city_code=1101",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "location",
+                "district"
+              ],
+              "query": [
+                {
+                  "key": "city_code",
+                  "value": "1101"
+                }
+              ]
+            },
+            "description": "Read districts by city_code from Redis cache first, then PostgreSQL."
+          },
+          "response": []
+        },
+        {
+          "name": "Get Villages",
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/location/village?district_code=110101",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "location",
+                "village"
+              ],
+              "query": [
+                {
+                  "key": "district_code",
+                  "value": "110101"
+                }
+              ]
+            },
+            "description": "Read villages by district_code from Redis cache first, then PostgreSQL."
+          },
+          "response": []
+        },
+        {
+          "name": "Sync Provinces",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "let jsonData = {};",
+                  "try { jsonData = pm.response.json(); } catch (e) {}",
+                  "if (jsonData && jsonData.data && jsonData.data.id) {",
+                  "  pm.collectionVariables.set('location_sync_job_id', jsonData.data.id);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/location/sync",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "location",
+                "sync"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"year\": \"2025\",\n  \"level\": \"province\"\n}"
+            },
+            "description": "Start an asynchronous province-only sync job. Payload requires only `year` and `level=province`. The returned job ID is automatically saved into `location_sync_job_id`.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{access_token}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Sync Cities",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "let jsonData = {};",
+                  "try { jsonData = pm.response.json(); } catch (e) {}",
+                  "if (jsonData && jsonData.data && jsonData.data.id) {",
+                  "  pm.collectionVariables.set('location_sync_job_id', jsonData.data.id);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/location/sync",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "location",
+                "sync"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"year\": \"2025\",\n  \"level\": \"city\",\n  \"province_code\": \"11\"\n}"
+            },
+            "description": "Start an asynchronous city sync job for one province. Required payload: `level=city` and `province_code`.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{access_token}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Sync Districts",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "let jsonData = {};",
+                  "try { jsonData = pm.response.json(); } catch (e) {}",
+                  "if (jsonData && jsonData.data && jsonData.data.id) {",
+                  "  pm.collectionVariables.set('location_sync_job_id', jsonData.data.id);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/location/sync",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "location",
+                "sync"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"year\": \"2025\",\n  \"level\": \"district\",\n  \"province_code\": \"11\",\n  \"city_code\": \"1101\"\n}"
+            },
+            "description": "Start an asynchronous district sync job for one city. Required payload: `level=district`, `province_code`, and `city_code`.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{access_token}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Sync Villages",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "let jsonData = {};",
+                  "try { jsonData = pm.response.json(); } catch (e) {}",
+                  "if (jsonData && jsonData.data && jsonData.data.id) {",
+                  "  pm.collectionVariables.set('location_sync_job_id', jsonData.data.id);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/location/sync",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "location",
+                "sync"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"year\": \"2025\",\n  \"level\": \"village\",\n  \"province_code\": \"11\",\n  \"city_code\": \"1101\",\n  \"district_code\": \"1101010\"\n}"
+            },
+            "description": "Start an asynchronous village sync job for one district. Required payload: `level=village`, `province_code`, `city_code`, and `district_code`.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{access_token}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Sync All Locations",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "let jsonData = {};",
+                  "try { jsonData = pm.response.json(); } catch (e) {}",
+                  "if (jsonData && jsonData.data && jsonData.data.id) {",
+                  "  pm.collectionVariables.set('location_sync_job_id', jsonData.data.id);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/location/sync",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "location",
+                "sync"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"year\": \"2025\",\n  \"level\": \"all\"\n}"
+            },
+            "description": "Start a full asynchronous hierarchical import. Use this for initial bootstrap only because it is much heavier than scoped sync requests.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{access_token}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get Location Sync Job",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/location/sync/{{location_sync_job_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "location",
+                "sync",
+                "{{location_sync_job_id}}"
+              ]
+            },
+            "description": "Read the current status of an asynchronous location sync job. `location_sync_job_id` is filled automatically after running one of the sync requests above. Status values: `queued`, `running`, `completed`, `failed`.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{access_token}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        }
+      ],
+      "description": "Runtime reads use Redis then PostgreSQL. External API is used only by the sync endpoint to refresh database data."
+    }
+  ]
+}
