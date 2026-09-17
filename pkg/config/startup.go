@@ -23,6 +23,7 @@ func ValidateStartupConfig(port string) error {
 	problems = append(problems, validateOptionalRedisConfig()...)
 	problems = append(problems, validateOptionalSMTPConfig()...)
 	problems = append(problems, validateOptionalStorageConfig()...)
+	problems = append(problems, validateMCPConfig()...)
 
 	if len(problems) > 0 {
 		return errors.New(strings.Join(problems, "; "))

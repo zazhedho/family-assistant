@@ -180,6 +180,10 @@ func clearStartupEnv(t *testing.T) {
 		"STORAGE_BUCKET_NAME",
 		"STORAGE_BASE_URL",
 		"R2_ACCOUNT_ID",
+		"MCP_ENABLED",
+		"MCP_ADDR",
+		"MCP_SERVER_KEY",
+		"MCP_PROFILE_HEADER",
 	} {
 		t.Setenv(key, "")
 	}
