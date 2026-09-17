@@ -8,16 +8,16 @@ import (
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 
-	"starter-kit/internal/authscope"
-	domainaudit "starter-kit/internal/domain/audit"
-	domainmedia "starter-kit/internal/domain/media"
-	handlercommon "starter-kit/internal/handlers/http/common"
-	interfaceaudit "starter-kit/internal/interfaces/audit"
-	interfacemedia "starter-kit/internal/interfaces/media"
-	"starter-kit/pkg/logger"
-	"starter-kit/pkg/messages"
-	"starter-kit/pkg/response"
-	"starter-kit/utils"
+	"github.com/zazhedho/family-assistant/internal/authscope"
+	domainaudit "github.com/zazhedho/family-assistant/internal/domain/audit"
+	domainmedia "github.com/zazhedho/family-assistant/internal/domain/media"
+	handlercommon "github.com/zazhedho/family-assistant/internal/handlers/http/common"
+	interfaceaudit "github.com/zazhedho/family-assistant/internal/interfaces/audit"
+	interfacemedia "github.com/zazhedho/family-assistant/internal/interfaces/media"
+	"github.com/zazhedho/family-assistant/pkg/logger"
+	"github.com/zazhedho/family-assistant/pkg/messages"
+	"github.com/zazhedho/family-assistant/pkg/response"
+	"github.com/zazhedho/family-assistant/utils"
 )
 
 const multipartOverhead = int64(1 << 20)

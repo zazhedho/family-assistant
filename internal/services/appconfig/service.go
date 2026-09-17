@@ -3,12 +3,12 @@ package serviceappconfig
 import (
 	"context"
 	"errors"
-	domainappconfig "starter-kit/internal/domain/appconfig"
-	"starter-kit/internal/dto"
-	interfaceappconfig "starter-kit/internal/interfaces/appconfig"
-	"starter-kit/pkg/configvalue"
-	"starter-kit/pkg/filter"
-	"starter-kit/utils"
+	domainappconfig "github.com/zazhedho/family-assistant/internal/domain/appconfig"
+	"github.com/zazhedho/family-assistant/internal/dto"
+	interfaceappconfig "github.com/zazhedho/family-assistant/internal/interfaces/appconfig"
+	"github.com/zazhedho/family-assistant/pkg/configvalue"
+	"github.com/zazhedho/family-assistant/pkg/filter"
+	"github.com/zazhedho/family-assistant/utils"
 	"time"
 
 	"gorm.io/gorm"

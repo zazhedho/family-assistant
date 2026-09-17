@@ -3,8 +3,8 @@ package serviceaudit
 import (
 	"context"
 	"errors"
-	domainaudit "starter-kit/internal/domain/audit"
-	"starter-kit/pkg/filter"
+	domainaudit "github.com/zazhedho/family-assistant/internal/domain/audit"
+	"github.com/zazhedho/family-assistant/pkg/filter"
 	"strings"
 	"testing"
 )

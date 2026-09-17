@@ -3,8 +3,8 @@ package servicesession
 import (
 	"context"
 	"errors"
-	domainsession "starter-kit/internal/domain/session"
-	domainuser "starter-kit/internal/domain/user"
+	domainsession "github.com/zazhedho/family-assistant/internal/domain/session"
+	domainuser "github.com/zazhedho/family-assistant/internal/domain/user"
 	"testing"
 	"time"
 )

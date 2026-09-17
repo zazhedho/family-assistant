@@ -2,9 +2,9 @@ package handlerrole
 
 import (
 	"errors"
+	"github.com/zazhedho/family-assistant/pkg/messages"
+	"github.com/zazhedho/family-assistant/pkg/response"
 	"net/http"
-	"starter-kit/pkg/messages"
-	"starter-kit/pkg/response"
 	"strings"
 
 	"github.com/google/uuid"

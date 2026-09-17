@@ -2,8 +2,8 @@ package utils
 
 import (
 	"errors"
+	domainuser "github.com/zazhedho/family-assistant/internal/domain/user"
 	"net/http/httptest"
-	domainuser "starter-kit/internal/domain/user"
 	"testing"
 	"time"
 

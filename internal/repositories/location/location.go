@@ -2,9 +2,9 @@ package repositorylocation
 
 import (
 	"context"
-	domainlocation "starter-kit/internal/domain/location"
-	interfacelocation "starter-kit/internal/interfaces/location"
-	"starter-kit/utils"
+	domainlocation "github.com/zazhedho/family-assistant/internal/domain/location"
+	interfacelocation "github.com/zazhedho/family-assistant/internal/interfaces/location"
+	"github.com/zazhedho/family-assistant/utils"
 	"time"
 
 	"gorm.io/gorm"

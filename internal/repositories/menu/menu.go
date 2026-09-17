@@ -2,12 +2,12 @@ package repositorymenu
 
 import (
 	"context"
+	domainmenu "github.com/zazhedho/family-assistant/internal/domain/menu"
+	interfacemenu "github.com/zazhedho/family-assistant/internal/interfaces/menu"
+	repositorygeneric "github.com/zazhedho/family-assistant/internal/repositories/generic"
+	"github.com/zazhedho/family-assistant/pkg/filter"
+	"github.com/zazhedho/family-assistant/utils"
 	"sort"
-	domainmenu "starter-kit/internal/domain/menu"
-	interfacemenu "starter-kit/internal/interfaces/menu"
-	repositorygeneric "starter-kit/internal/repositories/generic"
-	"starter-kit/pkg/filter"
-	"starter-kit/utils"
 
 	"gorm.io/gorm"
 )

@@ -3,9 +3,9 @@ package serviceappconfig
 import (
 	"context"
 	"errors"
-	domainappconfig "starter-kit/internal/domain/appconfig"
-	"starter-kit/internal/dto"
-	"starter-kit/pkg/filter"
+	domainappconfig "github.com/zazhedho/family-assistant/internal/domain/appconfig"
+	"github.com/zazhedho/family-assistant/internal/dto"
+	"github.com/zazhedho/family-assistant/pkg/filter"
 	"testing"
 	"time"
 

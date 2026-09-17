@@ -3,9 +3,9 @@ package serviceaudit
 import (
 	"encoding/json"
 	"fmt"
-	domainaudit "starter-kit/internal/domain/audit"
-	"starter-kit/internal/dto"
-	"starter-kit/utils"
+	domainaudit "github.com/zazhedho/family-assistant/internal/domain/audit"
+	"github.com/zazhedho/family-assistant/internal/dto"
+	"github.com/zazhedho/family-assistant/utils"
 	"strings"
 )
 

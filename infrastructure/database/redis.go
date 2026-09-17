@@ -3,8 +3,8 @@ package database
 import (
 	"context"
 	"fmt"
-	"starter-kit/pkg/logger"
-	"starter-kit/utils"
+	"github.com/zazhedho/family-assistant/pkg/logger"
+	"github.com/zazhedho/family-assistant/utils"
 	"time"
 
 	"github.com/redis/go-redis/v9"

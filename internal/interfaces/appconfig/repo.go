@@ -2,8 +2,8 @@ package interfaceappconfig
 
 import (
 	"context"
-	domainappconfig "starter-kit/internal/domain/appconfig"
-	interfacegeneric "starter-kit/internal/interfaces/generic"
+	domainappconfig "github.com/zazhedho/family-assistant/internal/domain/appconfig"
+	interfacegeneric "github.com/zazhedho/family-assistant/internal/interfaces/generic"
 )
 
 type RepoAppConfigInterface interface {

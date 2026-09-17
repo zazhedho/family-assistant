@@ -5,9 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/zazhedho/family-assistant/pkg/logger"
+	"github.com/zazhedho/family-assistant/utils"
 	"os"
-	"starter-kit/pkg/logger"
-	"starter-kit/utils"
 	"time"
 
 	"github.com/google/uuid"

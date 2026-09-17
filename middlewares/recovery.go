@@ -2,10 +2,10 @@ package middlewares
 
 import (
 	"fmt"
+	"github.com/zazhedho/family-assistant/pkg/logger"
+	"github.com/zazhedho/family-assistant/pkg/response"
+	"github.com/zazhedho/family-assistant/utils"
 	"net/http"
-	"starter-kit/pkg/logger"
-	"starter-kit/pkg/response"
-	"starter-kit/utils"
 
 	"github.com/gin-gonic/gin"
 )

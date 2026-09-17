@@ -3,7 +3,7 @@ package servicereset
 import (
 	"context"
 	"errors"
-	"starter-kit/pkg/config"
+	"github.com/zazhedho/family-assistant/pkg/config"
 	"testing"
 	"time"
 

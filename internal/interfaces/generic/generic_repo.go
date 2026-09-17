@@ -2,7 +2,7 @@ package interfacegeneric
 
 import (
 	"context"
-	"starter-kit/pkg/filter"
+	"github.com/zazhedho/family-assistant/pkg/filter"
 )
 
 type GenericRepository[T any] interface {

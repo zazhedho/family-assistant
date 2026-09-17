@@ -2,9 +2,9 @@ package interfacemenu
 
 import (
 	"context"
-	domainmenu "starter-kit/internal/domain/menu"
-	"starter-kit/internal/dto"
-	"starter-kit/pkg/filter"
+	domainmenu "github.com/zazhedho/family-assistant/internal/domain/menu"
+	"github.com/zazhedho/family-assistant/internal/dto"
+	"github.com/zazhedho/family-assistant/pkg/filter"
 )
 
 type ServiceMenuInterface interface {

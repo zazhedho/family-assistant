@@ -3,11 +3,11 @@ package handlercommon
 import (
 	"context"
 	"errors"
+	domainaudit "github.com/zazhedho/family-assistant/internal/domain/audit"
+	"github.com/zazhedho/family-assistant/internal/dto"
+	"github.com/zazhedho/family-assistant/pkg/filter"
 	"net/http"
 	"net/http/httptest"
-	domainaudit "starter-kit/internal/domain/audit"
-	"starter-kit/internal/dto"
-	"starter-kit/pkg/filter"
 	"testing"
 
 	"github.com/gin-gonic/gin"

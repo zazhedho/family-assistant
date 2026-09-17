@@ -3,8 +3,8 @@ package moduleseed
 import (
 	"errors"
 	"fmt"
+	"github.com/zazhedho/family-assistant/utils"
 	"slices"
-	"starter-kit/utils"
 	"strings"
 )
 

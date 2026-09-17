@@ -2,9 +2,9 @@ package media
 
 import (
 	"fmt"
-	"starter-kit/pkg/logger"
-	"starter-kit/pkg/storage"
-	"starter-kit/utils"
+	"github.com/zazhedho/family-assistant/pkg/logger"
+	"github.com/zazhedho/family-assistant/pkg/storage"
+	"github.com/zazhedho/family-assistant/utils"
 	"strconv"
 )
 

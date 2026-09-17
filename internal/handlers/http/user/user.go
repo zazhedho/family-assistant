@@ -4,30 +4,30 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/zazhedho/family-assistant/internal/authscope"
+	domainaudit "github.com/zazhedho/family-assistant/internal/domain/audit"
+	domainsession "github.com/zazhedho/family-assistant/internal/domain/session"
+	domainuser "github.com/zazhedho/family-assistant/internal/domain/user"
+	"github.com/zazhedho/family-assistant/internal/dto"
+	handlercommon "github.com/zazhedho/family-assistant/internal/handlers/http/common"
+	interfaceappconfig "github.com/zazhedho/family-assistant/internal/interfaces/appconfig"
+	interfaceaudit "github.com/zazhedho/family-assistant/internal/interfaces/audit"
+	interfaceauth "github.com/zazhedho/family-assistant/internal/interfaces/auth"
+	interfaceotp "github.com/zazhedho/family-assistant/internal/interfaces/otp"
+	interfacereset "github.com/zazhedho/family-assistant/internal/interfaces/reset"
+	interfacesession "github.com/zazhedho/family-assistant/internal/interfaces/session"
+	interfaceuser "github.com/zazhedho/family-assistant/internal/interfaces/user"
+	serviceotp "github.com/zazhedho/family-assistant/internal/services/otp"
+	servicereset "github.com/zazhedho/family-assistant/internal/services/reset"
+	serviceuser "github.com/zazhedho/family-assistant/internal/services/user"
+	"github.com/zazhedho/family-assistant/pkg/config"
+	"github.com/zazhedho/family-assistant/pkg/filter"
+	"github.com/zazhedho/family-assistant/pkg/logger"
+	"github.com/zazhedho/family-assistant/pkg/messages"
+	"github.com/zazhedho/family-assistant/pkg/response"
+	"github.com/zazhedho/family-assistant/pkg/security"
+	"github.com/zazhedho/family-assistant/utils"
 	"net/http"
-	"starter-kit/internal/authscope"
-	domainaudit "starter-kit/internal/domain/audit"
-	domainsession "starter-kit/internal/domain/session"
-	domainuser "starter-kit/internal/domain/user"
-	"starter-kit/internal/dto"
-	handlercommon "starter-kit/internal/handlers/http/common"
-	interfaceappconfig "starter-kit/internal/interfaces/appconfig"
-	interfaceaudit "starter-kit/internal/interfaces/audit"
-	interfaceauth "starter-kit/internal/interfaces/auth"
-	interfaceotp "starter-kit/internal/interfaces/otp"
-	interfacereset "starter-kit/internal/interfaces/reset"
-	interfacesession "starter-kit/internal/interfaces/session"
-	interfaceuser "starter-kit/internal/interfaces/user"
-	serviceotp "starter-kit/internal/services/otp"
-	servicereset "starter-kit/internal/services/reset"
-	serviceuser "starter-kit/internal/services/user"
-	"starter-kit/pkg/config"
-	"starter-kit/pkg/filter"
-	"starter-kit/pkg/logger"
-	"starter-kit/pkg/messages"
-	"starter-kit/pkg/response"
-	"starter-kit/pkg/security"
-	"starter-kit/utils"
 	"strings"
 	"time"
 
@@ -282,7 +282,7 @@ func (h *HandlerUser) SendRegisterOTP(ctx *gin.Context) {
 		}
 	}
 
-	if err := h.OTPService.SendRegisterOTP(ctx.Request.Context(), normalizedEmail, utils.FirstNonEmptyString(utils.GetEnv("AUTH_EMAIL_APP_NAME", ""), utils.GetEnv("APP_NAME", "STARTER-KIT"))); err != nil {
+	if err := h.OTPService.SendRegisterOTP(ctx.Request.Context(), normalizedEmail, utils.FirstNonEmptyString(utils.GetEnv("AUTH_EMAIL_APP_NAME", ""), utils.GetEnv("APP_NAME", "FAMILY-ASSISTANT"))); err != nil {
 		h.WriteAudit(ctx, domainaudit.AuditEvent{
 			Action:       domainaudit.ActionCreate,
 			Resource:     "user_registration_otp",
@@ -1304,7 +1304,7 @@ func (h *HandlerUser) ForgotPassword(ctx *gin.Context) {
 
 		normalizedEmail := utils.SanitizeEmail(req.Email)
 		if data, err := h.Service.GetUserByEmail(reqCtx, normalizedEmail); err == nil && data.Id != "" {
-			if err := h.ResetService.RequestReset(ctx.Request.Context(), normalizedEmail, utils.FirstNonEmptyString(utils.GetEnv("AUTH_EMAIL_APP_NAME", ""), utils.GetEnv("APP_NAME", "STARTER-KIT"))); err != nil {
+			if err := h.ResetService.RequestReset(ctx.Request.Context(), normalizedEmail, utils.FirstNonEmptyString(utils.GetEnv("AUTH_EMAIL_APP_NAME", ""), utils.GetEnv("APP_NAME", "FAMILY-ASSISTANT"))); err != nil {
 				h.WriteAudit(ctx, domainaudit.AuditEvent{
 					Action:       domainaudit.ActionUpdate,
 					Resource:     "user_password_reset",

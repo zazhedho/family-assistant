@@ -2,9 +2,9 @@ package middlewares
 
 import (
 	"fmt"
+	"github.com/zazhedho/family-assistant/internal/authscope"
+	"github.com/zazhedho/family-assistant/pkg/logger"
 	"net/http"
-	"starter-kit/internal/authscope"
-	"starter-kit/pkg/logger"
 	"time"
 
 	"github.com/gin-gonic/gin"

@@ -1,4 +1,4 @@
-module starter-kit
+module github.com/zazhedho/family-assistant
 
 go 1.27
 

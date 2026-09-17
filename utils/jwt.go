@@ -3,7 +3,7 @@ package utils
 import (
 	"errors"
 	"fmt"
-	domainuser "starter-kit/internal/domain/user"
+	domainuser "github.com/zazhedho/family-assistant/internal/domain/user"
 	"strings"
 	"time"
 

@@ -5,8 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	domainsession "starter-kit/internal/domain/session"
-	"starter-kit/pkg/logger"
+	domainsession "github.com/zazhedho/family-assistant/internal/domain/session"
+	"github.com/zazhedho/family-assistant/pkg/logger"
 	"time"
 
 	"github.com/redis/go-redis/v9"

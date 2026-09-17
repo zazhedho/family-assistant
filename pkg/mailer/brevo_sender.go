@@ -3,9 +3,9 @@ package mailer
 import (
 	"bytes"
 	"fmt"
+	"github.com/zazhedho/family-assistant/utils"
 	"html"
 	"net/smtp"
-	"starter-kit/utils"
 	"strconv"
 	"strings"
 	"time"

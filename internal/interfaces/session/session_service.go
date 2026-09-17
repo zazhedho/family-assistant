@@ -4,8 +4,8 @@ import (
 	"context"
 	"time"
 
-	domainsession "starter-kit/internal/domain/session"
-	domainuser "starter-kit/internal/domain/user"
+	domainsession "github.com/zazhedho/family-assistant/internal/domain/session"
+	domainuser "github.com/zazhedho/family-assistant/internal/domain/user"
 )
 
 type ServiceSessionInterface interface {

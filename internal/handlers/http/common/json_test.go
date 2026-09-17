@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"starter-kit/utils"
+	"github.com/zazhedho/family-assistant/utils"
 
 	"github.com/gin-gonic/gin"
 )

@@ -5,9 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"starter-kit/internal/dto"
-	"starter-kit/pkg/logger"
-	"starter-kit/utils"
+	"github.com/zazhedho/family-assistant/internal/dto"
+	"github.com/zazhedho/family-assistant/pkg/logger"
+	"github.com/zazhedho/family-assistant/utils"
 	"time"
 
 	"github.com/redis/go-redis/v9"

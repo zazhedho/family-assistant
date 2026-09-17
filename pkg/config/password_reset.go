@@ -3,7 +3,7 @@ package config
 import (
 	"time"
 
-	"starter-kit/utils"
+	"github.com/zazhedho/family-assistant/utils"
 )
 
 type PasswordResetConfig struct {

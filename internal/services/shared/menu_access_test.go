@@ -3,10 +3,10 @@ package serviceshared
 import (
 	"context"
 	"errors"
-	"starter-kit/internal/authscope"
-	domainmenu "starter-kit/internal/domain/menu"
-	domainpermission "starter-kit/internal/domain/permission"
-	"starter-kit/pkg/filter"
+	"github.com/zazhedho/family-assistant/internal/authscope"
+	domainmenu "github.com/zazhedho/family-assistant/internal/domain/menu"
+	domainpermission "github.com/zazhedho/family-assistant/internal/domain/permission"
+	"github.com/zazhedho/family-assistant/pkg/filter"
 	"testing"
 )
 

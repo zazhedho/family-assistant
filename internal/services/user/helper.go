@@ -3,12 +3,12 @@ package serviceuser
 import (
 	"context"
 	"errors"
+	domainuser "github.com/zazhedho/family-assistant/internal/domain/user"
+	"github.com/zazhedho/family-assistant/internal/dto"
+	interfacerole "github.com/zazhedho/family-assistant/internal/interfaces/role"
+	"github.com/zazhedho/family-assistant/utils"
 	"net/mail"
 	"regexp"
-	domainuser "starter-kit/internal/domain/user"
-	"starter-kit/internal/dto"
-	interfacerole "starter-kit/internal/interfaces/role"
-	"starter-kit/utils"
 	"strings"
 )
 

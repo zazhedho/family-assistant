@@ -3,7 +3,7 @@ package configvalue
 import (
 	"encoding/json"
 	"fmt"
-	"starter-kit/utils"
+	"github.com/zazhedho/family-assistant/utils"
 	"strconv"
 	"strings"
 	"time"

@@ -3,9 +3,9 @@ package main
 import (
 	"flag"
 	"fmt"
+	"github.com/zazhedho/family-assistant/pkg/moduleseed"
 	"log"
 	"os"
-	"starter-kit/pkg/moduleseed"
 	"strings"
 )
 

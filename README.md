@@ -1,6 +1,6 @@
-# Starter Kit
+# Family Assistant
 
-Backend starter template for Go services with:
+Backend service for a private household assistant with:
 - Gin HTTP router
 - PostgreSQL via GORM
 - JWT authentication
@@ -85,7 +85,7 @@ System modules currently included:
 Main backend layout:
 
 ```text
-starter-kit/
+family-assistant/
 ├── infrastructure/
 ├── internal/
 │   ├── domain/

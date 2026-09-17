@@ -3,11 +3,11 @@ package serviceaudit
 import (
 	"context"
 	"errors"
-	domainaudit "starter-kit/internal/domain/audit"
-	"starter-kit/internal/dto"
-	interfaceaudit "starter-kit/internal/interfaces/audit"
-	"starter-kit/pkg/filter"
-	"starter-kit/utils"
+	domainaudit "github.com/zazhedho/family-assistant/internal/domain/audit"
+	"github.com/zazhedho/family-assistant/internal/dto"
+	interfaceaudit "github.com/zazhedho/family-assistant/internal/interfaces/audit"
+	"github.com/zazhedho/family-assistant/pkg/filter"
+	"github.com/zazhedho/family-assistant/utils"
 	"strings"
 	"time"
 )
