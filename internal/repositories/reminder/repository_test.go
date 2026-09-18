@@ -256,8 +256,8 @@ func TestUpdateUsesMutableAllowlistAndAllowsNullCompletedAt(t *testing.T) {
 	reminder.Title = "must not be updated"
 	reminder.OwnerMemberID = "must-not-mutate-owner"
 
-	mock.ExpectExec(regexp.QuoteMeta(`UPDATE "reminders" SET "completed_at"=$1,"status"=$2,"updated_at"=$3 WHERE id = $4 AND family_id = $5`)).
-		WithArgs(nil, reminder.Status, sqlmock.AnyArg(), reminder.ID, reminder.FamilyID).
+	mock.ExpectExec(regexp.QuoteMeta(`UPDATE "reminders" SET "completed_at"=$1,"status"=$2,"updated_at"=$3 WHERE id = $4 AND family_id = $5 AND status = $6`)).
+		WithArgs(nil, reminder.Status, sqlmock.AnyArg(), reminder.ID, reminder.FamilyID, domainreminder.StatusPending).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 
 	if err := repo.Update(context.Background(), reminder); err != nil {
@@ -277,8 +277,8 @@ func TestUpdateOwnsFreshUpdatedAtAndPersistsItOnModel(t *testing.T) {
 	before := time.Now().UTC()
 	var persisted time.Time
 
-	mock.ExpectExec(regexp.QuoteMeta(`UPDATE "reminders" SET "completed_at"=$1,"status"=$2,"updated_at"=$3 WHERE id = $4 AND family_id = $5`)).
-		WithArgs(nil, reminder.Status, updatedAtMatcher{got: &persisted, min: before, max: before.Add(5 * time.Second)}, reminder.ID, reminder.FamilyID).
+	mock.ExpectExec(regexp.QuoteMeta(`UPDATE "reminders" SET "completed_at"=$1,"status"=$2,"updated_at"=$3 WHERE id = $4 AND family_id = $5 AND status = $6`)).
+		WithArgs(nil, reminder.Status, updatedAtMatcher{got: &persisted, min: before, max: before.Add(5 * time.Second)}, reminder.ID, reminder.FamilyID, domainreminder.StatusPending).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 
 	if err := repo.Update(context.Background(), reminder); err != nil {
@@ -296,18 +296,18 @@ func TestUpdateOwnsFreshUpdatedAtAndPersistsItOnModel(t *testing.T) {
 	}
 }
 
-func TestUpdateReturnsNotFoundWhenFamilyScopedRowIsMissing(t *testing.T) {
+func TestUpdateReturnsStatusConflictWhenPendingFamilyScopedRowIsMissing(t *testing.T) {
 	db, mock := newReminderMockDB(t)
 	repo := NewRepository(db)
 	reminder := reminderFixture()
 
-	mock.ExpectExec(regexp.QuoteMeta(`UPDATE "reminders" SET "completed_at"=$1,"status"=$2,"updated_at"=$3 WHERE id = $4 AND family_id = $5`)).
-		WithArgs(nil, reminder.Status, sqlmock.AnyArg(), reminder.ID, reminder.FamilyID).
+	mock.ExpectExec(regexp.QuoteMeta(`UPDATE "reminders" SET "completed_at"=$1,"status"=$2,"updated_at"=$3 WHERE id = $4 AND family_id = $5 AND status = $6`)).
+		WithArgs(nil, reminder.Status, sqlmock.AnyArg(), reminder.ID, reminder.FamilyID, domainreminder.StatusPending).
 		WillReturnResult(sqlmock.NewResult(0, 0))
 
 	err := repo.Update(context.Background(), reminder)
-	if !errors.Is(err, gorm.ErrRecordNotFound) {
-		t.Fatalf("expected record not found, got %v", err)
+	if !errors.Is(err, domainreminder.ErrStatusConflict) {
+		t.Fatalf("expected status conflict, got %v", err)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("sql expectations: %v", err)

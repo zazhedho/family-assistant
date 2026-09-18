@@ -16,6 +16,7 @@ type FamilyMember struct {
 	FamilyID  string     `json:"family_id" gorm:"column:family_id"`
 	UserID    string     `json:"user_id" gorm:"column:user_id"`
 	RoleID    string     `json:"role_id" gorm:"column:role_id"`
+	RoleName  string     `json:"role_name,omitempty" gorm:"column:role_name;->"`
 	Status    string     `json:"status" gorm:"column:status"`
 	CreatedAt time.Time  `json:"created_at" gorm:"column:created_at"`
 	UpdatedAt *time.Time `json:"updated_at,omitempty" gorm:"column:updated_at"`

@@ -6,6 +6,7 @@ import (
 
 	serviceauthorization "github.com/zazhedho/family-assistant/internal/services/authorization"
 	serviceidentity "github.com/zazhedho/family-assistant/internal/services/identity"
+	servicereminder "github.com/zazhedho/family-assistant/internal/services/reminder"
 	"gorm.io/gorm"
 )
 
@@ -14,6 +15,7 @@ var (
 	ErrMCPForbidden       = errors.New("forbidden")
 	ErrMCPNotFound        = errors.New("not found")
 	ErrMCPInvalidInput    = errors.New("invalid input")
+	ErrMCPConflict        = errors.New("conflict")
 	ErrMCPInternal        = errors.New("internal server error")
 )
 
@@ -56,6 +58,8 @@ func MapToolError(err error, logger ...*slog.Logger) error {
 		return &MCPError{Code: "not_found", Message: ErrMCPNotFound.Error(), cause: err}
 	case errors.Is(err, serviceauthorization.ErrInvalidResource):
 		return &MCPError{Code: "invalid_input", Message: ErrMCPInvalidInput.Error(), cause: err}
+	case errors.Is(err, servicereminder.ErrConflict):
+		return &MCPError{Code: "conflict", Message: ErrMCPConflict.Error(), cause: err}
 	default:
 		log := slog.Default()
 		if len(logger) > 0 && logger[0] != nil {

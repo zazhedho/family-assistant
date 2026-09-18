@@ -10,6 +10,7 @@ var (
 	ErrFamilyIDRequired   = errors.New("family_id is required")
 	ErrReminderRequired   = errors.New("reminder is required")
 	ErrReminderIDRequired = errors.New("reminder_id is required")
+	ErrStatusConflict     = errors.New("reminder status conflict")
 )
 
 type ListFilter struct {

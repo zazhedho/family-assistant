@@ -89,7 +89,7 @@ func (r *Repository) Update(ctx context.Context, reminder *domainreminder.Remind
 
 	result := r.DB.WithContext(ctx).
 		Model(&domainreminder.Reminder{}).
-		Where("id = ? AND family_id = ?", reminder.ID, reminder.FamilyID).
+		Where("id = ? AND family_id = ? AND status = ?", reminder.ID, reminder.FamilyID, domainreminder.StatusPending).
 		Updates(map[string]any{
 			"status":       reminder.Status,
 			"completed_at": reminder.CompletedAt,
@@ -99,7 +99,7 @@ func (r *Repository) Update(ctx context.Context, reminder *domainreminder.Remind
 		return result.Error
 	}
 	if result.RowsAffected == 0 {
-		return gorm.ErrRecordNotFound
+		return domainreminder.ErrStatusConflict
 	}
 	return nil
 }

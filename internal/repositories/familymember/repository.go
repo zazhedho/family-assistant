@@ -38,7 +38,10 @@ func (r *Repository) FindActiveByHermesProfile(ctx context.Context, profileID st
 func (r *Repository) FindActiveByID(ctx context.Context, familyID, memberID string) (*domainfamilymember.FamilyMember, error) {
 	var member domainfamilymember.FamilyMember
 	err := r.DB.WithContext(ctx).
-		Where("family_id = ? AND id = ? AND status = ?", familyID, memberID, domainfamilymember.StatusActive).
+		Table("family_members fm").
+		Select("fm.id, fm.family_id, fm.user_id, fm.role_id, fm.status, fm.created_at, fm.updated_at, r.name AS role_name").
+		Joins("JOIN roles r ON r.id = fm.role_id").
+		Where("fm.family_id = ? AND fm.id = ? AND fm.status = ? AND r.deleted_at IS NULL", familyID, memberID, domainfamilymember.StatusActive).
 		First(&member).Error
 	if err != nil {
 		return nil, err

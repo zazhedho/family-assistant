@@ -72,13 +72,51 @@ func TestFindActiveByID_IsFamilyScoped(t *testing.T) {
 	db, mock := newFamilyMemberMockDB(t)
 	repo := NewRepository(db)
 
-	mock.ExpectQuery(`SELECT \* FROM "family_members" WHERE family_id = \$1 AND id = \$2 AND status = \$3.*LIMIT \$4`).
+	mock.ExpectQuery(`SELECT .*fm\.id.*r\.name AS role_name.*FROM family_members fm.*JOIN roles r ON r\.id = fm\.role_id.*fm\.family_id = \$1 AND fm\.id = \$2 AND fm\.status = \$3.*r\.deleted_at IS NULL.*LIMIT \$4`).
 		WithArgs("family-a", "member-b", "ACTIVE", 1).
-		WillReturnRows(sqlmock.NewRows([]string{"id", "family_id", "user_id", "role_id", "status"}))
+		WillReturnRows(sqlmock.NewRows([]string{"id", "family_id", "user_id", "role_id", "status", "role_name"}))
 
 	_, err := repo.FindActiveByID(context.Background(), "family-a", "member-b")
 	if !errors.Is(err, gorm.ErrRecordNotFound) {
 		t.Fatalf("expected record not found, got %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("sql expectations: %v", err)
+	}
+}
+
+func TestFindActiveByIDRejectsInactiveMembershipOrDeletedRole(t *testing.T) {
+	db, mock := newFamilyMemberMockDB(t)
+	repo := NewRepository(db)
+
+	mock.ExpectQuery(`SELECT .*fm\.id.*r\.name AS role_name.*FROM family_members fm.*JOIN roles r ON r\.id = fm\.role_id.*fm\.family_id = \$1 AND fm\.id = \$2 AND fm\.status = \$3.*r\.deleted_at IS NULL.*LIMIT \$4`).
+		WithArgs("family-1", "member-inactive", "ACTIVE", 1).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "family_id", "user_id", "role_id", "status", "role_name"}))
+
+	_, err := repo.FindActiveByID(context.Background(), "family-1", "member-inactive")
+	if !errors.Is(err, gorm.ErrRecordNotFound) {
+		t.Fatalf("expected inactive/deleted-role lookup to be not found, got %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("sql expectations: %v", err)
+	}
+}
+
+func TestFindActiveByIDReturnsTrustedRoleName(t *testing.T) {
+	db, mock := newFamilyMemberMockDB(t)
+	repo := NewRepository(db)
+
+	mock.ExpectQuery(`SELECT .*fm\.id.*r\.name AS role_name.*FROM family_members fm.*JOIN roles r ON r\.id = fm\.role_id.*fm\.family_id = \$1 AND fm\.id = \$2 AND fm\.status = \$3.*r\.deleted_at IS NULL.*LIMIT \$4`).
+		WithArgs("family-1", "member-1", "ACTIVE", 1).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "family_id", "user_id", "role_id", "status", "role_name"}).
+			AddRow("member-1", "family-1", "user-1", "role-1", "ACTIVE", "child"))
+
+	got, err := repo.FindActiveByID(context.Background(), "family-1", "member-1")
+	if err != nil {
+		t.Fatalf("find active member: %v", err)
+	}
+	if got.RoleName != "child" {
+		t.Fatalf("role name = %q, want child", got.RoleName)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("sql expectations: %v", err)
