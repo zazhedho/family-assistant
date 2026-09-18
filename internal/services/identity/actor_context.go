@@ -8,6 +8,7 @@ type ActorContext struct {
 	RoleName          string
 	Permissions       map[string]struct{}
 	HermesProfileID   string
+	Source            string
 	Channel           string
 	InitiatorUserID   string
 	InitiatorRoleName string

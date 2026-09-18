@@ -81,7 +81,19 @@ func NewService(
 	return NewReminderService(reminders, members, authorize, auditService)
 }
 
-func (s *service) Create(ctx context.Context, actor identity.ActorContext, input CreateInput) (*domainreminder.Reminder, error) {
+func (s *service) Create(ctx context.Context, actor identity.ActorContext, input CreateInput) (created *domainreminder.Reminder, err error) {
+	ownerID := strings.TrimSpace(actor.MemberID)
+	defer func() {
+		if err == nil {
+			return
+		}
+		resourceID := ""
+		if created != nil {
+			resourceID = auditResourceID(created.ID)
+		}
+		s.writeFailedAudit(ctx, actor, domainaudit.ActionCreate, resourceID, ownerID, err)
+	}()
+
 	if strings.TrimSpace(input.Title) == "" {
 		return nil, &authorization.ValidationError{Field: "title", Reason: "is required"}
 	}
@@ -97,7 +109,6 @@ func (s *service) Create(ctx context.Context, actor identity.ActorContext, input
 		return nil, err
 	}
 
-	ownerID := actor.MemberID
 	ownerRole := actor.RoleName
 	if input.TargetMemberID != nil {
 		target, err := s.targetMember(ctx, actor, input.TargetMemberID)
@@ -119,7 +130,7 @@ func (s *service) Create(ctx context.Context, actor identity.ActorContext, input
 		return nil, err
 	}
 
-	created := &domainreminder.Reminder{
+	created = &domainreminder.Reminder{
 		FamilyID:          actor.FamilyID,
 		OwnerMemberID:     ownerID,
 		CreatedByMemberID: actor.MemberID,
@@ -134,13 +145,18 @@ func (s *service) Create(ctx context.Context, actor identity.ActorContext, input
 	}
 
 	s.writeAudit(ctx, actor, domainaudit.AuditEvent{
-		ActorUserID: auditActorUserID(actor),
-		ActorRole:   auditActorRole(actor),
-		Action:      domainaudit.ActionCreate,
-		Resource:    "reminder",
-		ResourceID:  created.ID,
-		Status:      domainaudit.StatusSuccess,
-		Metadata:    reminderAuditMetadata(actor, created),
+		ActorUserID:           auditActorUserID(actor),
+		ActorMemberID:         actor.MemberID,
+		ResourceOwnerMemberID: created.OwnerMemberID,
+		Source:                auditSource(actor),
+		Channel:               auditChannel(actor),
+		AgentProfile:          actor.HermesProfileID,
+		ActorRole:             auditActorRole(actor),
+		Action:                domainaudit.ActionCreate,
+		Resource:              "reminder",
+		ResourceID:            created.ID,
+		Status:                domainaudit.StatusSuccess,
+		Metadata:              reminderAuditMetadata(actor, created),
 	})
 	return created, nil
 }
@@ -191,13 +207,25 @@ func (s *service) List(ctx context.Context, actor identity.ActorContext, input L
 	return s.reminders.List(ctx, filter)
 }
 
-func (s *service) Complete(ctx context.Context, actor identity.ActorContext, reminderID string) (*domainreminder.Reminder, error) {
+func (s *service) Complete(ctx context.Context, actor identity.ActorContext, reminderID string) (result *domainreminder.Reminder, err error) {
 	reminderID = strings.TrimSpace(reminderID)
+	var reminder *domainreminder.Reminder
+	defer func() {
+		if err == nil {
+			return
+		}
+		ownerID := ""
+		if reminder != nil {
+			ownerID = strings.TrimSpace(reminder.OwnerMemberID)
+		}
+		s.writeFailedAudit(ctx, actor, domainaudit.ActionUpdate, auditResourceID(reminderID), ownerID, err)
+	}()
+
 	if err := validateUUID(reminderID, "reminder_id"); err != nil {
 		return nil, err
 	}
 
-	reminder, err := s.reminders.FindByIDInFamily(ctx, actor.FamilyID, reminderID)
+	reminder, err = s.reminders.FindByIDInFamily(ctx, actor.FamilyID, reminderID)
 	if err != nil {
 		return nil, mapNotFound(err)
 	}
@@ -239,13 +267,18 @@ func (s *service) Complete(ctx context.Context, actor identity.ActorContext, rem
 	}
 
 	s.writeAudit(ctx, actor, domainaudit.AuditEvent{
-		ActorUserID: auditActorUserID(actor),
-		ActorRole:   auditActorRole(actor),
-		Action:      domainaudit.ActionUpdate,
-		Resource:    "reminder",
-		ResourceID:  reminder.ID,
-		Status:      domainaudit.StatusSuccess,
-		Metadata:    reminderAuditMetadata(actor, reminder),
+		ActorUserID:           auditActorUserID(actor),
+		ActorMemberID:         actor.MemberID,
+		ResourceOwnerMemberID: reminder.OwnerMemberID,
+		Source:                auditSource(actor),
+		Channel:               auditChannel(actor),
+		AgentProfile:          actor.HermesProfileID,
+		ActorRole:             auditActorRole(actor),
+		Action:                domainaudit.ActionUpdate,
+		Resource:              "reminder",
+		ResourceID:            reminder.ID,
+		Status:                domainaudit.StatusSuccess,
+		Metadata:              reminderAuditMetadata(actor, reminder),
 	})
 	return reminder, nil
 }
@@ -329,18 +362,10 @@ func mapUpdateError(err error) error {
 
 func reminderAuditMetadata(actor identity.ActorContext, reminder *domainreminder.Reminder) map[string]any {
 	metadata := map[string]any{
-		"actor_member_id":          actor.MemberID,
-		"resource_type":            "reminder",
-		"resource_owner_member_id": reminder.OwnerMemberID,
-		"source":                   auditSource(actor),
-		"channel":                  actor.Channel,
-		"status":                   string(reminder.Status),
+		"status": string(reminder.Status),
 	}
-	if actor.HermesProfileID != "" {
-		metadata["agent_profile"] = actor.HermesProfileID
-	}
-	if actor.InitiatorUserID != "" && actor.InitiatorUserID != actor.UserID {
-		metadata["subject_user_id"] = actor.UserID
+	if subjectUserID := auditSubjectUserID(actor); subjectUserID != "" {
+		metadata["subject_user_id"] = subjectUserID
 	}
 	return metadata
 }
@@ -360,10 +385,48 @@ func auditActorRole(actor identity.ActorContext) string {
 }
 
 func auditSource(actor identity.ActorContext) string {
-	if strings.TrimSpace(actor.HermesProfileID) != "" {
-		return "mcp"
+	source := strings.ToLower(strings.TrimSpace(actor.Source))
+	if source == "mcp" || source == "http" {
+		return source
 	}
-	return "http"
+	return "unknown"
+}
+
+func auditChannel(actor identity.ActorContext) string {
+	return strings.TrimSpace(actor.Channel)
+}
+
+func auditSubjectUserID(actor identity.ActorContext) string {
+	initiatorUserID := strings.TrimSpace(actor.InitiatorUserID)
+	subjectUserID := strings.TrimSpace(actor.UserID)
+	if initiatorUserID != "" && initiatorUserID != subjectUserID {
+		return subjectUserID
+	}
+	return ""
+}
+
+func auditResourceID(value string) string {
+	value = strings.TrimSpace(value)
+	if _, err := uuid.Parse(value); err != nil {
+		return ""
+	}
+	return value
+}
+
+func auditFailureCategory(err error) string {
+	var validationErr *authorization.ValidationError
+	switch {
+	case errors.As(err, &validationErr), errors.Is(err, authorization.ErrInvalidResource):
+		return "validation"
+	case errors.Is(err, authorization.ErrForbidden):
+		return "forbidden"
+	case errors.Is(err, authorization.ErrNotFound), errors.Is(err, gorm.ErrRecordNotFound):
+		return "not_found"
+	case errors.Is(err, ErrConflict), errors.Is(err, domainreminder.ErrStatusConflict):
+		return "conflict"
+	default:
+		return "internal"
+	}
 }
 
 func (s *service) writeAudit(ctx context.Context, actor identity.ActorContext, event domainaudit.AuditEvent) {
@@ -373,6 +436,32 @@ func (s *service) writeAudit(ctx context.Context, actor identity.ActorContext, e
 	if err := s.audit.Store(ctx, event); err != nil {
 		logger.WriteLog(logger.LogLevelWarn, fmt.Sprintf("[Reminder][Audit]; failed to store audit trail: %v", err))
 	}
+}
+
+func (s *service) writeFailedAudit(ctx context.Context, actor identity.ActorContext, action, resourceID, ownerID string, cause error) {
+	category := auditFailureCategory(cause)
+	s.writeAudit(ctx, actor, domainaudit.AuditEvent{
+		ActorUserID:           auditActorUserID(actor),
+		ActorMemberID:         strings.TrimSpace(actor.MemberID),
+		ResourceOwnerMemberID: strings.TrimSpace(ownerID),
+		Source:                auditSource(actor),
+		Channel:               auditChannel(actor),
+		AgentProfile:          strings.TrimSpace(actor.HermesProfileID),
+		ActorRole:             auditActorRole(actor),
+		Action:                action,
+		Resource:              "reminder",
+		ResourceID:            auditResourceID(resourceID),
+		Status:                domainaudit.StatusFailed,
+		ErrorMessage:          category,
+		Metadata:              failureAuditMetadata(actor),
+	})
+}
+
+func failureAuditMetadata(actor identity.ActorContext) map[string]any {
+	if subjectUserID := auditSubjectUserID(actor); subjectUserID != "" {
+		return map[string]any{"subject_user_id": subjectUserID}
+	}
+	return nil
 }
 
 var _ Service = (*service)(nil)

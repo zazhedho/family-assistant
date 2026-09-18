@@ -27,21 +27,26 @@ type AuditTrail struct {
 }
 
 type AuditEvent struct {
-	OccurredAt   time.Time
-	ActorUserID  string
-	ActorRole    string
-	Action       string
-	Resource     string
-	ResourceID   string
-	Status       string
-	Message      string
-	ErrorMessage string
-	RequestID    string
-	IPAddress    string
-	UserAgent    string
-	BeforeData   any
-	AfterData    any
-	Metadata     map[string]any
+	OccurredAt            time.Time
+	ActorUserID           string
+	ActorMemberID         string
+	ResourceOwnerMemberID string
+	Source                string
+	Channel               string
+	AgentProfile          string
+	ActorRole             string
+	Action                string
+	Resource              string
+	ResourceID            string
+	Status                string
+	Message               string
+	ErrorMessage          string
+	RequestID             string
+	IPAddress             string
+	UserAgent             string
+	BeforeData            any
+	AfterData             any
+	Metadata              map[string]any
 }
 
 const (

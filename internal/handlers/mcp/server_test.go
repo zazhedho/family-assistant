@@ -46,6 +46,7 @@ func TestHTTPHandlerMountsMCPOnlyAtExactPath(t *testing.T) {
 			UserID:   "user-1",
 			MemberID: "member-1",
 			FamilyID: "family-1",
+			Source:   "mcp",
 			RoleName: "parent",
 		},
 	}, nil)

@@ -127,12 +127,20 @@ func (r *ResolverService) actorFromMember(ctx context.Context, member *domainfam
 		RoleID:      roleID,
 		RoleName:    roleName,
 		Permissions: permissionSet,
+		Source:      sourceForResolution(requireProfile),
 		Channel:     strings.TrimSpace(channel),
 	}
 	if requireProfile {
 		actor.HermesProfileID = resolvedProfileID
 	}
 	return actor, nil
+}
+
+func sourceForResolution(requireProfile bool) string {
+	if requireProfile {
+		return "mcp"
+	}
+	return "http"
 }
 
 var _ Resolver = (*ResolverService)(nil)

@@ -2,15 +2,19 @@ package servicereminder
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
 	domainaudit "github.com/zazhedho/family-assistant/internal/domain/audit"
 	domainfamilymember "github.com/zazhedho/family-assistant/internal/domain/familymember"
 	domainreminder "github.com/zazhedho/family-assistant/internal/domain/reminder"
+	serviceaudit "github.com/zazhedho/family-assistant/internal/services/audit"
 	"github.com/zazhedho/family-assistant/internal/services/authorization"
 	identity "github.com/zazhedho/family-assistant/internal/services/identity"
+	"github.com/zazhedho/family-assistant/pkg/filter"
 	"gorm.io/gorm"
 )
 
@@ -132,6 +136,36 @@ func (s *auditServiceStub) Store(_ context.Context, event domainaudit.AuditEvent
 	return nil
 }
 
+type capturingAuditRepo struct {
+	stored domainaudit.AuditTrail
+}
+
+func (r *capturingAuditRepo) Store(_ context.Context, data domainaudit.AuditTrail) error {
+	r.stored = data
+	return nil
+}
+
+func (r *capturingAuditRepo) GetByID(context.Context, string) (domainaudit.AuditTrail, error) {
+	return r.stored, nil
+}
+
+func (r *capturingAuditRepo) GetAll(context.Context, filter.BaseParams) ([]domainaudit.AuditTrail, int64, error) {
+	return []domainaudit.AuditTrail{r.stored}, 1, nil
+}
+
+func (r *capturingAuditRepo) Update(context.Context, domainaudit.AuditTrail) error { return nil }
+func (r *capturingAuditRepo) Delete(context.Context, string) error                 { return nil }
+func (r *capturingAuditRepo) SoftDelete(context.Context, string, string) error     { return nil }
+
+type assigningReminderRepository struct {
+	*reminderRepositoryStub
+}
+
+func (r *assigningReminderRepository) Create(ctx context.Context, reminder *domainreminder.Reminder) error {
+	reminder.ID = reminderUUID
+	return r.reminderRepositoryStub.Create(ctx, reminder)
+}
+
 func reminderActor(role, member, family string, permissions ...string) identity.ActorContext {
 	permissionSet := make(map[string]struct{}, len(permissions))
 	for _, permission := range permissions {
@@ -143,6 +177,7 @@ func reminderActor(role, member, family string, permissions ...string) identity.
 		FamilyID:        family,
 		RoleName:        role,
 		Permissions:     permissionSet,
+		Source:          "mcp",
 		Channel:         "whatsapp",
 		HermesProfileID: "profile-" + member,
 	}
@@ -191,15 +226,15 @@ func TestCreateOwnPersonalReminderDerivesTrustedOwnershipAndAudits(t *testing.T)
 	if event.ActorUserID != actor.UserID || event.Resource != "reminder" || event.ResourceID != got.ID || event.Action != domainaudit.ActionCreate || event.Status != domainaudit.StatusSuccess {
 		t.Fatalf("unexpected create audit event: %#v", event)
 	}
-	for key, want := range map[string]string{
-		"actor_member_id":          actor.MemberID,
-		"resource_owner_member_id": actor.MemberID,
-		"source":                   "mcp",
-		"channel":                  actor.Channel,
-		"agent_profile":            actor.HermesProfileID,
-	} {
-		if got := event.Metadata[key]; got != want {
-			t.Errorf("metadata[%q] = %v, want %q", key, got, want)
+	if event.ActorMemberID != actor.MemberID || event.ResourceOwnerMemberID != actor.MemberID || event.Source != "mcp" || event.Channel != actor.Channel || event.AgentProfile != actor.HermesProfileID {
+		t.Fatalf("typed create audit metadata = %#v, want actor=%q owner=%q source=mcp channel=%q profile=%q", event, actor.MemberID, actor.MemberID, actor.Channel, actor.HermesProfileID)
+	}
+	if event.Metadata["status"] != string(domainreminder.StatusPending) {
+		t.Fatalf("status metadata = %#v, want pending", event.Metadata)
+	}
+	for _, key := range []string{"actor_member_id", "resource_owner_member_id", "source", "channel", "agent_profile", "resource_type"} {
+		if _, ok := event.Metadata[key]; ok {
+			t.Fatalf("typed audit key %q duplicated in metadata: %#v", key, event.Metadata)
 		}
 	}
 }
@@ -208,8 +243,8 @@ func TestCreateAuditUsesImpersonatorAsInitiatorAndPreservesSubject(t *testing.T)
 	repo := &reminderRepositoryStub{}
 	auditService := &auditServiceStub{}
 	actor := reminderActor("parent", "member-effective", "family-1", "reminders:create")
-	actor.InitiatorUserID = "user-operator"
-	actor.InitiatorRoleName = "admin"
+	actor.InitiatorUserID = " user-operator "
+	actor.InitiatorRoleName = " admin "
 	service := newReminderService(repo, &familyMemberRepositoryStub{}, authorization.NewAuthorizer(), auditService)
 
 	if _, err := service.Create(context.Background(), actor, validCreateInput()); err != nil {
@@ -547,8 +582,12 @@ func TestCompleteUpdateConflictDoesNotAuditSuccess(t *testing.T) {
 	if !errors.Is(err, ErrConflict) {
 		t.Fatalf("complete error = %v, want ErrConflict", err)
 	}
-	if len(auditService.events) != 0 {
-		t.Fatalf("conflicted completion emitted audit success: %#v", auditService.events)
+	if len(auditService.events) != 1 {
+		t.Fatalf("expected one failed audit, got %#v", auditService.events)
+	}
+	event := auditService.events[0]
+	if event.Status != domainaudit.StatusFailed || event.Action != domainaudit.ActionUpdate || event.ResourceID != reminderUUID || event.ErrorMessage != "conflict" {
+		t.Fatalf("unexpected conflict audit: %#v", event)
 	}
 }
 
@@ -576,17 +615,159 @@ func TestCompleteAuthorizesOwnerAndPersistsCompletionWithAudit(t *testing.T) {
 	if event.ActorUserID != actor.UserID || event.Action != domainaudit.ActionUpdate || event.Status != domainaudit.StatusSuccess || event.ResourceID != reminder.ID {
 		t.Fatalf("unexpected completion audit: %#v", event)
 	}
+	if event.ActorMemberID != actor.MemberID || event.ResourceOwnerMemberID != "child-1" || event.Source != "mcp" || event.Channel != actor.Channel || event.AgentProfile != actor.HermesProfileID {
+		t.Fatalf("typed completion audit metadata = %#v, want actor=%q owner=child-1 source=mcp channel=%q profile=%q", event, actor.MemberID, actor.Channel, actor.HermesProfileID)
+	}
+	if event.Metadata["status"] != string(domainreminder.StatusCompleted) {
+		t.Fatalf("status metadata = %#v, want completed", event.Metadata)
+	}
+	for _, key := range []string{"actor_member_id", "resource_owner_member_id", "source", "channel", "agent_profile", "resource_type"} {
+		if _, ok := event.Metadata[key]; ok {
+			t.Fatalf("typed audit key %q duplicated in metadata: %#v", key, event.Metadata)
+		}
+	}
+}
+
+func TestCreateMCPAuditPersistsTrustedTypedMetadata(t *testing.T) {
+	const (
+		actorUserID   = "00000000-0000-0000-0000-000000000010"
+		actorMemberID = "00000000-0000-0000-0000-000000000011"
+		childMemberID = "00000000-0000-0000-0000-000000000022"
+	)
+
+	repo := &assigningReminderRepository{reminderRepositoryStub: &reminderRepositoryStub{}}
+	members := &familyMemberRepositoryStub{byID: map[string]*domainfamilymember.FamilyMember{
+		childMemberID: member(childMemberID, "family-1", "child"),
+	}}
+	auditRepo := &capturingAuditRepo{}
+	service := NewReminderService(repo, members, authorization.NewAuthorizer(), serviceaudit.NewAuditService(auditRepo))
+	actor := reminderActor("parent", actorMemberID, "family-1", "reminders:create")
+	actor.UserID = actorUserID
+	actor.HermesProfileID = "hermes-family"
+	actor.Source = "mcp"
+	actor.Channel = "whatsapp"
+	input := validCreateInput()
+	input.TargetMemberID = stringPtr(childMemberID)
+
+	created, err := service.Create(context.Background(), actor, input)
+	if err != nil {
+		t.Fatalf("create reminder: %v", err)
+	}
+	if created.ID != reminderUUID {
+		t.Fatalf("created reminder ID = %q, want %q", created.ID, reminderUUID)
+	}
+	if auditRepo.stored.ActorUserID == nil || *auditRepo.stored.ActorUserID != actorUserID {
+		t.Fatalf("stored actor user ID = %#v, want %q", auditRepo.stored.ActorUserID, actorUserID)
+	}
+	if auditRepo.stored.Action != domainaudit.ActionCreate || auditRepo.stored.Resource != "reminder" || auditRepo.stored.ResourceID != reminderUUID || auditRepo.stored.Status != domainaudit.StatusSuccess {
+		t.Fatalf("stored audit trail = %#v", auditRepo.stored)
+	}
+
+	var metadata map[string]any
+	if err := json.Unmarshal([]byte(auditRepo.stored.Metadata), &metadata); err != nil {
+		t.Fatalf("decode stored metadata: %v", err)
+	}
 	for key, want := range map[string]string{
-		"actor_member_id":          actor.MemberID,
-		"resource_owner_member_id": "child-1",
+		"actor_member_id":          actorMemberID,
+		"resource_owner_member_id": childMemberID,
 		"source":                   "mcp",
-		"channel":                  actor.Channel,
-		"agent_profile":            actor.HermesProfileID,
-		"status":                   string(domainreminder.StatusCompleted),
+		"channel":                  "whatsapp",
+		"agent_profile":            "hermes-family",
 	} {
-		if got := event.Metadata[key]; got != want {
+		if got := metadata[key]; got != want {
 			t.Errorf("metadata[%q] = %v, want %q", key, got, want)
 		}
+	}
+	if metadata["resource_type"] != nil {
+		t.Errorf("resource_type metadata = %v, want omitted", metadata["resource_type"])
+	}
+}
+
+func TestCreateAuditUsesValidatedSourceAndTrimmedChannel(t *testing.T) {
+	repo := &reminderRepositoryStub{}
+	auditService := &auditServiceStub{}
+	actor := reminderActor("parent", "parent-1", "family-1", "reminders:create")
+	actor.Source = " MCP "
+	actor.Channel = " whatsapp "
+	service := newReminderService(repo, &familyMemberRepositoryStub{}, authorization.NewAuthorizer(), auditService)
+
+	if _, err := service.Create(context.Background(), actor, validCreateInput()); err != nil {
+		t.Fatalf("create reminder: %v", err)
+	}
+	if len(auditService.events) != 1 || auditService.events[0].Source != "mcp" || auditService.events[0].Channel != "whatsapp" {
+		t.Fatalf("unexpected trusted source/channel: %#v", auditService.events)
+	}
+
+	auditService.events = nil
+	actor.Source = ""
+	actor.HermesProfileID = "caller-controlled-profile"
+	if _, err := service.Create(context.Background(), actor, validCreateInput()); err != nil {
+		t.Fatalf("create reminder with blank source: %v", err)
+	}
+	if len(auditService.events) != 1 || auditService.events[0].Source != "unknown" {
+		t.Fatalf("blank source inferred from profile: %#v", auditService.events)
+	}
+}
+
+func TestCreateValidationFailureWritesSafeFailedAudit(t *testing.T) {
+	repo := &reminderRepositoryStub{}
+	auditService := &auditServiceStub{}
+	actor := reminderActor("parent", "parent-1", "family-1", "reminders:create")
+	service := newReminderService(repo, &familyMemberRepositoryStub{}, authorization.NewAuthorizer(), auditService)
+
+	_, err := service.Create(context.Background(), actor, CreateInput{ScheduledAt: time.Now()})
+	assertValidationField(t, err, "title")
+	assertFailedAudit(t, auditService, domainaudit.ActionCreate, "", "parent-1", "validation")
+}
+
+func TestCreateForbiddenTargetWritesSafeFailedAudit(t *testing.T) {
+	repo := &reminderRepositoryStub{}
+	auditService := &auditServiceStub{}
+	members := &familyMemberRepositoryStub{byID: map[string]*domainfamilymember.FamilyMember{
+		parentMemberUUID: member(parentMemberUUID, "family-1", "parent"),
+	}}
+	actor := reminderActor("child", childMemberUUID, "family-1", "reminders:create")
+	service := newReminderService(repo, members, authorization.NewAuthorizer(), auditService)
+	input := validCreateInput()
+	input.TargetMemberID = stringPtr(parentMemberUUID)
+
+	_, err := service.Create(context.Background(), actor, input)
+	if !errors.Is(err, authorization.ErrForbidden) {
+		t.Fatalf("create error = %v, want forbidden", err)
+	}
+	assertFailedAudit(t, auditService, domainaudit.ActionCreate, "", parentMemberUUID, "forbidden")
+}
+
+func TestCreateRepositoryFailureWritesSafeInternalAudit(t *testing.T) {
+	repo := &reminderRepositoryStub{createErr: errors.New("sql: title leaked")}
+	auditService := &auditServiceStub{}
+	actor := reminderActor("parent", parentMemberUUID, "family-1", "reminders:create")
+	service := newReminderService(repo, &familyMemberRepositoryStub{}, authorization.NewAuthorizer(), auditService)
+	input := validCreateInput()
+	input.Title = "secret title"
+	input.Description = "private description"
+
+	_, err := service.Create(context.Background(), actor, input)
+	if err == nil || !strings.Contains(err.Error(), "sql") {
+		t.Fatalf("create error = %v, want repository error", err)
+	}
+	assertFailedAudit(t, auditService, domainaudit.ActionCreate, "", actor.MemberID, "internal")
+	if got := auditService.events[0].ErrorMessage; strings.Contains(got, "sql") || strings.Contains(got, input.Title) || strings.Contains(got, input.Description) {
+		t.Fatalf("failed audit leaked raw mutation data: %q", got)
+	}
+}
+
+func assertFailedAudit(t *testing.T, auditService *auditServiceStub, action, resourceID, ownerID, category string) {
+	t.Helper()
+	if len(auditService.events) != 1 {
+		t.Fatalf("expected one failed audit, got %#v", auditService.events)
+	}
+	event := auditService.events[0]
+	if event.Status != domainaudit.StatusFailed || event.Action != action || event.Resource != "reminder" || event.ResourceID != resourceID || event.ResourceOwnerMemberID != ownerID || event.ErrorMessage != category {
+		t.Fatalf("unexpected failed audit: %#v", event)
+	}
+	if event.ActorMemberID == "" || event.Source == "" || event.Channel == "" {
+		t.Fatalf("missing typed actor metadata: %#v", event)
 	}
 }
 

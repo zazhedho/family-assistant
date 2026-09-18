@@ -123,7 +123,7 @@ func TestReminderFamilyPermissionMiddlewareUsesResolvedFamilyActor(t *testing.T)
 
 func TestReminderFamilyPermissionMiddlewareDeniesMissingFamilyPermission(t *testing.T) {
 	service := &reminderHTTPServiceStub{}
-	resolver := &userResolverStub{actor: serviceidentity.ActorContext{UserID: "user-trusted", MemberID: "member-trusted", FamilyID: "family-trusted", RoleName: "child"}}
+	resolver := &userResolverStub{actor: serviceidentity.ActorContext{UserID: "user-trusted", MemberID: "member-trusted", FamilyID: "family-trusted", RoleName: "child", Source: "http"}}
 	h := NewReminderHandler(service, resolver)
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
@@ -165,7 +165,7 @@ func TestReminderFamilyPermissionMiddlewareSetsImpersonationInitiator(t *testing
 }
 
 func httpTestActor() serviceidentity.ActorContext {
-	return serviceidentity.ActorContext{UserID: "user-trusted", MemberID: "member-trusted", FamilyID: "family-trusted", RoleName: "parent", Permissions: map[string]struct{}{"reminders:create": {}, "reminders:list": {}, "reminders:update": {}}}
+	return serviceidentity.ActorContext{UserID: "user-trusted", MemberID: "member-trusted", FamilyID: "family-trusted", RoleName: "parent", Source: "http", Permissions: map[string]struct{}{"reminders:create": {}, "reminders:list": {}, "reminders:update": {}}}
 }
 
 func performReminderHTTPRequest(method, path string, body any, scope authscope.Scope, handler gin.HandlerFunc) *httptest.ResponseRecorder {

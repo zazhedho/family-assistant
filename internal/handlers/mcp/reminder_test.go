@@ -66,7 +66,7 @@ func mcpTestActor() serviceidentity.ActorContext {
 	return serviceidentity.ActorContext{
 		UserID: "user-trusted", MemberID: "member-trusted", FamilyID: "family-trusted",
 		RoleID: "role-parent", RoleName: "parent", HermesProfileID: "profile-trusted",
-		Channel: "whatsapp", Permissions: map[string]struct{}{"reminders:create": {}, "reminders:list": {}, "reminders:update": {}},
+		Source: "mcp", Channel: "whatsapp", Permissions: map[string]struct{}{"reminders:create": {}, "reminders:list": {}, "reminders:update": {}},
 	}
 }
 

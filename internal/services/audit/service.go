@@ -16,6 +16,14 @@ type AuditService struct {
 	AuditRepo interfaceaudit.RepoAuditInterface
 }
 
+var reservedMetadataKeys = map[string]struct{}{
+	"actor_member_id":          {},
+	"resource_owner_member_id": {},
+	"source":                   {},
+	"channel":                  {},
+	"agent_profile":            {},
+}
+
 func NewAuditService(auditRepo interfaceaudit.RepoAuditInterface) *AuditService {
 	return &AuditService{
 		AuditRepo: auditRepo,
@@ -40,7 +48,7 @@ func (s *AuditService) Store(ctx context.Context, req domainaudit.AuditEvent) er
 
 	before := utils.RedactSensitivePayload(req.BeforeData)
 	after := utils.RedactSensitivePayload(req.AfterData)
-	meta := utils.RedactSensitivePayload(req.Metadata)
+	meta := utils.RedactSensitivePayload(mergeMetadata(req))
 
 	data := domainaudit.AuditTrail{
 		ID:           utils.CreateUUID(),
@@ -63,6 +71,39 @@ func (s *AuditService) Store(ctx context.Context, req domainaudit.AuditEvent) er
 	}
 
 	return s.AuditRepo.Store(ctx, data)
+}
+
+func typedMetadata(req domainaudit.AuditEvent) map[string]any {
+	metadata := make(map[string]any, 5)
+	for key, value := range map[string]string{
+		"actor_member_id":          req.ActorMemberID,
+		"resource_owner_member_id": req.ResourceOwnerMemberID,
+		"source":                   req.Source,
+		"channel":                  req.Channel,
+		"agent_profile":            req.AgentProfile,
+	} {
+		if value = strings.TrimSpace(value); value != "" {
+			metadata[key] = value
+		}
+	}
+	return metadata
+}
+
+func mergeMetadata(req domainaudit.AuditEvent) map[string]any {
+	metadata := make(map[string]any, len(req.Metadata)+len(reservedMetadataKeys))
+	for key, value := range req.Metadata {
+		if _, reserved := reservedMetadataKeys[strings.ToLower(strings.TrimSpace(key))]; reserved {
+			continue
+		}
+		metadata[key] = value
+	}
+	for key, value := range typedMetadata(req) {
+		metadata[key] = value
+	}
+	if len(metadata) == 0 {
+		return nil
+	}
+	return metadata
 }
 
 func (s *AuditService) GetAll(ctx context.Context, params filter.BaseParams) ([]dto.AuditTrailResponse, int64, error) {

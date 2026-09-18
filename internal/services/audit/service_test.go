@@ -2,6 +2,7 @@ package serviceaudit
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	domainaudit "github.com/zazhedho/family-assistant/internal/domain/audit"
 	"github.com/zazhedho/family-assistant/pkg/filter"
@@ -145,5 +146,137 @@ func TestStoreSanitizesSensitivePayloadAndHumanizesValues(t *testing.T) {
 		strings.Contains(repo.stored.AfterData, "sensitive-access-token") ||
 		strings.Contains(repo.stored.AfterData, "123456") {
 		t.Fatalf("expected sensitive values to be redacted, got %s", repo.stored.AfterData)
+	}
+}
+
+func TestStorePreservesHTTPMetadataWithoutTypedKeys(t *testing.T) {
+	repo := &auditRepoMock{}
+	service := NewAuditService(repo)
+
+	err := service.Store(context.Background(), domainaudit.AuditEvent{
+		ActorUserID: "00000000-0000-0000-0000-000000000010",
+		Action:      domainaudit.ActionUpdate,
+		Resource:    "user",
+		Status:      domainaudit.StatusSuccess,
+		Metadata: map[string]any{
+			"request_kind": "http",
+			"legacy":       "preserved",
+		},
+	})
+	if err != nil {
+		t.Fatalf("expected success, got %v", err)
+	}
+
+	var metadata map[string]any
+	if err := json.Unmarshal([]byte(repo.stored.Metadata), &metadata); err != nil {
+		t.Fatalf("decode stored metadata: %v", err)
+	}
+	if metadata["request_kind"] != "http" || metadata["legacy"] != "preserved" {
+		t.Fatalf("existing metadata not preserved: %#v", metadata)
+	}
+	for _, key := range []string{
+		"actor_member_id",
+		"resource_owner_member_id",
+		"source",
+		"channel",
+		"agent_profile",
+	} {
+		if _, ok := metadata[key]; ok {
+			t.Fatalf("unexpected invented metadata key %q in %#v", key, metadata)
+		}
+	}
+}
+
+func TestStoreTypedMetadataOverridesConflictsAndRedacts(t *testing.T) {
+	repo := &auditRepoMock{}
+	service := NewAuditService(repo)
+
+	err := service.Store(context.Background(), domainaudit.AuditEvent{
+		Action:                domainaudit.ActionCreate,
+		Resource:              "reminder",
+		Status:                domainaudit.StatusSuccess,
+		ActorMemberID:         "00000000-0000-0000-0000-000000000011",
+		ResourceOwnerMemberID: "00000000-0000-0000-0000-000000000022",
+		Source:                "mcp",
+		Channel:               "whatsapp",
+		AgentProfile:          "hermes-family",
+		Metadata: map[string]any{
+			"actor_member_id":          "spoofed-actor",
+			"resource_owner_member_id": "spoofed-owner",
+			"source":                   "http",
+			"channel":                  "browser",
+			"agent_profile":            "spoofed-profile",
+			"password":                 "do-not-store",
+			"nested": map[string]any{
+				"access_token": "also-do-not-store",
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("expected success, got %v", err)
+	}
+
+	var metadata map[string]any
+	if err := json.Unmarshal([]byte(repo.stored.Metadata), &metadata); err != nil {
+		t.Fatalf("decode stored metadata: %v", err)
+	}
+	for key, want := range map[string]string{
+		"actor_member_id":          "00000000-0000-0000-0000-000000000011",
+		"resource_owner_member_id": "00000000-0000-0000-0000-000000000022",
+		"source":                   "mcp",
+		"channel":                  "whatsapp",
+		"agent_profile":            "hermes-family",
+	} {
+		if got := metadata[key]; got != want {
+			t.Errorf("metadata[%q] = %v, want %q", key, got, want)
+		}
+	}
+	if metadata["password"] != "[REDACTED]" {
+		t.Errorf("password metadata = %v, want redacted", metadata["password"])
+	}
+	nested, ok := metadata["nested"].(map[string]any)
+	if !ok || nested["access_token"] != "[REDACTED]" {
+		t.Errorf("nested sensitive metadata = %#v, want redacted", metadata["nested"])
+	}
+}
+
+func TestStoreRemovesReservedCallerMetadataWhenTypedFieldsAreBlank(t *testing.T) {
+	repo := &auditRepoMock{}
+	service := NewAuditService(repo)
+	callerMetadata := map[string]any{
+		" ACTOR_MEMBER_ID ":        "spoofed-actor",
+		"Resource_Owner_Member_ID": "spoofed-owner",
+		" SOURCE ":                 "spoofed-source",
+		"Channel":                  "spoofed-channel",
+		" agent_profile ":          "spoofed-profile",
+		"safe":                     "preserved",
+	}
+
+	err := service.Store(context.Background(), domainaudit.AuditEvent{
+		Action:   domainaudit.ActionUpdate,
+		Resource: "reminder",
+		Status:   domainaudit.StatusFailed,
+		Metadata: callerMetadata,
+	})
+	if err != nil {
+		t.Fatalf("expected success, got %v", err)
+	}
+
+	var metadata map[string]any
+	if err := json.Unmarshal([]byte(repo.stored.Metadata), &metadata); err != nil {
+		t.Fatalf("decode stored metadata: %v", err)
+	}
+	if metadata["safe"] != "preserved" {
+		t.Fatalf("safe metadata not preserved: %#v", metadata)
+	}
+	for key, value := range metadata {
+		canonical := strings.ToLower(strings.TrimSpace(key))
+		switch canonical {
+		case "actor_member_id", "resource_owner_member_id", "source", "channel", "agent_profile":
+			t.Fatalf("reserved metadata key %q survived with value %v", key, value)
+		}
+	}
+	if len(callerMetadata) != 6 {
+		t.Fatalf("caller metadata was mutated: %#v", callerMetadata)
 	}
 }

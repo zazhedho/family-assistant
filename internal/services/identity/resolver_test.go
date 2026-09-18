@@ -54,7 +54,7 @@ func TestResolverResolve_ReturnsActorWithPermissions(t *testing.T) {
 		permissionService,
 	)
 
-	got, err := resolver.Resolve(context.Background(), "profile-parent", "whatsapp")
+	got, err := resolver.Resolve(context.Background(), "profile-parent", " whatsapp ")
 	if err != nil {
 		t.Fatalf("resolve actor: %v", err)
 	}
@@ -62,7 +62,7 @@ func TestResolverResolve_ReturnsActorWithPermissions(t *testing.T) {
 	if got.UserID != "user-1" || got.MemberID != "member-1" || got.FamilyID != "family-1" || got.RoleID != "role-parent" || got.RoleName != "parent" {
 		t.Fatalf("unexpected actor: %+v", got)
 	}
-	if got.HermesProfileID != "profile-parent" || got.Channel != "whatsapp" {
+	if got.HermesProfileID != "profile-parent" || got.Channel != "whatsapp" || got.Source != "mcp" {
 		t.Fatalf("unexpected trusted metadata: %+v", got)
 	}
 	if !got.HasPermission("reminders:create") || !got.HasPermission("members:view") {
@@ -108,14 +108,14 @@ func TestResolverResolveUser_UsesUserIDAndTrustedRolePermissions(t *testing.T) {
 	}}
 	resolver := NewResolver(repo, permissionService)
 
-	got, err := resolver.ResolveUser(context.Background(), "user-1", "http")
+	got, err := resolver.ResolveUser(context.Background(), "user-1", " http ")
 	if err != nil {
 		t.Fatalf("resolve user: %v", err)
 	}
 	if got.UserID != "user-1" || got.MemberID != "member-1" || got.FamilyID != "family-1" || got.RoleID != "role-parent" || got.RoleName != "parent" {
 		t.Fatalf("unexpected actor: %+v", got)
 	}
-	if got.Channel != "http" || got.HermesProfileID != "" {
+	if got.Channel != "http" || got.HermesProfileID != "" || got.Source != "http" {
 		t.Fatalf("unexpected HTTP identity metadata: %+v", got)
 	}
 	if !got.HasPermission("reminders:create") {

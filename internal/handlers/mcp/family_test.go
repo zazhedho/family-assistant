@@ -14,6 +14,7 @@ func TestFamilyGetMemberReturnsOnlySafeMembershipSummary(t *testing.T) {
 		UserID:          "user-1",
 		MemberID:        "member-1",
 		FamilyID:        "family-1",
+		Source:          "mcp",
 		RoleID:          "role-parent",
 		RoleName:        "parent",
 		HermesProfileID: "profile-parent",
