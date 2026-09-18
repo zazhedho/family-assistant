@@ -134,8 +134,8 @@ func (s *service) Create(ctx context.Context, actor identity.ActorContext, input
 	}
 
 	s.writeAudit(ctx, actor, domainaudit.AuditEvent{
-		ActorUserID: actor.UserID,
-		ActorRole:   actor.RoleName,
+		ActorUserID: auditActorUserID(actor),
+		ActorRole:   auditActorRole(actor),
 		Action:      domainaudit.ActionCreate,
 		Resource:    "reminder",
 		ResourceID:  created.ID,
@@ -239,8 +239,8 @@ func (s *service) Complete(ctx context.Context, actor identity.ActorContext, rem
 	}
 
 	s.writeAudit(ctx, actor, domainaudit.AuditEvent{
-		ActorUserID: actor.UserID,
-		ActorRole:   actor.RoleName,
+		ActorUserID: auditActorUserID(actor),
+		ActorRole:   auditActorRole(actor),
 		Action:      domainaudit.ActionUpdate,
 		Resource:    "reminder",
 		ResourceID:  reminder.ID,
@@ -339,7 +339,24 @@ func reminderAuditMetadata(actor identity.ActorContext, reminder *domainreminder
 	if actor.HermesProfileID != "" {
 		metadata["agent_profile"] = actor.HermesProfileID
 	}
+	if actor.InitiatorUserID != "" && actor.InitiatorUserID != actor.UserID {
+		metadata["subject_user_id"] = actor.UserID
+	}
 	return metadata
+}
+
+func auditActorUserID(actor identity.ActorContext) string {
+	if strings.TrimSpace(actor.InitiatorUserID) != "" {
+		return strings.TrimSpace(actor.InitiatorUserID)
+	}
+	return actor.UserID
+}
+
+func auditActorRole(actor identity.ActorContext) string {
+	if strings.TrimSpace(actor.InitiatorRoleName) != "" {
+		return strings.TrimSpace(actor.InitiatorRoleName)
+	}
+	return actor.RoleName
 }
 
 func auditSource(actor identity.ActorContext) string {

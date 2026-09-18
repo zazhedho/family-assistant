@@ -19,6 +19,10 @@ func (s *familyMemberRepositoryStub) FindActiveByHermesProfile(context.Context, 
 	return s.member, s.err
 }
 
+func (s *familyMemberRepositoryStub) FindActiveByUserID(context.Context, string) (*domainfamilymember.ResolvedMember, error) {
+	return s.member, s.err
+}
+
 func (s *familyMemberRepositoryStub) FindActiveByID(context.Context, string, string) (*domainfamilymember.FamilyMember, error) {
 	return nil, errors.New("not implemented")
 }
@@ -87,6 +91,79 @@ func TestResolverResolve_RejectsUnknownProfile(t *testing.T) {
 	_, err := resolver.Resolve(context.Background(), "profile-unknown", "whatsapp")
 	if !errors.Is(err, ErrUnauthenticated) {
 		t.Fatalf("expected unauthenticated error, got %v", err)
+	}
+}
+
+func TestResolverResolveUser_UsesUserIDAndTrustedRolePermissions(t *testing.T) {
+	permissionService := &permissionServiceStub{permissions: []domainpermission.Permission{
+		{Name: "create_reminders", Resource: "reminders", Action: "create"},
+	}}
+	repo := &familyMemberRepositoryStub{member: &domainfamilymember.ResolvedMember{
+		UserID:          "user-1",
+		MemberID:        "member-1",
+		FamilyID:        "family-1",
+		RoleID:          "role-parent",
+		RoleName:        "parent",
+		HermesProfileID: "profile-parent",
+	}}
+	resolver := NewResolver(repo, permissionService)
+
+	got, err := resolver.ResolveUser(context.Background(), "user-1", "http")
+	if err != nil {
+		t.Fatalf("resolve user: %v", err)
+	}
+	if got.UserID != "user-1" || got.MemberID != "member-1" || got.FamilyID != "family-1" || got.RoleID != "role-parent" || got.RoleName != "parent" {
+		t.Fatalf("unexpected actor: %+v", got)
+	}
+	if got.Channel != "http" || got.HermesProfileID != "" {
+		t.Fatalf("unexpected HTTP identity metadata: %+v", got)
+	}
+	if !got.HasPermission("reminders:create") {
+		t.Fatalf("expected trusted role permission, got %#v", got.Permissions)
+	}
+	if permissionService.roleID != "role-parent" {
+		t.Fatalf("expected role permission lookup, got %q", permissionService.roleID)
+	}
+}
+
+func TestResolverResolveUserRejectsMissingActiveMembership(t *testing.T) {
+	resolver := NewResolver(&familyMemberRepositoryStub{err: gorm.ErrRecordNotFound}, &permissionServiceStub{})
+
+	_, err := resolver.ResolveUser(context.Background(), "user-unknown", "http")
+	if !errors.Is(err, ErrUnauthenticated) {
+		t.Fatalf("expected unauthenticated error, got %v", err)
+	}
+}
+
+func TestResolverRejectsAmbiguousUserMembershipAsUnauthenticated(t *testing.T) {
+	resolver := NewResolver(&familyMemberRepositoryStub{err: gorm.ErrRecordNotFound}, &permissionServiceStub{})
+
+	_, err := resolver.ResolveUser(context.Background(), "user-duplicate", "http")
+	if !errors.Is(err, ErrUnauthenticated) {
+		t.Fatalf("expected ambiguous membership to be unauthenticated, got %v", err)
+	}
+}
+
+func TestResolverReturnsControlledErrorWhenDependenciesMissing(t *testing.T) {
+	for _, tt := range []struct {
+		name     string
+		resolver *ResolverService
+	}{
+		{name: "nil resolver", resolver: nil},
+		{name: "nil repositories", resolver: NewResolver(nil, nil)},
+	} {
+		t.Run(tt.name+" profile", func(t *testing.T) {
+			_, err := tt.resolver.Resolve(context.Background(), "profile-parent", "whatsapp")
+			if !errors.Is(err, ErrResolverMisconfigured) {
+				t.Fatalf("Resolve error = %v, want ErrResolverMisconfigured", err)
+			}
+		})
+		t.Run(tt.name+" user", func(t *testing.T) {
+			_, err := tt.resolver.ResolveUser(context.Background(), "user-parent", "http")
+			if !errors.Is(err, ErrResolverMisconfigured) {
+				t.Fatalf("ResolveUser error = %v, want ErrResolverMisconfigured", err)
+			}
+		})
 	}
 }
 

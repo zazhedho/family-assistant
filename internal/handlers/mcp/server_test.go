@@ -16,7 +16,7 @@ func TestListenPropagatesBindErrorSynchronously(t *testing.T) {
 	server, bound, err := listenMCP(config.MCPConfig{
 		Addr:      "127.0.0.1:8081",
 		ServerKey: "secret",
-	}, nil, func(string, string) (net.Listener, error) {
+	}, nil, nil, func(string, string) (net.Listener, error) {
 		return nil, errAddressInUse
 	})
 	if !errors.Is(err, errAddressInUse) {
@@ -28,7 +28,7 @@ func TestListenPropagatesBindErrorSynchronously(t *testing.T) {
 }
 
 func TestHTTPServerUsesSafeTimeoutsWithoutWriteTimeout(t *testing.T) {
-	server := NewHTTPServer(config.MCPConfig{Addr: "127.0.0.1:0"}, nil)
+	server := NewHTTPServer(config.MCPConfig{Addr: "127.0.0.1:0"}, nil, nil)
 	if server.ReadHeaderTimeout <= 0 {
 		t.Fatal("expected MCP ReadHeaderTimeout")
 	}
@@ -48,7 +48,7 @@ func TestHTTPHandlerMountsMCPOnlyAtExactPath(t *testing.T) {
 			FamilyID: "family-1",
 			RoleName: "parent",
 		},
-	})
+	}, nil)
 
 	for _, path := range []string{"/", "/other", "/mcp/"} {
 		req := httptest.NewRequest(http.MethodPost, path, nil)

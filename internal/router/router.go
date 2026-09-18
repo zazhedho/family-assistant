@@ -17,6 +17,7 @@ import (
 	mediaHandler "github.com/zazhedho/family-assistant/internal/handlers/http/media"
 	menuHandler "github.com/zazhedho/family-assistant/internal/handlers/http/menu"
 	permissionHandler "github.com/zazhedho/family-assistant/internal/handlers/http/permission"
+	reminderHandler "github.com/zazhedho/family-assistant/internal/handlers/http/reminder"
 	roleHandler "github.com/zazhedho/family-assistant/internal/handlers/http/role"
 	sessionHandler "github.com/zazhedho/family-assistant/internal/handlers/http/session"
 	userHandler "github.com/zazhedho/family-assistant/internal/handlers/http/user"
@@ -37,11 +38,13 @@ import (
 	userRepo "github.com/zazhedho/family-assistant/internal/repositories/user"
 	appConfigSvc "github.com/zazhedho/family-assistant/internal/services/appconfig"
 	auditSvc "github.com/zazhedho/family-assistant/internal/services/audit"
+	serviceidentity "github.com/zazhedho/family-assistant/internal/services/identity"
 	locationSvc "github.com/zazhedho/family-assistant/internal/services/location"
 	mediaSvc "github.com/zazhedho/family-assistant/internal/services/media"
 	menuSvc "github.com/zazhedho/family-assistant/internal/services/menu"
 	otpSvc "github.com/zazhedho/family-assistant/internal/services/otp"
 	permissionSvc "github.com/zazhedho/family-assistant/internal/services/permission"
+	servicereminder "github.com/zazhedho/family-assistant/internal/services/reminder"
 	resetSvc "github.com/zazhedho/family-assistant/internal/services/reset"
 	roleSvc "github.com/zazhedho/family-assistant/internal/services/role"
 	sessionSvc "github.com/zazhedho/family-assistant/internal/services/session"
@@ -81,6 +84,10 @@ func NewRoutes() *Routes {
 
 func (r *Routes) auditService() interfaceaudit.ServiceAuditInterface {
 	return auditSvc.NewAuditService(auditRepo.NewAuditRepo(r.DB))
+}
+
+func (r *Routes) AuditService() interfaceaudit.ServiceAuditInterface {
+	return r.auditService()
 }
 
 func (r *Routes) permissionRepo() interfacepermission.RepoPermissionInterface {
@@ -273,6 +280,18 @@ func (r *Routes) AuditRoutes() {
 	audit := r.App.Group("/api/audit").Use(mdw.AuthMiddleware())
 	{
 		audit.GET("/:id", mdw.PermissionMiddleware("audits", "view"), h.GetByID)
+	}
+}
+
+func (r *Routes) ReminderRoutes(service servicereminder.Service, resolver serviceidentity.UserResolver) {
+	h := reminderHandler.NewReminderHandler(service, resolver)
+	mdw := r.middleware(r.permissionRepo())
+
+	reminder := r.App.Group("/api/reminders").Use(mdw.AuthMiddleware())
+	{
+		reminder.POST("", reminderHandler.FamilyPermissionMiddleware(resolver, "reminders:create"), h.Create)
+		reminder.GET("", reminderHandler.FamilyPermissionMiddleware(resolver, "reminders:list"), h.List)
+		reminder.PATCH("/:id/complete", reminderHandler.FamilyPermissionMiddleware(resolver, "reminders:update"), h.Complete)
 	}
 }
 

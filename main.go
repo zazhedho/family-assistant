@@ -10,9 +10,12 @@ import (
 	mcpHandler "github.com/zazhedho/family-assistant/internal/handlers/mcp"
 	familyMemberRepo "github.com/zazhedho/family-assistant/internal/repositories/familymember"
 	permissionRepo "github.com/zazhedho/family-assistant/internal/repositories/permission"
+	reminderRepo "github.com/zazhedho/family-assistant/internal/repositories/reminder"
 	"github.com/zazhedho/family-assistant/internal/router"
+	authorizationService "github.com/zazhedho/family-assistant/internal/services/authorization"
 	identityService "github.com/zazhedho/family-assistant/internal/services/identity"
 	permissionService "github.com/zazhedho/family-assistant/internal/services/permission"
+	reminderService "github.com/zazhedho/family-assistant/internal/services/reminder"
 	"github.com/zazhedho/family-assistant/pkg/config"
 	"github.com/zazhedho/family-assistant/pkg/logger"
 	"github.com/zazhedho/family-assistant/utils"
@@ -122,6 +125,14 @@ func run() error {
 	routes.LocationRoutes()
 	FailOnError(routes.MediaRoutes(), "Failed to initialize media routes")
 
+	familyMembers := familyMemberRepo.NewRepository(routes.DB)
+	permissions := permissionService.NewPermissionService(permissionRepo.NewPermissionRepo(routes.DB))
+	identityResolver := identityService.NewResolver(familyMembers, permissions)
+	reminders := reminderService.NewReminderService(
+		reminderRepo.NewRepository(routes.DB), familyMembers, authorizationService.NewAuthorizer(), routes.AuditService(),
+	)
+	routes.ReminderRoutes(reminders, identityResolver)
+
 	// Register session routes if Redis is available
 	if redisClient != nil {
 		routes.SessionRoutes()
@@ -135,11 +146,7 @@ func run() error {
 	var mcpServer *http.Server
 	var mcpListener net.Listener
 	if mcpConfig.Enabled {
-		identityResolver := identityService.NewResolver(
-			familyMemberRepo.NewRepository(routes.DB),
-			permissionService.NewPermissionService(permissionRepo.NewPermissionRepo(routes.DB)),
-		)
-		mcpServer, mcpListener, err = mcpHandler.Listen(mcpConfig, identityResolver)
+		mcpServer, mcpListener, err = mcpHandler.Listen(mcpConfig, identityResolver, reminders)
 		FailOnError(err, "Failed to bind MCP server")
 	}
 

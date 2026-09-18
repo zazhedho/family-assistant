@@ -90,6 +90,10 @@ func (s *familyMemberRepositoryStub) FindActiveByHermesProfile(context.Context, 
 	return nil, gorm.ErrRecordNotFound
 }
 
+func (s *familyMemberRepositoryStub) FindActiveByUserID(context.Context, string) (*domainfamilymember.ResolvedMember, error) {
+	return nil, gorm.ErrRecordNotFound
+}
+
 func (s *familyMemberRepositoryStub) FindActiveByID(_ context.Context, familyID, memberID string) (*domainfamilymember.FamilyMember, error) {
 	s.findCalls++
 	s.lastFamily, s.lastID = familyID, memberID
@@ -197,6 +201,29 @@ func TestCreateOwnPersonalReminderDerivesTrustedOwnershipAndAudits(t *testing.T)
 		if got := event.Metadata[key]; got != want {
 			t.Errorf("metadata[%q] = %v, want %q", key, got, want)
 		}
+	}
+}
+
+func TestCreateAuditUsesImpersonatorAsInitiatorAndPreservesSubject(t *testing.T) {
+	repo := &reminderRepositoryStub{}
+	auditService := &auditServiceStub{}
+	actor := reminderActor("parent", "member-effective", "family-1", "reminders:create")
+	actor.InitiatorUserID = "user-operator"
+	actor.InitiatorRoleName = "admin"
+	service := newReminderService(repo, &familyMemberRepositoryStub{}, authorization.NewAuthorizer(), auditService)
+
+	if _, err := service.Create(context.Background(), actor, validCreateInput()); err != nil {
+		t.Fatalf("create reminder: %v", err)
+	}
+	if len(auditService.events) != 1 {
+		t.Fatalf("expected one audit event, got %d", len(auditService.events))
+	}
+	event := auditService.events[0]
+	if event.ActorUserID != "user-operator" || event.ActorRole != "admin" {
+		t.Fatalf("audit initiator = %q/%q, want operator/admin", event.ActorUserID, event.ActorRole)
+	}
+	if got := event.Metadata["subject_user_id"]; got != actor.UserID {
+		t.Fatalf("subject_user_id = %v, want %q", got, actor.UserID)
 	}
 }
 
