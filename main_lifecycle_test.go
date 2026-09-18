@@ -56,8 +56,8 @@ func (a testAddr) String() string  { return string(a) }
 func TestServeServersStopsHTTPAndMCPOnContextCancellation(t *testing.T) {
 	httpListener := newBlockingListener()
 	mcpListener := newBlockingListener()
-	httpServer := &http.Server{Handler: http.NewServeMux()}
-	mcpServer := &http.Server{Handler: http.NewServeMux()}
+	httpServer := &http.Server{Handler: http.NewServeMux(), ReadHeaderTimeout: time.Second}
+	mcpServer := &http.Server{Handler: http.NewServeMux(), ReadHeaderTimeout: time.Second}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
@@ -88,7 +88,7 @@ func TestServeServersStopsHTTPAndMCPOnContextCancellation(t *testing.T) {
 }
 
 func TestRunServerLifecyclePropagatesUnexpectedServeError(t *testing.T) {
-	server := &http.Server{Handler: http.NewServeMux()}
+	server := &http.Server{Handler: http.NewServeMux(), ReadHeaderTimeout: time.Second}
 	err := runServerLifecycle(context.Background(), server, failingListener{}, nil, nil)
 	if !errors.Is(err, errTestServe) {
 		t.Fatalf("expected serve error %v, got %v", errTestServe, err)

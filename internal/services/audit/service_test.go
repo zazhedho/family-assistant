@@ -208,7 +208,7 @@ func TestStoreTypedMetadataOverridesConflictsAndRedacts(t *testing.T) {
 			"agent_profile":            "spoofed-profile",
 			"password":                 "do-not-store",
 			"nested": map[string]any{
-				"access_token": "also-do-not-store",
+				"access_token": "also-do-not-store", // #nosec G101 -- this fixture verifies sensitive-value redaction.
 			},
 		},
 	})

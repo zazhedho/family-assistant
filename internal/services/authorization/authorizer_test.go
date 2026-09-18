@@ -65,5 +65,5 @@ func TestAuthorizerRequiresPermissionForFamilyResource(t *testing.T) {
 }
 
 func TestAuthorizerImplementsInterface(t *testing.T) {
-	var _ Authorizer = NewAuthorizer()
+	var _ Authorizer = authorizer{}
 }

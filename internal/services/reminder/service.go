@@ -312,7 +312,7 @@ func validateReminderStatus(status domainreminder.Status) error {
 	case domainreminder.StatusPending, domainreminder.StatusCompleted, domainreminder.StatusCancelled:
 		return nil
 	default:
-		return &authorization.ValidationError{Field: "status", Reason: "must be PENDING, COMPLETED, or CANCELLED"}
+		return &authorization.ValidationError{Field: "status", Reason: "must be PENDING, COMPLETED, or CANCELLED"} //nolint:misspell // persisted API enum; preserve spelling.
 	}
 }
 

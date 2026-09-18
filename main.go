@@ -151,10 +151,11 @@ func run() error {
 	}
 
 	httpServer := &http.Server{
-		Addr:    fmt.Sprintf(":%s", port),
-		Handler: routes.App,
+		Addr:              fmt.Sprintf(":%s", port),
+		Handler:           routes.App,
+		ReadHeaderTimeout: 10 * time.Second,
 	}
-	httpListener, err := net.Listen("tcp", httpServer.Addr)
+	httpListener, err := (&net.ListenConfig{}).Listen(serverContext, "tcp", httpServer.Addr)
 	if err != nil {
 		if mcpListener != nil {
 			_ = mcpListener.Close()

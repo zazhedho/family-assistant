@@ -23,7 +23,7 @@ type ReminderCreateInput struct {
 
 type ReminderListInput struct {
 	Scope          string `json:"scope,omitempty" jsonschema:"PERSONAL or FAMILY"`
-	Status         string `json:"status,omitempty" jsonschema:"PENDING, COMPLETED, or CANCELLED"`
+	Status         string `json:"status,omitempty" jsonschema:"PENDING, COMPLETED, or CANCELLED"` //nolint:misspell // persisted API enum; preserve spelling.
 	From           string `json:"from,omitempty" jsonschema:"RFC3339 lower bound"`
 	To             string `json:"to,omitempty" jsonschema:"RFC3339 upper bound"`
 	TargetMemberID string `json:"target_member_id,omitempty" jsonschema:"optional family member target"`

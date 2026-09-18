@@ -14,9 +14,8 @@ import (
 )
 
 func TestSecretDigestUsesFixedSizeHashForComparison(t *testing.T) {
-	digest := secretDigest("short")
-	if len(digest) != sha256.Size {
-		t.Fatalf("expected fixed SHA-256 digest size %d, got %d", sha256.Size, len(digest))
+	if got := len(secretDigest("short")); got != sha256.Size {
+		t.Fatalf("expected fixed SHA-256 digest size %d, got %d", sha256.Size, got)
 	}
 	if !constantTimeEqual("short", "short") {
 		t.Fatal("expected equal secrets to compare equal")

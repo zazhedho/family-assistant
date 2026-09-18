@@ -14,7 +14,7 @@ type Status string
 const (
 	StatusPending   Status = "PENDING"
 	StatusCompleted Status = "COMPLETED"
-	StatusCancelled Status = "CANCELLED"
+	StatusCancelled Status = "CANCELLED" //nolint:misspell // persisted API enum; preserve spelling.
 )
 
 func (Reminder) TableName() string {

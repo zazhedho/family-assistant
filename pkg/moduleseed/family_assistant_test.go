@@ -82,7 +82,7 @@ func TestFamilyAssistantMigrationUsesRenderedSeed(t *testing.T) {
 	}
 
 	migrationPath := filepath.Join("..", "..", "migrations", "000008_seed_family_assistant_rbac.up.sql")
-	contents, err := os.ReadFile(migrationPath)
+	contents, err := os.ReadFile(migrationPath) // #nosec G304 -- path is fixed to the repository migration fixture.
 	if err != nil {
 		t.Fatalf("read family assistant migration: %v", err)
 	}
@@ -154,7 +154,7 @@ func TestFamilyAssistantSeedUsesExactCanonicalGrantsAndSafeRollback(t *testing.T
 	}
 
 	downPath := filepath.Join("..", "..", "migrations", "000008_seed_family_assistant_rbac.down.sql")
-	down, err := os.ReadFile(downPath)
+	down, err := os.ReadFile(downPath) // #nosec G304 -- path is fixed to the repository migration fixture.
 	if err != nil {
 		t.Fatalf("read family assistant down migration: %v", err)
 	}

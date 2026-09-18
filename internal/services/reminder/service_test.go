@@ -112,21 +112,6 @@ func (s *familyMemberRepositoryStub) FindActiveByID(_ context.Context, familyID,
 	return &copy, nil
 }
 
-type authorizationCall struct {
-	permission string
-	resource   authorization.Resource
-}
-
-type authorizerStub struct {
-	calls []authorizationCall
-	err   error
-}
-
-func (s *authorizerStub) Authorize(_ context.Context, _ identity.ActorContext, permission string, resource authorization.Resource) error {
-	s.calls = append(s.calls, authorizationCall{permission: permission, resource: resource})
-	return s.err
-}
-
 type auditServiceStub struct {
 	events []domainaudit.AuditEvent
 }
@@ -816,7 +801,7 @@ func TestCompleteRejectsUnauthorizedTerminalAndCrossFamilyReminders(t *testing.T
 			wantErr:  ErrConflict,
 		},
 		{
-			name:     "cancelled",
+			name:     "canceled",
 			actor:    reminderActor("parent", "parent-1", "family-1", "reminders:update"),
 			reminder: &domainreminder.Reminder{ID: reminderUUID, FamilyID: "family-1", OwnerMemberID: "parent-1", Scope: domainreminder.ScopePersonal, Status: domainreminder.StatusCancelled},
 			wantErr:  ErrConflict,
