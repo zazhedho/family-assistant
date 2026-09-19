@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"testing"
 
-	servicereminder "github.com/zazhedho/family-assistant/internal/services/reminder"
+	servicereminder "family-assistant/internal/services/reminder"
 )
 
 func TestMapToolErrorMapsReminderConflictSafely(t *testing.T) {

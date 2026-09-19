@@ -4,7 +4,7 @@ import (
 	"context"
 	"strings"
 
-	serviceidentity "github.com/zazhedho/family-assistant/internal/services/identity"
+	serviceidentity "family-assistant/internal/services/identity"
 )
 
 type Authorizer interface {

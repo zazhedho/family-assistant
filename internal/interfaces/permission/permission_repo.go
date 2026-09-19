@@ -2,8 +2,8 @@ package interfacepermission
 
 import (
 	"context"
-	domainpermission "github.com/zazhedho/family-assistant/internal/domain/permission"
-	interfacegeneric "github.com/zazhedho/family-assistant/internal/interfaces/generic"
+	domainpermission "family-assistant/internal/domain/permission"
+	interfacegeneric "family-assistant/internal/interfaces/generic"
 )
 
 type RepoPermissionInterface interface {

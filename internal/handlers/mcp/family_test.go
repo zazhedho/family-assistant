@@ -6,7 +6,7 @@ import (
 	"errors"
 	"testing"
 
-	serviceidentity "github.com/zazhedho/family-assistant/internal/services/identity"
+	serviceidentity "family-assistant/internal/services/identity"
 )
 
 func TestFamilyGetMemberReturnsOnlySafeMembershipSummary(t *testing.T) {

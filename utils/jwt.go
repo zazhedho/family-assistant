@@ -2,8 +2,8 @@ package utils
 
 import (
 	"errors"
+	domainuser "family-assistant/internal/domain/user"
 	"fmt"
-	domainuser "github.com/zazhedho/family-assistant/internal/domain/user"
 	"strings"
 	"time"
 

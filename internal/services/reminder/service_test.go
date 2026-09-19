@@ -8,13 +8,14 @@ import (
 	"testing"
 	"time"
 
-	domainaudit "github.com/zazhedho/family-assistant/internal/domain/audit"
-	domainfamilymember "github.com/zazhedho/family-assistant/internal/domain/familymember"
-	domainreminder "github.com/zazhedho/family-assistant/internal/domain/reminder"
-	serviceaudit "github.com/zazhedho/family-assistant/internal/services/audit"
-	"github.com/zazhedho/family-assistant/internal/services/authorization"
-	identity "github.com/zazhedho/family-assistant/internal/services/identity"
-	"github.com/zazhedho/family-assistant/pkg/filter"
+	domainaudit "family-assistant/internal/domain/audit"
+	domainfamilymember "family-assistant/internal/domain/familymember"
+	domainreminder "family-assistant/internal/domain/reminder"
+	serviceaudit "family-assistant/internal/services/audit"
+	"family-assistant/internal/services/authorization"
+	identity "family-assistant/internal/services/identity"
+	"family-assistant/pkg/filter"
+
 	"gorm.io/gorm"
 )
 

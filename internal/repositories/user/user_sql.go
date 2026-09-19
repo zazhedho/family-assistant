@@ -2,10 +2,10 @@ package repositoryuser
 
 import (
 	"context"
-	domainuser "github.com/zazhedho/family-assistant/internal/domain/user"
-	interfaceuser "github.com/zazhedho/family-assistant/internal/interfaces/user"
-	repositorygeneric "github.com/zazhedho/family-assistant/internal/repositories/generic"
-	"github.com/zazhedho/family-assistant/pkg/filter"
+	domainuser "family-assistant/internal/domain/user"
+	interfaceuser "family-assistant/internal/interfaces/user"
+	repositorygeneric "family-assistant/internal/repositories/generic"
+	"family-assistant/pkg/filter"
 
 	"gorm.io/gorm"
 )

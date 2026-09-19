@@ -2,11 +2,11 @@ package servicesession
 
 import (
 	"context"
+	domainsession "family-assistant/internal/domain/session"
+	domainuser "family-assistant/internal/domain/user"
+	interfacesession "family-assistant/internal/interfaces/session"
+	"family-assistant/utils"
 	"fmt"
-	domainsession "github.com/zazhedho/family-assistant/internal/domain/session"
-	domainuser "github.com/zazhedho/family-assistant/internal/domain/user"
-	interfacesession "github.com/zazhedho/family-assistant/internal/interfaces/session"
-	"github.com/zazhedho/family-assistant/utils"
 	"time"
 
 	"github.com/google/uuid"

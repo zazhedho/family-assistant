@@ -6,11 +6,12 @@ import (
 	"strings"
 	"time"
 
+	domainreminder "family-assistant/internal/domain/reminder"
+	serviceauthorization "family-assistant/internal/services/authorization"
+	serviceidentity "family-assistant/internal/services/identity"
+	servicereminder "family-assistant/internal/services/reminder"
+
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
-	domainreminder "github.com/zazhedho/family-assistant/internal/domain/reminder"
-	serviceauthorization "github.com/zazhedho/family-assistant/internal/services/authorization"
-	serviceidentity "github.com/zazhedho/family-assistant/internal/services/identity"
-	servicereminder "github.com/zazhedho/family-assistant/internal/services/reminder"
 )
 
 type ReminderCreateInput struct {

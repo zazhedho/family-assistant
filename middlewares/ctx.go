@@ -1,7 +1,7 @@
 package middlewares
 
 import (
-	"github.com/zazhedho/family-assistant/utils"
+	"family-assistant/utils"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"

@@ -3,12 +3,12 @@ package servicepermission
 import (
 	"context"
 	"errors"
-	permissioncache "github.com/zazhedho/family-assistant/internal/cache/permission"
-	domainpermission "github.com/zazhedho/family-assistant/internal/domain/permission"
-	"github.com/zazhedho/family-assistant/internal/dto"
-	interfacepermission "github.com/zazhedho/family-assistant/internal/interfaces/permission"
-	"github.com/zazhedho/family-assistant/pkg/filter"
-	"github.com/zazhedho/family-assistant/utils"
+	permissioncache "family-assistant/internal/cache/permission"
+	domainpermission "family-assistant/internal/domain/permission"
+	"family-assistant/internal/dto"
+	interfacepermission "family-assistant/internal/interfaces/permission"
+	"family-assistant/pkg/filter"
+	"family-assistant/utils"
 	"time"
 )
 

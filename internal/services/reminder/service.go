@@ -7,13 +7,14 @@ import (
 	"strings"
 	"time"
 
+	domainaudit "family-assistant/internal/domain/audit"
+	domainfamilymember "family-assistant/internal/domain/familymember"
+	domainreminder "family-assistant/internal/domain/reminder"
+	"family-assistant/internal/services/authorization"
+	identity "family-assistant/internal/services/identity"
+	"family-assistant/pkg/logger"
+
 	"github.com/google/uuid"
-	domainaudit "github.com/zazhedho/family-assistant/internal/domain/audit"
-	domainfamilymember "github.com/zazhedho/family-assistant/internal/domain/familymember"
-	domainreminder "github.com/zazhedho/family-assistant/internal/domain/reminder"
-	"github.com/zazhedho/family-assistant/internal/services/authorization"
-	identity "github.com/zazhedho/family-assistant/internal/services/identity"
-	"github.com/zazhedho/family-assistant/pkg/logger"
 	"gorm.io/gorm"
 )
 

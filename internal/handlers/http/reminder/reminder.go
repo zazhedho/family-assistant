@@ -9,14 +9,15 @@ import (
 	"strings"
 	"time"
 
+	"family-assistant/internal/authscope"
+	domainreminder "family-assistant/internal/domain/reminder"
+	serviceauthorization "family-assistant/internal/services/authorization"
+	serviceidentity "family-assistant/internal/services/identity"
+	servicereminder "family-assistant/internal/services/reminder"
+	"family-assistant/pkg/response"
+	"family-assistant/utils"
+
 	"github.com/gin-gonic/gin"
-	"github.com/zazhedho/family-assistant/internal/authscope"
-	domainreminder "github.com/zazhedho/family-assistant/internal/domain/reminder"
-	serviceauthorization "github.com/zazhedho/family-assistant/internal/services/authorization"
-	serviceidentity "github.com/zazhedho/family-assistant/internal/services/identity"
-	servicereminder "github.com/zazhedho/family-assistant/internal/services/reminder"
-	"github.com/zazhedho/family-assistant/pkg/response"
-	"github.com/zazhedho/family-assistant/utils"
 	"gorm.io/gorm"
 )
 

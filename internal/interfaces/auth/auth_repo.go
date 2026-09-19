@@ -2,7 +2,7 @@ package interfaceauth
 
 import (
 	"context"
-	domainauth "github.com/zazhedho/family-assistant/internal/domain/auth"
+	domainauth "family-assistant/internal/domain/auth"
 	"time"
 )
 

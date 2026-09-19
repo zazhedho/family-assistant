@@ -3,8 +3,8 @@ package repositorygeneric
 import (
 	"context"
 	"errors"
+	"family-assistant/pkg/filter"
 	"fmt"
-	"github.com/zazhedho/family-assistant/pkg/filter"
 	"strings"
 	"time"
 

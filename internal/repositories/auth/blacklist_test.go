@@ -3,7 +3,7 @@ package repositoryauth
 import (
 	"context"
 	"errors"
-	domainauth "github.com/zazhedho/family-assistant/internal/domain/auth"
+	domainauth "family-assistant/internal/domain/auth"
 	"testing"
 	"time"
 )

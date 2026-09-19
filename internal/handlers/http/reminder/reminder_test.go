@@ -10,12 +10,13 @@ import (
 	"testing"
 	"time"
 
+	"family-assistant/internal/authscope"
+	domainreminder "family-assistant/internal/domain/reminder"
+	serviceauthorization "family-assistant/internal/services/authorization"
+	serviceidentity "family-assistant/internal/services/identity"
+	servicereminder "family-assistant/internal/services/reminder"
+
 	"github.com/gin-gonic/gin"
-	"github.com/zazhedho/family-assistant/internal/authscope"
-	domainreminder "github.com/zazhedho/family-assistant/internal/domain/reminder"
-	serviceauthorization "github.com/zazhedho/family-assistant/internal/services/authorization"
-	serviceidentity "github.com/zazhedho/family-assistant/internal/services/identity"
-	servicereminder "github.com/zazhedho/family-assistant/internal/services/reminder"
 )
 
 const httpReminderID = "00000000-0000-0000-0000-000000000101"

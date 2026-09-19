@@ -3,9 +3,9 @@ package servicepermission
 import (
 	"context"
 	"errors"
-	domainpermission "github.com/zazhedho/family-assistant/internal/domain/permission"
-	"github.com/zazhedho/family-assistant/internal/dto"
-	"github.com/zazhedho/family-assistant/pkg/filter"
+	domainpermission "family-assistant/internal/domain/permission"
+	"family-assistant/internal/dto"
+	"family-assistant/pkg/filter"
 	"testing"
 )
 

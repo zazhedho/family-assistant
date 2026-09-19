@@ -3,10 +3,10 @@ package servicemenu
 import (
 	"context"
 	"errors"
-	domainmenu "github.com/zazhedho/family-assistant/internal/domain/menu"
-	domainpermission "github.com/zazhedho/family-assistant/internal/domain/permission"
-	"github.com/zazhedho/family-assistant/internal/dto"
-	"github.com/zazhedho/family-assistant/pkg/filter"
+	domainmenu "family-assistant/internal/domain/menu"
+	domainpermission "family-assistant/internal/domain/permission"
+	"family-assistant/internal/dto"
+	"family-assistant/pkg/filter"
 	"testing"
 )
 

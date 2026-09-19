@@ -7,8 +7,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	serviceidentity "github.com/zazhedho/family-assistant/internal/services/identity"
-	"github.com/zazhedho/family-assistant/pkg/config"
+	serviceidentity "family-assistant/internal/services/identity"
+	"family-assistant/pkg/config"
 )
 
 func TestListenPropagatesBindErrorSynchronously(t *testing.T) {

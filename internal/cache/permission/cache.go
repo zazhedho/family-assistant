@@ -3,7 +3,7 @@ package permissioncache
 import (
 	"context"
 	"encoding/json"
-	"github.com/zazhedho/family-assistant/utils"
+	"family-assistant/utils"
 	"strings"
 	"time"
 

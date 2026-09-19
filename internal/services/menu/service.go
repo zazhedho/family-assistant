@@ -2,12 +2,12 @@ package servicemenu
 
 import (
 	"context"
-	domainmenu "github.com/zazhedho/family-assistant/internal/domain/menu"
-	"github.com/zazhedho/family-assistant/internal/dto"
-	interfacemenu "github.com/zazhedho/family-assistant/internal/interfaces/menu"
-	interfacepermission "github.com/zazhedho/family-assistant/internal/interfaces/permission"
-	serviceshared "github.com/zazhedho/family-assistant/internal/services/shared"
-	"github.com/zazhedho/family-assistant/pkg/filter"
+	domainmenu "family-assistant/internal/domain/menu"
+	"family-assistant/internal/dto"
+	interfacemenu "family-assistant/internal/interfaces/menu"
+	interfacepermission "family-assistant/internal/interfaces/permission"
+	serviceshared "family-assistant/internal/services/shared"
+	"family-assistant/pkg/filter"
 	"time"
 )
 

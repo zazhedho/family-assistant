@@ -1,6 +1,6 @@
 package authorization
 
-import serviceidentity "github.com/zazhedho/family-assistant/internal/services/identity"
+import serviceidentity "family-assistant/internal/services/identity"
 
 func allowsPersonalAccess(actor serviceidentity.ActorContext, resource Resource) bool {
 	if actor.MemberID != "" && actor.MemberID == resource.OwnerMemberID {

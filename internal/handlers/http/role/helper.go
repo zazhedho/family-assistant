@@ -2,8 +2,8 @@ package handlerrole
 
 import (
 	"errors"
-	"github.com/zazhedho/family-assistant/pkg/messages"
-	"github.com/zazhedho/family-assistant/pkg/response"
+	"family-assistant/pkg/messages"
+	"family-assistant/pkg/response"
 	"net/http"
 	"strings"
 

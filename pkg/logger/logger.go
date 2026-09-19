@@ -12,7 +12,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/zazhedho/family-assistant/utils"
+	"family-assistant/utils"
 
 	"log/slog"
 

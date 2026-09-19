@@ -4,9 +4,10 @@ import (
 	"errors"
 	"log/slog"
 
-	serviceauthorization "github.com/zazhedho/family-assistant/internal/services/authorization"
-	serviceidentity "github.com/zazhedho/family-assistant/internal/services/identity"
-	servicereminder "github.com/zazhedho/family-assistant/internal/services/reminder"
+	serviceauthorization "family-assistant/internal/services/authorization"
+	serviceidentity "family-assistant/internal/services/identity"
+	servicereminder "family-assistant/internal/services/reminder"
+
 	"gorm.io/gorm"
 )
 

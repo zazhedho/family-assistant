@@ -10,8 +10,8 @@ import (
 	"net/http"
 	"strings"
 
-	serviceidentity "github.com/zazhedho/family-assistant/internal/services/identity"
-	"github.com/zazhedho/family-assistant/pkg/config"
+	serviceidentity "family-assistant/internal/services/identity"
+	"family-assistant/pkg/config"
 )
 
 type ActorContext = serviceidentity.ActorContext

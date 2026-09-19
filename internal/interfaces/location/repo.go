@@ -1,7 +1,7 @@
 package interfacelocation
 
 import "context"
-import domainlocation "github.com/zazhedho/family-assistant/internal/domain/location"
+import domainlocation "family-assistant/internal/domain/location"
 
 type RepoLocationInterface interface {
 	ListProvinces(ctx context.Context) ([]domainlocation.Province, error)

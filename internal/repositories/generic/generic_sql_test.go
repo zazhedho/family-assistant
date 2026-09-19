@@ -9,7 +9,7 @@ import (
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 
-	"github.com/zazhedho/family-assistant/pkg/filter"
+	"family-assistant/pkg/filter"
 )
 
 type sampleRecord struct {

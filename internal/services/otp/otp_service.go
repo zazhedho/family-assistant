@@ -3,12 +3,12 @@ package serviceotp
 import (
 	"context"
 	"errors"
+	interfaceotp "family-assistant/internal/interfaces/otp"
+	"family-assistant/pkg/config"
+	"family-assistant/pkg/logger"
+	"family-assistant/pkg/mailer"
+	"family-assistant/utils"
 	"fmt"
-	interfaceotp "github.com/zazhedho/family-assistant/internal/interfaces/otp"
-	"github.com/zazhedho/family-assistant/pkg/config"
-	"github.com/zazhedho/family-assistant/pkg/logger"
-	"github.com/zazhedho/family-assistant/pkg/mailer"
-	"github.com/zazhedho/family-assistant/utils"
 	"strings"
 	"time"
 

@@ -1,9 +1,9 @@
 package middlewares
 
 import (
+	"family-assistant/internal/authscope"
+	"family-assistant/pkg/logger"
 	"fmt"
-	"github.com/zazhedho/family-assistant/internal/authscope"
-	"github.com/zazhedho/family-assistant/pkg/logger"
 	"net/http"
 	"time"
 

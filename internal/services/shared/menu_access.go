@@ -2,10 +2,10 @@ package serviceshared
 
 import (
 	"context"
-	"github.com/zazhedho/family-assistant/internal/authscope"
-	domainmenu "github.com/zazhedho/family-assistant/internal/domain/menu"
-	domainpermission "github.com/zazhedho/family-assistant/internal/domain/permission"
-	interfacepermission "github.com/zazhedho/family-assistant/internal/interfaces/permission"
+	"family-assistant/internal/authscope"
+	domainmenu "family-assistant/internal/domain/menu"
+	domainpermission "family-assistant/internal/domain/permission"
+	interfacepermission "family-assistant/internal/interfaces/permission"
 	"strings"
 )
 

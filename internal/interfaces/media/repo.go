@@ -3,7 +3,7 @@ package interfacemedia
 import (
 	"context"
 
-	domainmedia "github.com/zazhedho/family-assistant/internal/domain/media"
+	domainmedia "family-assistant/internal/domain/media"
 )
 
 type RepoMediaInterface interface {

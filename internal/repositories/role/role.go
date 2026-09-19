@@ -2,11 +2,11 @@ package repositoryrole
 
 import (
 	"context"
-	domainrole "github.com/zazhedho/family-assistant/internal/domain/role"
-	interfacerole "github.com/zazhedho/family-assistant/internal/interfaces/role"
-	repositorygeneric "github.com/zazhedho/family-assistant/internal/repositories/generic"
-	"github.com/zazhedho/family-assistant/pkg/filter"
-	"github.com/zazhedho/family-assistant/utils"
+	domainrole "family-assistant/internal/domain/role"
+	interfacerole "family-assistant/internal/interfaces/role"
+	repositorygeneric "family-assistant/internal/repositories/generic"
+	"family-assistant/pkg/filter"
+	"family-assistant/utils"
 
 	"gorm.io/gorm"
 )

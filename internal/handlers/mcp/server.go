@@ -7,10 +7,11 @@ import (
 	"strings"
 	"time"
 
+	serviceidentity "family-assistant/internal/services/identity"
+	servicereminder "family-assistant/internal/services/reminder"
+	"family-assistant/pkg/config"
+
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
-	serviceidentity "github.com/zazhedho/family-assistant/internal/services/identity"
-	servicereminder "github.com/zazhedho/family-assistant/internal/services/reminder"
-	"github.com/zazhedho/family-assistant/pkg/config"
 )
 
 func NewHTTPHandler(cfg config.MCPConfig, resolver serviceidentity.Resolver, reminderService servicereminder.Service) http.Handler {

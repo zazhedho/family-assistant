@@ -4,7 +4,7 @@ import (
 	"errors"
 	"strings"
 
-	"github.com/zazhedho/family-assistant/utils"
+	"family-assistant/utils"
 )
 
 type MCPConfig struct {

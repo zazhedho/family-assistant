@@ -1,7 +1,7 @@
 package interfacelocation
 
 import "context"
-import "github.com/zazhedho/family-assistant/internal/dto"
+import "family-assistant/internal/dto"
 
 type ServiceLocationInterface interface {
 	GetProvince(ctx context.Context) ([]dto.Location, error)

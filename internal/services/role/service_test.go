@@ -3,13 +3,13 @@ package servicerole
 import (
 	"context"
 	"errors"
-	"github.com/zazhedho/family-assistant/internal/authscope"
-	domainmenu "github.com/zazhedho/family-assistant/internal/domain/menu"
-	domainpermission "github.com/zazhedho/family-assistant/internal/domain/permission"
-	domainrole "github.com/zazhedho/family-assistant/internal/domain/role"
-	"github.com/zazhedho/family-assistant/internal/dto"
-	"github.com/zazhedho/family-assistant/pkg/filter"
-	"github.com/zazhedho/family-assistant/utils"
+	"family-assistant/internal/authscope"
+	domainmenu "family-assistant/internal/domain/menu"
+	domainpermission "family-assistant/internal/domain/permission"
+	domainrole "family-assistant/internal/domain/role"
+	"family-assistant/internal/dto"
+	"family-assistant/pkg/filter"
+	"family-assistant/utils"
 	"testing"
 )
 

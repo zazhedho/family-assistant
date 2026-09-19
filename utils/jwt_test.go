@@ -2,7 +2,7 @@ package utils
 
 import (
 	"errors"
-	domainuser "github.com/zazhedho/family-assistant/internal/domain/user"
+	domainuser "family-assistant/internal/domain/user"
 	"net/http/httptest"
 	"testing"
 	"time"

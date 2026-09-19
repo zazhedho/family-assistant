@@ -9,7 +9,7 @@ import (
 
 	"github.com/redis/go-redis/v9"
 
-	"github.com/zazhedho/family-assistant/utils"
+	"family-assistant/utils"
 )
 
 func ValidateStartupConfig(port string) error {

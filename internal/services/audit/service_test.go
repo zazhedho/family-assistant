@@ -4,8 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	domainaudit "github.com/zazhedho/family-assistant/internal/domain/audit"
-	"github.com/zazhedho/family-assistant/pkg/filter"
+	domainaudit "family-assistant/internal/domain/audit"
+	"family-assistant/pkg/filter"
 	"strings"
 	"testing"
 )

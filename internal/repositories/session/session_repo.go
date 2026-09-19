@@ -4,9 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	domainsession "family-assistant/internal/domain/session"
+	"family-assistant/pkg/logger"
 	"fmt"
-	domainsession "github.com/zazhedho/family-assistant/internal/domain/session"
-	"github.com/zazhedho/family-assistant/pkg/logger"
 	"time"
 
 	"github.com/redis/go-redis/v9"

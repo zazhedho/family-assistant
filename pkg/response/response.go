@@ -1,8 +1,8 @@
 package response
 
 import (
+	"family-assistant/pkg/messages"
 	"fmt"
-	"github.com/zazhedho/family-assistant/pkg/messages"
 	"math"
 	"net/http"
 

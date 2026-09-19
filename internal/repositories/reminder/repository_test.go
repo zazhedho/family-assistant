@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	domainreminder "github.com/zazhedho/family-assistant/internal/domain/reminder"
+	domainreminder "family-assistant/internal/domain/reminder"
 
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/google/uuid"

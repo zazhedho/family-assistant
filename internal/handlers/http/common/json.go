@@ -5,10 +5,10 @@ import (
 	"net/http"
 	"reflect"
 
-	"github.com/zazhedho/family-assistant/pkg/logger"
-	"github.com/zazhedho/family-assistant/pkg/messages"
-	"github.com/zazhedho/family-assistant/pkg/response"
-	"github.com/zazhedho/family-assistant/utils"
+	"family-assistant/pkg/logger"
+	"family-assistant/pkg/messages"
+	"family-assistant/pkg/response"
+	"family-assistant/utils"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"

@@ -2,10 +2,10 @@ package repositoryappconfig
 
 import (
 	"context"
-	domainappconfig "github.com/zazhedho/family-assistant/internal/domain/appconfig"
-	interfaceappconfig "github.com/zazhedho/family-assistant/internal/interfaces/appconfig"
-	repositorygeneric "github.com/zazhedho/family-assistant/internal/repositories/generic"
-	"github.com/zazhedho/family-assistant/pkg/filter"
+	domainappconfig "family-assistant/internal/domain/appconfig"
+	interfaceappconfig "family-assistant/internal/interfaces/appconfig"
+	repositorygeneric "family-assistant/internal/repositories/generic"
+	"family-assistant/pkg/filter"
 
 	"gorm.io/gorm"
 )

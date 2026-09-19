@@ -2,8 +2,8 @@ package interfaceuser
 
 import (
 	"context"
-	domainuser "github.com/zazhedho/family-assistant/internal/domain/user"
-	interfacegeneric "github.com/zazhedho/family-assistant/internal/interfaces/generic"
+	domainuser "family-assistant/internal/domain/user"
+	interfacegeneric "family-assistant/internal/interfaces/generic"
 )
 
 type RepoUserInterface interface {

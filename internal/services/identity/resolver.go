@@ -5,9 +5,10 @@ import (
 	"errors"
 	"strings"
 
-	"github.com/zazhedho/family-assistant/internal/authscope"
-	domainfamilymember "github.com/zazhedho/family-assistant/internal/domain/familymember"
-	domainpermission "github.com/zazhedho/family-assistant/internal/domain/permission"
+	"family-assistant/internal/authscope"
+	domainfamilymember "family-assistant/internal/domain/familymember"
+	domainpermission "family-assistant/internal/domain/permission"
+
 	"gorm.io/gorm"
 )
 

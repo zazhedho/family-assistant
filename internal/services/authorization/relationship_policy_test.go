@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	identity "github.com/zazhedho/family-assistant/internal/services/identity"
+	identity "family-assistant/internal/services/identity"
 )
 
 func TestRelationshipPolicy(t *testing.T) {

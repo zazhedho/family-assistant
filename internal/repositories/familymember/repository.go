@@ -3,8 +3,9 @@ package repositoryfamilymember
 import (
 	"context"
 
-	domainfamily "github.com/zazhedho/family-assistant/internal/domain/family"
-	domainfamilymember "github.com/zazhedho/family-assistant/internal/domain/familymember"
+	domainfamily "family-assistant/internal/domain/family"
+	domainfamilymember "family-assistant/internal/domain/familymember"
+
 	"gorm.io/gorm"
 )
 

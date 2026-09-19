@@ -5,8 +5,9 @@ import (
 	"strings"
 	"time"
 
-	domainreminder "github.com/zazhedho/family-assistant/internal/domain/reminder"
-	"github.com/zazhedho/family-assistant/utils"
+	domainreminder "family-assistant/internal/domain/reminder"
+	"family-assistant/utils"
+
 	"gorm.io/gorm"
 )
 

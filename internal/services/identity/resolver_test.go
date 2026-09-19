@@ -5,8 +5,9 @@ import (
 	"errors"
 	"testing"
 
-	domainfamilymember "github.com/zazhedho/family-assistant/internal/domain/familymember"
-	domainpermission "github.com/zazhedho/family-assistant/internal/domain/permission"
+	domainfamilymember "family-assistant/internal/domain/familymember"
+	domainpermission "family-assistant/internal/domain/permission"
+
 	"gorm.io/gorm"
 )
 

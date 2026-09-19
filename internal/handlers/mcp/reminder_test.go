@@ -7,9 +7,9 @@ import (
 	"testing"
 	"time"
 
-	domainreminder "github.com/zazhedho/family-assistant/internal/domain/reminder"
-	serviceidentity "github.com/zazhedho/family-assistant/internal/services/identity"
-	servicereminder "github.com/zazhedho/family-assistant/internal/services/reminder"
+	domainreminder "family-assistant/internal/domain/reminder"
+	serviceidentity "family-assistant/internal/services/identity"
+	servicereminder "family-assistant/internal/services/reminder"
 )
 
 const (
