@@ -58,3 +58,20 @@ func TestRenderSQLRejectsMissingRequiredFields(t *testing.T) {
 		t.Fatalf("expected display_name validation error, got %v", err)
 	}
 }
+
+func TestRenderSpaceSQLIsStable(t *testing.T) {
+	first, err := RenderSpaceSQL()
+	if err != nil {
+		t.Fatalf("render first seed: %v", err)
+	}
+	second, err := RenderSpaceSQL()
+	if err != nil {
+		t.Fatalf("render second seed: %v", err)
+	}
+	if first != second {
+		t.Fatal("Space seed must be deterministic")
+	}
+	if strings.Contains(first, "gen_random_uuid()") {
+		t.Fatal("Space seed must not generate random seed IDs")
+	}
+}

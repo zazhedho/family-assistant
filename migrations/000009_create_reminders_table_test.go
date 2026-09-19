@@ -2,46 +2,57 @@ package migrations
 
 import (
 	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 )
 
-func TestReminderMigrationUsesSameFamilyCompositeForeignKeys(t *testing.T) {
-	up, err := os.ReadFile(filepath.Join("000009_create_reminders_table.up.sql"))
-	if err != nil {
-		t.Fatalf("read up migration: %v", err)
-	}
-	down, err := os.ReadFile(filepath.Join("000009_create_reminders_table.down.sql"))
-	if err != nil {
-		t.Fatalf("read down migration: %v", err)
-	}
-
-	upSQL := string(up)
+func TestSpaceFoundationMigration(t *testing.T) {
+	up := readMigration(t, "000007_create_space_foundation.up.sql")
 	for _, required := range []string{
-		"CREATE UNIQUE INDEX IF NOT EXISTS ux_family_members_family_id_id",
-		"ON family_members (family_id, id);",
-		"CONSTRAINT fk_reminders_owner_family FOREIGN KEY (family_id, owner_member_id)",
-		"CONSTRAINT fk_reminders_creator_family FOREIGN KEY (family_id, created_by_member_id)",
-		"REFERENCES family_members(family_id, id)",
+		"ADD COLUMN IF NOT EXISTS birth_date DATE",
+		"CREATE TABLE IF NOT EXISTS spaces",
+		"CREATE UNIQUE INDEX ux_spaces_personal_created_by",
+		"CREATE TABLE IF NOT EXISTS space_members",
+		"CREATE TABLE IF NOT EXISTS space_invitations",
+		"CREATE TABLE IF NOT EXISTS external_identities",
+		"CREATE TABLE IF NOT EXISTS identity_link_tokens",
+		"CHECK (type IN ('PERSONAL','SHARED'))",
 	} {
-		if !strings.Contains(upSQL, required) {
-			t.Errorf("up migration missing %q", required)
+		if !strings.Contains(up, required) {
+			t.Errorf("missing %q", required)
 		}
 	}
-	for _, forbidden := range []string{
-		"owner_member_id UUID NOT NULL REFERENCES family_members(id)",
-		"created_by_member_id UUID NOT NULL REFERENCES family_members(id)",
-	} {
-		if strings.Contains(upSQL, forbidden) {
-			t.Errorf("up migration retains redundant foreign key %q", forbidden)
+	for _, forbidden := range []string{"families", "family_members", "hermes_profile_id"} {
+		if strings.Contains(up, forbidden) {
+			t.Errorf("retains %q", forbidden)
 		}
 	}
+}
 
-	downSQL := string(down)
-	tablePos := strings.Index(downSQL, "DROP TABLE IF EXISTS reminders;")
-	indexPos := strings.Index(downSQL, "DROP INDEX IF EXISTS ux_family_members_family_id_id;")
-	if tablePos < 0 || indexPos < 0 || tablePos > indexPos {
-		t.Fatalf("down migration must drop reminders before family-member index")
+func TestReminderMigrationIsSpaceScoped(t *testing.T) {
+	up := readMigration(t, "000009_create_reminders_table.up.sql")
+	for _, required := range []string{
+		"space_id UUID NOT NULL",
+		"assignee_member_id UUID",
+		"fk_reminders_creator_space",
+		"fk_reminders_assignee_space",
+	} {
+		if !strings.Contains(up, required) {
+			t.Errorf("missing %q", required)
+		}
 	}
+	for _, forbidden := range []string{"family_id", "owner_member_id", "scope VARCHAR"} {
+		if strings.Contains(up, forbidden) {
+			t.Errorf("retains %q", forbidden)
+		}
+	}
+}
+
+func readMigration(t *testing.T, name string) string {
+	t.Helper()
+	content, err := os.ReadFile(name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(content)
 }

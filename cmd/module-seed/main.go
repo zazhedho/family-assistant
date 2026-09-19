@@ -20,6 +20,7 @@ func main() {
 		actions     string
 		grantRoles  string
 		orderIndex  int
+		space       bool
 	)
 
 	flag.StringVar(&name, "name", "", "menu and module name, for example: projects")
@@ -31,19 +32,28 @@ func main() {
 	flag.StringVar(&actions, "actions", "list,view,create,update,delete", "comma-separated actions")
 	flag.StringVar(&grantRoles, "grant-roles", "admin,superadmin", "comma-separated roles for default grants, empty to skip")
 	flag.IntVar(&orderIndex, "order-index", 900, "menu order index")
+	flag.BoolVar(&space, "space", false, "render the built-in Space RBAC seed")
 	flag.Parse()
 
-	sql, err := moduleseed.RenderSQL(moduleseed.Definition{
-		Name:        name,
-		DisplayName: displayName,
-		Path:        path,
-		Icon:        icon,
-		OrderIndex:  orderIndex,
-		ParentName:  parentName,
-		Resource:    resource,
-		Actions:     splitCSV(actions),
-		GrantRoles:  splitCSV(grantRoles),
-	})
+	var (
+		sql string
+		err error
+	)
+	if space {
+		sql, err = moduleseed.RenderSpaceSQL()
+	} else {
+		sql, err = moduleseed.RenderSQL(moduleseed.Definition{
+			Name:        name,
+			DisplayName: displayName,
+			Path:        path,
+			Icon:        icon,
+			OrderIndex:  orderIndex,
+			ParentName:  parentName,
+			Resource:    resource,
+			Actions:     splitCSV(actions),
+			GrantRoles:  splitCSV(grantRoles),
+		})
+	}
 	if err != nil {
 		log.Fatal(err)
 	}
