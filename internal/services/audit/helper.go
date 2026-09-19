@@ -2,10 +2,10 @@ package serviceaudit
 
 import (
 	"encoding/json"
-	domainaudit "family-assistant/internal/domain/audit"
-	"family-assistant/internal/dto"
-	"family-assistant/utils"
 	"fmt"
+	domainaudit "github.com/zazhedho/family-assistant/internal/domain/audit"
+	"github.com/zazhedho/family-assistant/internal/dto"
+	"github.com/zazhedho/family-assistant/utils"
 	"strings"
 )
 

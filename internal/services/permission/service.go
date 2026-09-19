@@ -3,12 +3,12 @@ package servicepermission
 import (
 	"context"
 	"errors"
-	permissioncache "family-assistant/internal/cache/permission"
-	domainpermission "family-assistant/internal/domain/permission"
-	"family-assistant/internal/dto"
-	interfacepermission "family-assistant/internal/interfaces/permission"
-	"family-assistant/pkg/filter"
-	"family-assistant/utils"
+	permissioncache "github.com/zazhedho/family-assistant/internal/cache/permission"
+	domainpermission "github.com/zazhedho/family-assistant/internal/domain/permission"
+	"github.com/zazhedho/family-assistant/internal/dto"
+	interfacepermission "github.com/zazhedho/family-assistant/internal/interfaces/permission"
+	"github.com/zazhedho/family-assistant/pkg/filter"
+	"github.com/zazhedho/family-assistant/utils"
 	"time"
 )
 
@@ -61,6 +61,10 @@ func (s *PermissionService) GetAll(ctx context.Context, params filter.BaseParams
 
 func (s *PermissionService) GetByResource(ctx context.Context, resource string) ([]domainpermission.Permission, error) {
 	return s.PermissionRepo.GetByResource(ctx, resource)
+}
+
+func (s *PermissionService) GetRolePermissions(ctx context.Context, roleID string) ([]domainpermission.Permission, error) {
+	return s.PermissionRepo.GetRolePermissions(ctx, roleID)
 }
 
 func (s *PermissionService) GetUserPermissions(ctx context.Context, userId string) ([]domainpermission.Permission, error) {

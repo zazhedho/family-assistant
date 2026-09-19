@@ -3,10 +3,10 @@ package handleruser
 import (
 	"context"
 	"errors"
-	"family-assistant/pkg/messages"
-	"family-assistant/pkg/response"
-	"family-assistant/utils"
 	"fmt"
+	"github.com/zazhedho/family-assistant/pkg/messages"
+	"github.com/zazhedho/family-assistant/pkg/response"
+	"github.com/zazhedho/family-assistant/utils"
 	"net/http"
 	"strconv"
 	"strings"

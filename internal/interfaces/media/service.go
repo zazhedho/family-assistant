@@ -4,8 +4,8 @@ import (
 	"context"
 	"mime/multipart"
 
-	"family-assistant/internal/authscope"
-	domainmedia "family-assistant/internal/domain/media"
+	"github.com/zazhedho/family-assistant/internal/authscope"
+	domainmedia "github.com/zazhedho/family-assistant/internal/domain/media"
 )
 
 type ServiceMediaInterface interface {

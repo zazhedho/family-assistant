@@ -3,10 +3,10 @@ package servicemenu
 import (
 	"context"
 	"errors"
-	domainmenu "family-assistant/internal/domain/menu"
-	domainpermission "family-assistant/internal/domain/permission"
-	"family-assistant/internal/dto"
-	"family-assistant/pkg/filter"
+	domainmenu "github.com/zazhedho/family-assistant/internal/domain/menu"
+	domainpermission "github.com/zazhedho/family-assistant/internal/domain/permission"
+	"github.com/zazhedho/family-assistant/internal/dto"
+	"github.com/zazhedho/family-assistant/pkg/filter"
 	"testing"
 )
 
@@ -77,6 +77,9 @@ func (m *permissionRepoMenuTestDouble) GetByResource(ctx context.Context, resour
 	return nil, nil
 }
 func (m *permissionRepoMenuTestDouble) GetUserPermissions(ctx context.Context, userId string) ([]domainpermission.Permission, error) {
+	return append([]domainpermission.Permission{}, m.userPermissions...), nil
+}
+func (m *permissionRepoMenuTestDouble) GetRolePermissions(ctx context.Context, roleID string) ([]domainpermission.Permission, error) {
 	return append([]domainpermission.Permission{}, m.userPermissions...), nil
 }
 

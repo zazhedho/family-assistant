@@ -3,10 +3,10 @@ package serviceshared
 import (
 	"context"
 	"errors"
-	"family-assistant/internal/authscope"
-	domainmenu "family-assistant/internal/domain/menu"
-	domainpermission "family-assistant/internal/domain/permission"
-	"family-assistant/pkg/filter"
+	"github.com/zazhedho/family-assistant/internal/authscope"
+	domainmenu "github.com/zazhedho/family-assistant/internal/domain/menu"
+	domainpermission "github.com/zazhedho/family-assistant/internal/domain/permission"
+	"github.com/zazhedho/family-assistant/pkg/filter"
 	"testing"
 )
 
@@ -70,6 +70,12 @@ func (m *permissionRepoSharedTestDouble) GetByResource(ctx context.Context, reso
 	return nil, nil
 }
 func (m *permissionRepoSharedTestDouble) GetUserPermissions(ctx context.Context, userId string) ([]domainpermission.Permission, error) {
+	if m.err != nil {
+		return nil, m.err
+	}
+	return append([]domainpermission.Permission{}, m.permissions...), nil
+}
+func (m *permissionRepoSharedTestDouble) GetRolePermissions(ctx context.Context, roleID string) ([]domainpermission.Permission, error) {
 	if m.err != nil {
 		return nil, m.err
 	}

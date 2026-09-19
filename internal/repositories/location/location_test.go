@@ -2,7 +2,7 @@ package repositorylocation
 
 import (
 	"context"
-	domainlocation "family-assistant/internal/domain/location"
+	domainlocation "github.com/zazhedho/family-assistant/internal/domain/location"
 	"testing"
 
 	"github.com/DATA-DOG/go-sqlmock"

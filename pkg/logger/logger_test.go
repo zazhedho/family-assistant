@@ -12,7 +12,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 
-	"family-assistant/utils"
+	"github.com/zazhedho/family-assistant/utils"
 )
 
 func TestMapLevelToSlog(t *testing.T) {

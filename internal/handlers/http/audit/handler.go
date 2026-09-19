@@ -1,13 +1,13 @@
 package handleraudit
 
 import (
-	interfaceaudit "family-assistant/internal/interfaces/audit"
-	"family-assistant/pkg/filter"
-	"family-assistant/pkg/logger"
-	"family-assistant/pkg/messages"
-	"family-assistant/pkg/response"
-	"family-assistant/utils"
 	"fmt"
+	interfaceaudit "github.com/zazhedho/family-assistant/internal/interfaces/audit"
+	"github.com/zazhedho/family-assistant/pkg/filter"
+	"github.com/zazhedho/family-assistant/pkg/logger"
+	"github.com/zazhedho/family-assistant/pkg/messages"
+	"github.com/zazhedho/family-assistant/pkg/response"
+	"github.com/zazhedho/family-assistant/utils"
 	"net/http"
 
 	"github.com/gin-gonic/gin"

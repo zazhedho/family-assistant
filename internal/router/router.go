@@ -8,50 +8,53 @@ import (
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 
-	"family-assistant/infrastructure/database"
-	mediaInfrastructure "family-assistant/infrastructure/media"
-	permissioncache "family-assistant/internal/cache/permission"
-	appConfigHandler "family-assistant/internal/handlers/http/appconfig"
-	auditHandler "family-assistant/internal/handlers/http/audit"
-	locationHandler "family-assistant/internal/handlers/http/location"
-	mediaHandler "family-assistant/internal/handlers/http/media"
-	menuHandler "family-assistant/internal/handlers/http/menu"
-	permissionHandler "family-assistant/internal/handlers/http/permission"
-	roleHandler "family-assistant/internal/handlers/http/role"
-	sessionHandler "family-assistant/internal/handlers/http/session"
-	userHandler "family-assistant/internal/handlers/http/user"
-	interfaceaudit "family-assistant/internal/interfaces/audit"
-	interfacepermission "family-assistant/internal/interfaces/permission"
-	interfacesession "family-assistant/internal/interfaces/session"
-	appConfigRepo "family-assistant/internal/repositories/appconfig"
-	auditRepo "family-assistant/internal/repositories/audit"
-	authRepo "family-assistant/internal/repositories/auth"
-	locationRepo "family-assistant/internal/repositories/location"
-	mediaRepo "family-assistant/internal/repositories/media"
-	menuRepo "family-assistant/internal/repositories/menu"
-	otpRepo "family-assistant/internal/repositories/otp"
-	permissionRepo "family-assistant/internal/repositories/permission"
-	resetRepo "family-assistant/internal/repositories/reset"
-	roleRepo "family-assistant/internal/repositories/role"
-	sessionRepo "family-assistant/internal/repositories/session"
-	userRepo "family-assistant/internal/repositories/user"
-	appConfigSvc "family-assistant/internal/services/appconfig"
-	auditSvc "family-assistant/internal/services/audit"
-	locationSvc "family-assistant/internal/services/location"
-	mediaSvc "family-assistant/internal/services/media"
-	menuSvc "family-assistant/internal/services/menu"
-	otpSvc "family-assistant/internal/services/otp"
-	permissionSvc "family-assistant/internal/services/permission"
-	resetSvc "family-assistant/internal/services/reset"
-	roleSvc "family-assistant/internal/services/role"
-	sessionSvc "family-assistant/internal/services/session"
-	userSvc "family-assistant/internal/services/user"
-	"family-assistant/middlewares"
-	"family-assistant/pkg/config"
-	"family-assistant/pkg/logger"
-	"family-assistant/pkg/mailer"
-	"family-assistant/pkg/security"
-	"family-assistant/utils"
+	"github.com/zazhedho/family-assistant/infrastructure/database"
+	mediaInfrastructure "github.com/zazhedho/family-assistant/infrastructure/media"
+	permissioncache "github.com/zazhedho/family-assistant/internal/cache/permission"
+	appConfigHandler "github.com/zazhedho/family-assistant/internal/handlers/http/appconfig"
+	auditHandler "github.com/zazhedho/family-assistant/internal/handlers/http/audit"
+	locationHandler "github.com/zazhedho/family-assistant/internal/handlers/http/location"
+	mediaHandler "github.com/zazhedho/family-assistant/internal/handlers/http/media"
+	menuHandler "github.com/zazhedho/family-assistant/internal/handlers/http/menu"
+	permissionHandler "github.com/zazhedho/family-assistant/internal/handlers/http/permission"
+	reminderHandler "github.com/zazhedho/family-assistant/internal/handlers/http/reminder"
+	roleHandler "github.com/zazhedho/family-assistant/internal/handlers/http/role"
+	sessionHandler "github.com/zazhedho/family-assistant/internal/handlers/http/session"
+	userHandler "github.com/zazhedho/family-assistant/internal/handlers/http/user"
+	interfaceaudit "github.com/zazhedho/family-assistant/internal/interfaces/audit"
+	interfacepermission "github.com/zazhedho/family-assistant/internal/interfaces/permission"
+	interfacesession "github.com/zazhedho/family-assistant/internal/interfaces/session"
+	appConfigRepo "github.com/zazhedho/family-assistant/internal/repositories/appconfig"
+	auditRepo "github.com/zazhedho/family-assistant/internal/repositories/audit"
+	authRepo "github.com/zazhedho/family-assistant/internal/repositories/auth"
+	locationRepo "github.com/zazhedho/family-assistant/internal/repositories/location"
+	mediaRepo "github.com/zazhedho/family-assistant/internal/repositories/media"
+	menuRepo "github.com/zazhedho/family-assistant/internal/repositories/menu"
+	otpRepo "github.com/zazhedho/family-assistant/internal/repositories/otp"
+	permissionRepo "github.com/zazhedho/family-assistant/internal/repositories/permission"
+	resetRepo "github.com/zazhedho/family-assistant/internal/repositories/reset"
+	roleRepo "github.com/zazhedho/family-assistant/internal/repositories/role"
+	sessionRepo "github.com/zazhedho/family-assistant/internal/repositories/session"
+	userRepo "github.com/zazhedho/family-assistant/internal/repositories/user"
+	appConfigSvc "github.com/zazhedho/family-assistant/internal/services/appconfig"
+	auditSvc "github.com/zazhedho/family-assistant/internal/services/audit"
+	serviceidentity "github.com/zazhedho/family-assistant/internal/services/identity"
+	locationSvc "github.com/zazhedho/family-assistant/internal/services/location"
+	mediaSvc "github.com/zazhedho/family-assistant/internal/services/media"
+	menuSvc "github.com/zazhedho/family-assistant/internal/services/menu"
+	otpSvc "github.com/zazhedho/family-assistant/internal/services/otp"
+	permissionSvc "github.com/zazhedho/family-assistant/internal/services/permission"
+	servicereminder "github.com/zazhedho/family-assistant/internal/services/reminder"
+	resetSvc "github.com/zazhedho/family-assistant/internal/services/reset"
+	roleSvc "github.com/zazhedho/family-assistant/internal/services/role"
+	sessionSvc "github.com/zazhedho/family-assistant/internal/services/session"
+	userSvc "github.com/zazhedho/family-assistant/internal/services/user"
+	"github.com/zazhedho/family-assistant/middlewares"
+	"github.com/zazhedho/family-assistant/pkg/config"
+	"github.com/zazhedho/family-assistant/pkg/logger"
+	"github.com/zazhedho/family-assistant/pkg/mailer"
+	"github.com/zazhedho/family-assistant/pkg/security"
+	"github.com/zazhedho/family-assistant/utils"
 )
 
 type Routes struct {
@@ -81,6 +84,10 @@ func NewRoutes() *Routes {
 
 func (r *Routes) auditService() interfaceaudit.ServiceAuditInterface {
 	return auditSvc.NewAuditService(auditRepo.NewAuditRepo(r.DB))
+}
+
+func (r *Routes) AuditService() interfaceaudit.ServiceAuditInterface {
+	return r.auditService()
 }
 
 func (r *Routes) permissionRepo() interfacepermission.RepoPermissionInterface {
@@ -273,6 +280,18 @@ func (r *Routes) AuditRoutes() {
 	audit := r.App.Group("/api/audit").Use(mdw.AuthMiddleware())
 	{
 		audit.GET("/:id", mdw.PermissionMiddleware("audits", "view"), h.GetByID)
+	}
+}
+
+func (r *Routes) ReminderRoutes(service servicereminder.Service, resolver serviceidentity.UserResolver) {
+	h := reminderHandler.NewReminderHandler(service, resolver)
+	mdw := r.middleware(r.permissionRepo())
+
+	reminder := r.App.Group("/api/reminders").Use(mdw.AuthMiddleware())
+	{
+		reminder.POST("", reminderHandler.FamilyPermissionMiddleware(resolver, "reminders:create"), h.Create)
+		reminder.GET("", reminderHandler.FamilyPermissionMiddleware(resolver, "reminders:list"), h.List)
+		reminder.PATCH("/:id/complete", reminderHandler.FamilyPermissionMiddleware(resolver, "reminders:update"), h.Complete)
 	}
 }
 

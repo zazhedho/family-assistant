@@ -2,10 +2,10 @@ package repositoryuser
 
 import (
 	"context"
-	domainuser "family-assistant/internal/domain/user"
-	interfaceuser "family-assistant/internal/interfaces/user"
-	repositorygeneric "family-assistant/internal/repositories/generic"
-	"family-assistant/pkg/filter"
+	domainuser "github.com/zazhedho/family-assistant/internal/domain/user"
+	interfaceuser "github.com/zazhedho/family-assistant/internal/interfaces/user"
+	repositorygeneric "github.com/zazhedho/family-assistant/internal/repositories/generic"
+	"github.com/zazhedho/family-assistant/pkg/filter"
 
 	"gorm.io/gorm"
 )
@@ -19,8 +19,15 @@ func NewUserRepo(db *gorm.DB) interfaceuser.RepoUserInterface {
 }
 
 func (r *repo) Store(ctx context.Context, user domainuser.Users) error {
+	var omit []string
 	if user.Phone == "" {
-		return r.DB.WithContext(ctx).Omit("phone").Create(&user).Error
+		omit = append(omit, "phone")
+	}
+	if user.HermesProfileID == nil {
+		omit = append(omit, "hermes_profile_id")
+	}
+	if len(omit) > 0 {
+		return r.DB.WithContext(ctx).Omit(omit...).Create(&user).Error
 	}
 	return r.GenericRepository.Store(ctx, user)
 }

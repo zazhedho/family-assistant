@@ -3,11 +3,11 @@ package handlercommon
 import (
 	"fmt"
 
-	"family-assistant/internal/authscope"
-	domainaudit "family-assistant/internal/domain/audit"
-	interfaceaudit "family-assistant/internal/interfaces/audit"
-	"family-assistant/pkg/logger"
-	"family-assistant/utils"
+	"github.com/zazhedho/family-assistant/internal/authscope"
+	domainaudit "github.com/zazhedho/family-assistant/internal/domain/audit"
+	interfaceaudit "github.com/zazhedho/family-assistant/internal/interfaces/audit"
+	"github.com/zazhedho/family-assistant/pkg/logger"
+	"github.com/zazhedho/family-assistant/utils"
 
 	"github.com/gin-gonic/gin"
 )

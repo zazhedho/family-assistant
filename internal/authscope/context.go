@@ -4,7 +4,7 @@ import (
 	"context"
 	"strings"
 
-	"family-assistant/utils"
+	"github.com/zazhedho/family-assistant/utils"
 )
 
 type contextKey string

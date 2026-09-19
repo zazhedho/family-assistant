@@ -2,9 +2,9 @@ package interfacerole
 
 import (
 	"context"
-	domainrole "family-assistant/internal/domain/role"
-	"family-assistant/internal/dto"
-	"family-assistant/pkg/filter"
+	domainrole "github.com/zazhedho/family-assistant/internal/domain/role"
+	"github.com/zazhedho/family-assistant/internal/dto"
+	"github.com/zazhedho/family-assistant/pkg/filter"
 )
 
 type ServiceRoleInterface interface {

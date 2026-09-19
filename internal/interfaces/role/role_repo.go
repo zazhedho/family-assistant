@@ -2,8 +2,8 @@ package interfacerole
 
 import (
 	"context"
-	domainrole "family-assistant/internal/domain/role"
-	interfacegeneric "family-assistant/internal/interfaces/generic"
+	domainrole "github.com/zazhedho/family-assistant/internal/domain/role"
+	interfacegeneric "github.com/zazhedho/family-assistant/internal/interfaces/generic"
 )
 
 type RepoRoleInterface interface {

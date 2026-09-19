@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"family-assistant/internal/dto"
+	"github.com/zazhedho/family-assistant/internal/dto"
 
 	redismock "github.com/go-redis/redismock/v9"
 )

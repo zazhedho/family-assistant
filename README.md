@@ -1,6 +1,6 @@
-# Starter Kit
+# Family Assistant
 
-Backend starter template for Go services with:
+Backend service for a private household assistant with:
 - Gin HTTP router
 - PostgreSQL via GORM
 - JWT authentication
@@ -85,7 +85,7 @@ System modules currently included:
 Main backend layout:
 
 ```text
-starter-kit/
+family-assistant/
 ├── infrastructure/
 ├── internal/
 │   ├── domain/
@@ -160,6 +160,25 @@ Or run migration and server separately:
 go run . -migrate
 go run .
 ```
+
+### Local Hermes MCP wiring
+
+When Hermes runs on the same private network, enable the internal MCP endpoint
+with `MCP_ENABLED=true` and set a local-only `MCP_SERVER_KEY`. Hermes calls
+`/mcp` with:
+
+```text
+Authorization: Bearer <MCP_SERVER_KEY>
+X-Hermes-Profile: <stable profile id>
+X-Hermes-Channel: whatsapp
+```
+
+The endpoint is `http://127.0.0.1:8081/mcp` by default. Available tools are
+`family_get_member`, `reminder_create`, `reminder_list`, and
+`reminder_complete`. The profile header is resolved to the local family
+member; database IDs supplied as tool arguments are inputs only and are
+re-authorized for the requested family resource, never trusted as caller
+identity.
 
 Default health check:
 

@@ -3,11 +3,11 @@ package middlewares
 import (
 	"context"
 	"errors"
-	domainauth "family-assistant/internal/domain/auth"
-	domainpermission "family-assistant/internal/domain/permission"
-	domainuser "family-assistant/internal/domain/user"
-	"family-assistant/pkg/filter"
-	"family-assistant/utils"
+	domainauth "github.com/zazhedho/family-assistant/internal/domain/auth"
+	domainpermission "github.com/zazhedho/family-assistant/internal/domain/permission"
+	domainuser "github.com/zazhedho/family-assistant/internal/domain/user"
+	"github.com/zazhedho/family-assistant/pkg/filter"
+	"github.com/zazhedho/family-assistant/utils"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -68,6 +68,12 @@ func (m *permissionRepoTestDouble) GetByResource(ctx context.Context, resource s
 }
 func (m *permissionRepoTestDouble) GetUserPermissions(ctx context.Context, userId string) ([]domainpermission.Permission, error) {
 	m.calls++
+	if m.err != nil {
+		return nil, m.err
+	}
+	return append([]domainpermission.Permission{}, m.permissions...), nil
+}
+func (m *permissionRepoTestDouble) GetRolePermissions(ctx context.Context, roleID string) ([]domainpermission.Permission, error) {
 	if m.err != nil {
 		return nil, m.err
 	}

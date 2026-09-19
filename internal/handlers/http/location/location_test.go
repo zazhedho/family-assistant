@@ -8,10 +8,10 @@ import (
 	"net/http"
 	"net/http/httptest"
 
-	"family-assistant/internal/authscope"
-	"family-assistant/internal/dto"
-	servicelocation "family-assistant/internal/services/location"
-	"family-assistant/utils"
+	"github.com/zazhedho/family-assistant/internal/authscope"
+	"github.com/zazhedho/family-assistant/internal/dto"
+	servicelocation "github.com/zazhedho/family-assistant/internal/services/location"
+	"github.com/zazhedho/family-assistant/utils"
 	"testing"
 
 	"github.com/gin-gonic/gin"

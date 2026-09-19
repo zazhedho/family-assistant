@@ -2,11 +2,11 @@ package repositorypermission
 
 import (
 	"context"
-	domainpermission "family-assistant/internal/domain/permission"
-	interfacepermission "family-assistant/internal/interfaces/permission"
-	repositorygeneric "family-assistant/internal/repositories/generic"
-	"family-assistant/pkg/filter"
-	"family-assistant/utils"
+	domainpermission "github.com/zazhedho/family-assistant/internal/domain/permission"
+	interfacepermission "github.com/zazhedho/family-assistant/internal/interfaces/permission"
+	repositorygeneric "github.com/zazhedho/family-assistant/internal/repositories/generic"
+	"github.com/zazhedho/family-assistant/pkg/filter"
+	"github.com/zazhedho/family-assistant/utils"
 
 	"gorm.io/gorm"
 )
@@ -42,6 +42,22 @@ func (r *repo) GetByResource(ctx context.Context, resource string) (ret []domain
 	return r.GetManyByField(ctx, "resource", resource)
 }
 
+func (r *repo) GetRolePermissions(ctx context.Context, roleID string) (ret []domainpermission.Permission, err error) {
+	query := `
+		SELECT DISTINCT p.*
+		FROM permissions p
+		INNER JOIN role_permissions rp ON p.id = rp.permission_id
+		INNER JOIN roles r ON r.id = rp.role_id
+		WHERE rp.role_id = ? AND r.deleted_at IS NULL AND p.deleted_at IS NULL
+		ORDER BY p.resource, p.action
+	`
+	if err = r.DB.WithContext(ctx).Raw(query, roleID).Scan(&ret).Error; err != nil {
+		return nil, err
+	}
+
+	return ret, nil
+}
+
 func (r *repo) GetUserPermissions(ctx context.Context, userId string) (ret []domainpermission.Permission, err error) {
 	var user struct {
 		RoleId *string
@@ -62,16 +78,5 @@ func (r *repo) GetUserPermissions(ctx context.Context, userId string) (ret []dom
 		return []domainpermission.Permission{}, nil
 	}
 
-	query := `
-		SELECT DISTINCT p.*
-		FROM permissions p
-		INNER JOIN role_permissions rp ON p.id = rp.permission_id
-		WHERE rp.role_id = ? AND p.deleted_at IS NULL
-		ORDER BY p.resource, p.action
-	`
-	if err = r.DB.WithContext(ctx).Raw(query, *user.RoleId).Scan(&ret).Error; err != nil {
-		return nil, err
-	}
-
-	return ret, nil
+	return r.GetRolePermissions(ctx, *user.RoleId)
 }

@@ -9,8 +9,8 @@ import (
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 
-	"family-assistant/pkg/filter"
-	"family-assistant/utils"
+	"github.com/zazhedho/family-assistant/pkg/filter"
+	"github.com/zazhedho/family-assistant/utils"
 )
 
 func newDryRunDB(t *testing.T) *gorm.DB {
@@ -127,7 +127,7 @@ func TestPermissionRepositoryGetUserPermissions(t *testing.T) {
 		mock.ExpectQuery(`SELECT role_id, role FROM "users" WHERE id = \$1 ORDER BY .* LIMIT \$2`).
 			WithArgs("user-1", 1).
 			WillReturnRows(sqlmock.NewRows([]string{"role_id", "role"}).AddRow(roleID, utils.RoleViewer))
-		mock.ExpectQuery(`SELECT DISTINCT p\.\*[\s\S]+FROM permissions p[\s\S]+INNER JOIN role_permissions rp[\s\S]+WHERE rp\.role_id = \$1 AND p\.deleted_at IS NULL[\s\S]+ORDER BY p\.resource, p\.action`).
+		mock.ExpectQuery(`SELECT DISTINCT p\.\*[\s\S]+FROM permissions p[\s\S]+INNER JOIN role_permissions rp[\s\S]+INNER JOIN roles r ON r\.id = rp\.role_id[\s\S]+WHERE rp\.role_id = \$1[\s\S]+r\.deleted_at IS NULL[\s\S]+p\.deleted_at IS NULL[\s\S]+ORDER BY p\.resource, p\.action`).
 			WithArgs(roleID).
 			WillReturnRows(sqlmock.NewRows([]string{
 				"id", "name", "display_name", "description", "resource", "action", "created_at", "updated_at", "deleted_at",
@@ -144,4 +144,27 @@ func TestPermissionRepositoryGetUserPermissions(t *testing.T) {
 			t.Fatalf("sql expectations: %v", err)
 		}
 	})
+}
+
+func TestPermissionRepositoryGetRolePermissions(t *testing.T) {
+	db, mock := newPermissionMockDB(t)
+	repo := NewPermissionRepo(db)
+	now := time.Now()
+
+	mock.ExpectQuery(`SELECT DISTINCT p\.\*[\s\S]+FROM permissions p[\s\S]+INNER JOIN role_permissions rp[\s\S]+INNER JOIN roles r ON r\.id = rp\.role_id[\s\S]+WHERE rp\.role_id = \$1[\s\S]+r\.deleted_at IS NULL[\s\S]+p\.deleted_at IS NULL[\s\S]+ORDER BY p\.resource, p\.action`).
+		WithArgs("role-parent").
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "name", "display_name", "description", "resource", "action", "created_at", "updated_at", "deleted_at",
+		}).AddRow("perm-1", "create_reminders", "Create reminders", "", "reminders", "create", now, nil, nil))
+
+	permissions, err := repo.GetRolePermissions(context.Background(), "role-parent")
+	if err != nil {
+		t.Fatalf("get role permissions: %v", err)
+	}
+	if len(permissions) != 1 || permissions[0].Resource != "reminders" || permissions[0].Action != "create" {
+		t.Fatalf("unexpected permissions: %#v", permissions)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("sql expectations: %v", err)
+	}
 }

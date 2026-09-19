@@ -6,13 +6,13 @@ import (
 	"regexp"
 	"testing"
 
-	domainuser "family-assistant/internal/domain/user"
+	domainuser "github.com/zazhedho/family-assistant/internal/domain/user"
 
 	"github.com/DATA-DOG/go-sqlmock"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 
-	"family-assistant/pkg/filter"
+	"github.com/zazhedho/family-assistant/pkg/filter"
 )
 
 func newDryRunDB(t *testing.T) *gorm.DB {

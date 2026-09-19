@@ -3,9 +3,9 @@ package handleruser
 import (
 	"context"
 	"errors"
-	domainappconfig "family-assistant/internal/domain/appconfig"
-	"family-assistant/internal/dto"
-	"family-assistant/pkg/filter"
+	domainappconfig "github.com/zazhedho/family-assistant/internal/domain/appconfig"
+	"github.com/zazhedho/family-assistant/internal/dto"
+	"github.com/zazhedho/family-assistant/pkg/filter"
 	"net/http"
 	"net/http/httptest"
 	"testing"

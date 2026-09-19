@@ -2,8 +2,8 @@ package mailer
 
 import (
 	"bytes"
-	"family-assistant/utils"
 	"fmt"
+	"github.com/zazhedho/family-assistant/utils"
 	"html"
 	"net/smtp"
 	"strconv"

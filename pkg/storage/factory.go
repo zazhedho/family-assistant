@@ -1,8 +1,8 @@
 package storage
 
 import (
-	"family-assistant/utils"
 	"fmt"
+	"github.com/zazhedho/family-assistant/utils"
 )
 
 // NewStorageProvider creates a new storage provider based on the configuration

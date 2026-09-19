@@ -1,9 +1,9 @@
 package repositorygeneric
 
 import (
-	"family-assistant/pkg/filter"
-	"family-assistant/utils"
 	"fmt"
+	"github.com/zazhedho/family-assistant/pkg/filter"
+	"github.com/zazhedho/family-assistant/utils"
 	"reflect"
 	"slices"
 	"strings"

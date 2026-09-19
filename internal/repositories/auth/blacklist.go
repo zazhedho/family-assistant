@@ -3,9 +3,9 @@ package repositoryauth
 import (
 	"context"
 	"errors"
-	domainauth "family-assistant/internal/domain/auth"
-	interfaceauth "family-assistant/internal/interfaces/auth"
-	repositorygeneric "family-assistant/internal/repositories/generic"
+	domainauth "github.com/zazhedho/family-assistant/internal/domain/auth"
+	interfaceauth "github.com/zazhedho/family-assistant/internal/interfaces/auth"
+	repositorygeneric "github.com/zazhedho/family-assistant/internal/repositories/generic"
 	"time"
 
 	"gorm.io/gorm"

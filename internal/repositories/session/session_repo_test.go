@@ -2,7 +2,7 @@ package repositorysession
 
 import (
 	"context"
-	domainsession "family-assistant/internal/domain/session"
+	domainsession "github.com/zazhedho/family-assistant/internal/domain/session"
 	"testing"
 	"time"
 )

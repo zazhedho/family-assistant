@@ -1,16 +1,16 @@
 package handlersession
 
 import (
-	"family-assistant/internal/authscope"
-	domainaudit "family-assistant/internal/domain/audit"
-	handlercommon "family-assistant/internal/handlers/http/common"
-	interfaceaudit "family-assistant/internal/interfaces/audit"
-	interfacesession "family-assistant/internal/interfaces/session"
-	"family-assistant/pkg/logger"
-	"family-assistant/pkg/messages"
-	"family-assistant/pkg/response"
-	"family-assistant/utils"
 	"fmt"
+	"github.com/zazhedho/family-assistant/internal/authscope"
+	domainaudit "github.com/zazhedho/family-assistant/internal/domain/audit"
+	handlercommon "github.com/zazhedho/family-assistant/internal/handlers/http/common"
+	interfaceaudit "github.com/zazhedho/family-assistant/internal/interfaces/audit"
+	interfacesession "github.com/zazhedho/family-assistant/internal/interfaces/session"
+	"github.com/zazhedho/family-assistant/pkg/logger"
+	"github.com/zazhedho/family-assistant/pkg/messages"
+	"github.com/zazhedho/family-assistant/pkg/response"
+	"github.com/zazhedho/family-assistant/utils"
 	"net/http"
 
 	"github.com/gin-gonic/gin"

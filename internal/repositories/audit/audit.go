@@ -2,10 +2,10 @@ package repositoryaudit
 
 import (
 	"context"
-	domainaudit "family-assistant/internal/domain/audit"
-	interfaceaudit "family-assistant/internal/interfaces/audit"
-	repositorygeneric "family-assistant/internal/repositories/generic"
-	"family-assistant/pkg/filter"
+	domainaudit "github.com/zazhedho/family-assistant/internal/domain/audit"
+	interfaceaudit "github.com/zazhedho/family-assistant/internal/interfaces/audit"
+	repositorygeneric "github.com/zazhedho/family-assistant/internal/repositories/generic"
+	"github.com/zazhedho/family-assistant/pkg/filter"
 
 	"gorm.io/gorm"
 )

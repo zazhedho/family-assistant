@@ -3,7 +3,7 @@ package config
 import (
 	"time"
 
-	"family-assistant/utils"
+	"github.com/zazhedho/family-assistant/utils"
 )
 
 type OTPConfig struct {

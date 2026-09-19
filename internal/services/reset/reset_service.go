@@ -3,11 +3,11 @@ package servicereset
 import (
 	"context"
 	"errors"
-	interfacereset "family-assistant/internal/interfaces/reset"
-	"family-assistant/pkg/config"
-	"family-assistant/pkg/mailer"
-	"family-assistant/utils"
 	"fmt"
+	interfacereset "github.com/zazhedho/family-assistant/internal/interfaces/reset"
+	"github.com/zazhedho/family-assistant/pkg/config"
+	"github.com/zazhedho/family-assistant/pkg/mailer"
+	"github.com/zazhedho/family-assistant/utils"
 	"strings"
 	"time"
 

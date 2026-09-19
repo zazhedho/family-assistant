@@ -9,7 +9,7 @@ import (
 
 	"github.com/redis/go-redis/v9"
 
-	"family-assistant/utils"
+	"github.com/zazhedho/family-assistant/utils"
 )
 
 func ValidateStartupConfig(port string) error {
@@ -23,6 +23,7 @@ func ValidateStartupConfig(port string) error {
 	problems = append(problems, validateOptionalRedisConfig()...)
 	problems = append(problems, validateOptionalSMTPConfig()...)
 	problems = append(problems, validateOptionalStorageConfig()...)
+	problems = append(problems, validateMCPConfig()...)
 
 	if len(problems) > 0 {
 		return errors.New(strings.Join(problems, "; "))

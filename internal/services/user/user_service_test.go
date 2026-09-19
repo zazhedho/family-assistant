@@ -3,14 +3,14 @@ package serviceuser
 import (
 	"context"
 	"errors"
-	"family-assistant/internal/authscope"
-	domainauth "family-assistant/internal/domain/auth"
-	domainpermission "family-assistant/internal/domain/permission"
-	domainrole "family-assistant/internal/domain/role"
-	domainuser "family-assistant/internal/domain/user"
-	"family-assistant/internal/dto"
-	"family-assistant/pkg/filter"
-	"family-assistant/utils"
+	"github.com/zazhedho/family-assistant/internal/authscope"
+	domainauth "github.com/zazhedho/family-assistant/internal/domain/auth"
+	domainpermission "github.com/zazhedho/family-assistant/internal/domain/permission"
+	domainrole "github.com/zazhedho/family-assistant/internal/domain/role"
+	domainuser "github.com/zazhedho/family-assistant/internal/domain/user"
+	"github.com/zazhedho/family-assistant/internal/dto"
+	"github.com/zazhedho/family-assistant/pkg/filter"
+	"github.com/zazhedho/family-assistant/utils"
 	"testing"
 	"time"
 
@@ -193,6 +193,12 @@ func (m *permissionRepoUserMock) GetByResource(ctx context.Context, resource str
 	return nil, nil
 }
 func (m *permissionRepoUserMock) GetUserPermissions(ctx context.Context, userId string) ([]domainpermission.Permission, error) {
+	if m.err != nil {
+		return nil, m.err
+	}
+	return append([]domainpermission.Permission{}, m.userPermissions...), nil
+}
+func (m *permissionRepoUserMock) GetRolePermissions(ctx context.Context, roleID string) ([]domainpermission.Permission, error) {
 	if m.err != nil {
 		return nil, m.err
 	}

@@ -1,7 +1,7 @@
 package mailer
 
 import (
-	"family-assistant/utils"
+	"github.com/zazhedho/family-assistant/utils"
 	"strings"
 	"testing"
 	"time"

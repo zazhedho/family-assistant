@@ -1,10 +1,10 @@
 package media
 
 import (
-	"family-assistant/pkg/logger"
-	"family-assistant/pkg/storage"
-	"family-assistant/utils"
 	"fmt"
+	"github.com/zazhedho/family-assistant/pkg/logger"
+	"github.com/zazhedho/family-assistant/pkg/storage"
+	"github.com/zazhedho/family-assistant/utils"
 	"strconv"
 )
 

@@ -2,13 +2,13 @@ package main
 
 import (
 	"database/sql"
-	"family-assistant/infrastructure/database"
-	"family-assistant/internal/router"
-	"family-assistant/pkg/config"
-	"family-assistant/pkg/logger"
-	"family-assistant/utils"
 	"flag"
 	"fmt"
+	"github.com/zazhedho/family-assistant/infrastructure/database"
+	"github.com/zazhedho/family-assistant/internal/router"
+	"github.com/zazhedho/family-assistant/pkg/config"
+	"github.com/zazhedho/family-assistant/pkg/logger"
+	"github.com/zazhedho/family-assistant/utils"
 	"log"
 	"net"
 	"os"

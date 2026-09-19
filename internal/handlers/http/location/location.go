@@ -2,15 +2,15 @@ package handlerlocation
 
 import (
 	"errors"
-	"family-assistant/internal/dto"
-	handlercommon "family-assistant/internal/handlers/http/common"
-	interfacelocation "family-assistant/internal/interfaces/location"
-	servicelocation "family-assistant/internal/services/location"
-	"family-assistant/pkg/logger"
-	"family-assistant/pkg/messages"
-	"family-assistant/pkg/response"
-	"family-assistant/utils"
 	"fmt"
+	"github.com/zazhedho/family-assistant/internal/dto"
+	handlercommon "github.com/zazhedho/family-assistant/internal/handlers/http/common"
+	interfacelocation "github.com/zazhedho/family-assistant/internal/interfaces/location"
+	servicelocation "github.com/zazhedho/family-assistant/internal/services/location"
+	"github.com/zazhedho/family-assistant/pkg/logger"
+	"github.com/zazhedho/family-assistant/pkg/messages"
+	"github.com/zazhedho/family-assistant/pkg/response"
+	"github.com/zazhedho/family-assistant/utils"
 	"net/http"
 
 	"github.com/gin-gonic/gin"

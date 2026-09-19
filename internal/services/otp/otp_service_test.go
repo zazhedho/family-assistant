@@ -3,7 +3,7 @@ package serviceotp
 import (
 	"context"
 	"errors"
-	"family-assistant/pkg/config"
+	"github.com/zazhedho/family-assistant/pkg/config"
 	"testing"
 	"time"
 

@@ -5,11 +5,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"family-assistant/internal/authscope"
-	domainaudit "family-assistant/internal/domain/audit"
-	domainpermission "family-assistant/internal/domain/permission"
-	"family-assistant/internal/dto"
-	"family-assistant/pkg/filter"
+	"github.com/zazhedho/family-assistant/internal/authscope"
+	domainaudit "github.com/zazhedho/family-assistant/internal/domain/audit"
+	domainpermission "github.com/zazhedho/family-assistant/internal/domain/permission"
+	"github.com/zazhedho/family-assistant/internal/dto"
+	"github.com/zazhedho/family-assistant/pkg/filter"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -57,6 +57,12 @@ func (m *permissionServiceTestDouble) GetUserPermissions(ctx context.Context, us
 		return nil, m.err
 	}
 	return m.userPermissions, nil
+}
+func (m *permissionServiceTestDouble) GetRolePermissions(ctx context.Context, roleID string) ([]domainpermission.Permission, error) {
+	if m.err != nil {
+		return nil, m.err
+	}
+	return m.permissions, nil
 }
 func (m *permissionServiceTestDouble) Update(ctx context.Context, id string, req dto.PermissionUpdate) (domainpermission.Permission, error) {
 	m.updateReq = req

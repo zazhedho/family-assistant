@@ -2,8 +2,8 @@ package interfacepermission
 
 import (
 	"context"
-	domainpermission "family-assistant/internal/domain/permission"
-	interfacegeneric "family-assistant/internal/interfaces/generic"
+	domainpermission "github.com/zazhedho/family-assistant/internal/domain/permission"
+	interfacegeneric "github.com/zazhedho/family-assistant/internal/interfaces/generic"
 )
 
 type RepoPermissionInterface interface {
@@ -11,5 +11,6 @@ type RepoPermissionInterface interface {
 
 	GetByName(ctx context.Context, name string) (domainpermission.Permission, error)
 	GetByResource(ctx context.Context, resource string) ([]domainpermission.Permission, error)
+	GetRolePermissions(ctx context.Context, roleID string) ([]domainpermission.Permission, error)
 	GetUserPermissions(ctx context.Context, userId string) ([]domainpermission.Permission, error)
 }

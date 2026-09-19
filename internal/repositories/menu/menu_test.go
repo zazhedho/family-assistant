@@ -9,8 +9,8 @@ import (
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 
-	"family-assistant/pkg/filter"
-	"family-assistant/utils"
+	"github.com/zazhedho/family-assistant/pkg/filter"
+	"github.com/zazhedho/family-assistant/utils"
 )
 
 func newDryRunDB(t *testing.T) *gorm.DB {

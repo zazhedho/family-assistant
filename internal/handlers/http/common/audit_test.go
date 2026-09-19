@@ -3,9 +3,9 @@ package handlercommon
 import (
 	"context"
 	"errors"
-	domainaudit "family-assistant/internal/domain/audit"
-	"family-assistant/internal/dto"
-	"family-assistant/pkg/filter"
+	domainaudit "github.com/zazhedho/family-assistant/internal/domain/audit"
+	"github.com/zazhedho/family-assistant/internal/dto"
+	"github.com/zazhedho/family-assistant/pkg/filter"
 	"net/http"
 	"net/http/httptest"
 	"testing"

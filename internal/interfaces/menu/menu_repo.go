@@ -2,8 +2,8 @@ package interfacemenu
 
 import (
 	"context"
-	domainmenu "family-assistant/internal/domain/menu"
-	interfacegeneric "family-assistant/internal/interfaces/generic"
+	domainmenu "github.com/zazhedho/family-assistant/internal/domain/menu"
+	interfacegeneric "github.com/zazhedho/family-assistant/internal/interfaces/generic"
 )
 
 type RepoMenuInterface interface {

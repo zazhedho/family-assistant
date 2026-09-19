@@ -3,13 +3,13 @@ package servicerole
 import (
 	"context"
 	"errors"
-	"family-assistant/internal/authscope"
-	domainmenu "family-assistant/internal/domain/menu"
-	domainpermission "family-assistant/internal/domain/permission"
-	domainrole "family-assistant/internal/domain/role"
-	"family-assistant/internal/dto"
-	"family-assistant/pkg/filter"
-	"family-assistant/utils"
+	"github.com/zazhedho/family-assistant/internal/authscope"
+	domainmenu "github.com/zazhedho/family-assistant/internal/domain/menu"
+	domainpermission "github.com/zazhedho/family-assistant/internal/domain/permission"
+	domainrole "github.com/zazhedho/family-assistant/internal/domain/role"
+	"github.com/zazhedho/family-assistant/internal/dto"
+	"github.com/zazhedho/family-assistant/pkg/filter"
+	"github.com/zazhedho/family-assistant/utils"
 	"testing"
 )
 
@@ -105,6 +105,9 @@ func (m *permissionRepoMock) GetByResource(ctx context.Context, resource string)
 	return nil, nil
 }
 func (m *permissionRepoMock) GetUserPermissions(ctx context.Context, userId string) ([]domainpermission.Permission, error) {
+	return append([]domainpermission.Permission{}, m.userPermissions...), nil
+}
+func (m *permissionRepoMock) GetRolePermissions(ctx context.Context, roleID string) ([]domainpermission.Permission, error) {
 	return append([]domainpermission.Permission{}, m.userPermissions...), nil
 }
 
