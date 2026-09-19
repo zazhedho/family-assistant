@@ -11,21 +11,40 @@ func TestSpaceFoundationMigration(t *testing.T) {
 	for _, required := range []string{
 		"ADD COLUMN IF NOT EXISTS birth_date DATE",
 		"CREATE TABLE IF NOT EXISTS spaces",
-		"CREATE UNIQUE INDEX ux_spaces_personal_created_by",
+		"CREATE UNIQUE INDEX IF NOT EXISTS ux_spaces_personal_created_by",
 		"CREATE TABLE IF NOT EXISTS space_members",
 		"CREATE TABLE IF NOT EXISTS space_invitations",
 		"CREATE TABLE IF NOT EXISTS external_identities",
 		"CREATE TABLE IF NOT EXISTS identity_link_tokens",
 		"CHECK (type IN ('PERSONAL','SHARED'))",
+		"CONSTRAINT ck_spaces_category CHECK (category IN ('personal','family','friends','community','work','finance','custom'))",
+		"CONSTRAINT ck_spaces_type_category CHECK",
+		"invited_email VARCHAR(255),",
+		"accepted_by_user_id UUID",
+		"fk_space_invitations_acceptor",
+		"verified_at TIMESTAMPTZ",
+		"metadata JSONB NOT NULL DEFAULT '{}'::jsonb",
+		"provider VARCHAR(64) NOT NULL",
 	} {
 		if !strings.Contains(up, required) {
 			t.Errorf("missing %q", required)
 		}
 	}
+	if strings.Count(up, "provider VARCHAR(64) NOT NULL") != 2 {
+		t.Errorf("provider must be persisted on external identities and link tokens")
+	}
 	for _, forbidden := range []string{"families", "family_members", "hermes_profile_id"} {
 		if strings.Contains(up, forbidden) {
 			t.Errorf("retains %q", forbidden)
 		}
+	}
+	if strings.Contains(up, "REMOVED") {
+		t.Error("space member status retains unsupported REMOVED value")
+	}
+
+	down := readMigration(t, "000008_seed_space_rbac.down.sql")
+	if !strings.Contains(down, "NOT EXISTS (SELECT 1 FROM space_members") {
+		t.Error("seed rollback must preserve roles referenced by space members")
 	}
 }
 
@@ -36,6 +55,7 @@ func TestReminderMigrationIsSpaceScoped(t *testing.T) {
 		"assignee_member_id UUID",
 		"fk_reminders_creator_space",
 		"fk_reminders_assignee_space",
+		"deleted_at TIMESTAMPTZ",
 	} {
 		if !strings.Contains(up, required) {
 			t.Errorf("missing %q", required)
