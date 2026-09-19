@@ -84,7 +84,7 @@ CREATE TABLE IF NOT EXISTS external_identities (
     provider VARCHAR(64) NOT NULL,
     external_id VARCHAR(255) NOT NULL,
     status VARCHAR(32) NOT NULL DEFAULT 'ACTIVE',
-    verified_at TIMESTAMPTZ,
+    verified_at TIMESTAMPTZ NOT NULL,
     metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),

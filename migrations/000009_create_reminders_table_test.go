@@ -22,7 +22,7 @@ func TestSpaceFoundationMigration(t *testing.T) {
 		"invited_email VARCHAR(255),",
 		"accepted_by_user_id UUID",
 		"fk_space_invitations_acceptor",
-		"verified_at TIMESTAMPTZ",
+		"verified_at TIMESTAMPTZ NOT NULL",
 		"metadata JSONB NOT NULL DEFAULT '{}'::jsonb",
 		"provider VARCHAR(64) NOT NULL",
 	} {
@@ -43,8 +43,14 @@ func TestSpaceFoundationMigration(t *testing.T) {
 	}
 
 	down := readMigration(t, "000008_seed_space_rbac.down.sql")
-	if !strings.Contains(down, "NOT EXISTS (SELECT 1 FROM space_members") {
-		t.Error("seed rollback must preserve roles referenced by space members")
+	for _, required := range []string{
+		"RAISE EXCEPTION",
+		"FROM space_members",
+		"FROM space_invitations",
+	} {
+		if !strings.Contains(down, required) {
+			t.Errorf("seed rollback missing dependent-row guard %q", required)
+		}
 	}
 }
 

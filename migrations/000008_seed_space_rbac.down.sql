@@ -1,3 +1,28 @@
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1
+        FROM space_members
+        WHERE role_id IN (
+            '11111111-1111-4111-8111-000000000001',
+            '11111111-1111-4111-8111-000000000002',
+            '11111111-1111-4111-8111-000000000003',
+            '11111111-1111-4111-8111-000000000004'
+        )
+    ) OR EXISTS (
+        SELECT 1
+        FROM space_invitations
+        WHERE role_id IN (
+            '11111111-1111-4111-8111-000000000001',
+            '11111111-1111-4111-8111-000000000002',
+            '11111111-1111-4111-8111-000000000003',
+            '11111111-1111-4111-8111-000000000004'
+        )
+    ) THEN
+        RAISE EXCEPTION 'cannot roll back Space RBAC while seeded roles are referenced';
+    END IF;
+END$$;
+
 DELETE FROM role_permissions rp
 USING roles r, permissions p
 WHERE rp.id = md5('space-rbac:' || r.name || ':' || p.name)::uuid
@@ -38,5 +63,4 @@ WHERE id IN (
     '11111111-1111-4111-8111-000000000002',
     '11111111-1111-4111-8111-000000000003',
     '11111111-1111-4111-8111-000000000004'
-)
-AND NOT EXISTS (SELECT 1 FROM space_members sm WHERE sm.role_id = roles.id);
+);
