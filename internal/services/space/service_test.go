@@ -3,6 +3,7 @@ package servicespace
 import (
 	"context"
 	"errors"
+	"reflect"
 	"testing"
 
 	"family-assistant/internal/authscope"
@@ -218,8 +219,11 @@ func TestCreateSharedSpaceAuditsFailureWithoutRequestBody(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected repository error")
 	}
-	if len(audit.events) != 1 || audit.events[0].Status != domainaudit.StatusFailed || audit.events[0].ErrorMessage != "internal" || audit.events[0].ResourceID == "" || audit.events[0].ActorUserID != "user-1" || audit.events[0].ActorMemberID != "member-personal" || audit.events[0].Source != "http" || audit.events[0].AfterData != nil {
+	if len(audit.events) != 1 || audit.events[0].Status != domainaudit.StatusFailed || audit.events[0].ErrorMessage != "internal" || audit.events[0].ResourceID == "" || audit.events[0].ActorUserID != "user-1" || audit.events[0].ActorMemberID != "member-personal" || audit.events[0].ResourceOwnerMemberID == "" || audit.events[0].Source != "http" || audit.events[0].AfterData != nil {
 		t.Fatalf("unexpected failure audit: %+v", audit.events)
+	}
+	if audit.events[0].ErrorMessage == "insert failed: secret=raw-body password=top-secret" || audit.events[0].ErrorMessage == "sql" {
+		t.Fatalf("failure audit leaked raw error: %+v", audit.events[0])
 	}
 }
 
@@ -257,15 +261,24 @@ func TestListAuditsEmptySuccess(t *testing.T) {
 
 func TestListDeniesMembershipRoleWithoutListPermission(t *testing.T) {
 	audit := &spaceAuditStub{}
-	repo := &spaceRepositoryStub{memberships: []domainspace.ResolvedMembership{membership("role-1", "space-1", "user-1")}}
+	repo := &spaceRepositoryStub{memberships: []domainspace.ResolvedMembership{
+		membership("role-1", "space-b", "user-1"),
+		membership("role-1", "space-a", "user-1"),
+	}}
 	service := newSpaceService(repo, map[string][]domainpermission.Permission{"role-1": {}}, audit)
 
 	_, err := service.List(context.Background(), "user-1")
 	if !errors.Is(err, ErrForbidden) {
 		t.Fatalf("expected forbidden, got %v", err)
 	}
-	if len(audit.events) != 1 || audit.events[0].Status != domainaudit.StatusFailed || audit.events[0].ErrorMessage != "forbidden" {
+	if len(audit.events) != 1 || audit.events[0].Status != domainaudit.StatusFailed || audit.events[0].ErrorMessage != "forbidden" || audit.events[0].ResourceID != "" || audit.events[0].ActorMemberID != "" {
 		t.Fatalf("expected one sanitized denial audit, got %+v", audit.events)
+	}
+	if got := audit.events[0].Metadata["space_ids"]; !reflect.DeepEqual(got, []string{"space-a", "space-b"}) {
+		t.Fatalf("denied space IDs = %#v, want deterministic candidates", got)
+	}
+	if got := audit.events[0].Metadata["member_ids"]; !reflect.DeepEqual(got, []string{"member-space-a", "member-space-b"}) {
+		t.Fatalf("denied member IDs = %#v, want deterministic candidates", got)
 	}
 }
 
@@ -278,8 +291,14 @@ func TestCreateDeniesMembershipRoleWithoutCreatePermission(t *testing.T) {
 	if !errors.Is(err, ErrForbidden) {
 		t.Fatalf("expected forbidden, got %v", err)
 	}
-	if len(audit.events) != 1 || audit.events[0].Status != domainaudit.StatusFailed || audit.events[0].ErrorMessage != "forbidden" {
+	if len(audit.events) != 1 || audit.events[0].Status != domainaudit.StatusFailed || audit.events[0].ErrorMessage != "forbidden" || audit.events[0].ResourceID != "space-1" || audit.events[0].ActorMemberID != "member-space-1" {
 		t.Fatalf("expected one sanitized denial audit, got %+v", audit.events)
+	}
+	if got := audit.events[0].Metadata["space_ids"]; !reflect.DeepEqual(got, []string{"space-1"}) {
+		t.Fatalf("denied space IDs = %#v, want candidate", got)
+	}
+	if got := audit.events[0].Metadata["member_ids"]; !reflect.DeepEqual(got, []string{"member-space-1"}) {
+		t.Fatalf("denied member IDs = %#v, want candidate", got)
 	}
 }
 

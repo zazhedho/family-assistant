@@ -3,6 +3,7 @@ package servicespace
 import (
 	"context"
 	"errors"
+	"sort"
 	"strings"
 	"time"
 
@@ -91,6 +92,7 @@ func (s *service) List(ctx context.Context, userID string) ([]domainspace.Resolv
 	}
 
 	allowed := make([]domainspace.ResolvedMembership, 0, len(memberships))
+	denied := make([]domainspace.ResolvedMembership, 0, len(memberships))
 	for _, membership := range memberships {
 		ok, err := s.hasPermission(ctx, membership.RoleID, listPermission)
 		if err != nil {
@@ -98,13 +100,15 @@ func (s *service) List(ctx context.Context, userID string) ([]domainspace.Resolv
 			return nil, err
 		}
 		if !ok {
+			denied = append(denied, membership)
 			continue
 		}
 		allowed = append(allowed, membership)
 	}
 	if len(memberships) > 0 && len(allowed) == 0 {
 		err := ErrForbidden
-		s.writeFailure(ctx, "list", "", "", userID, err)
+		spaceID, memberID, metadata := auditCandidateDetails(denied)
+		s.writeFailureWithDetails(ctx, "list", spaceID, memberID, "", userID, metadata, err)
 		return nil, err
 	}
 	spaceID, memberID := "", ""
@@ -151,20 +155,25 @@ func (s *service) Create(ctx context.Context, userID string, input CreateInput) 
 		return nil, err
 	}
 	var actorMembership *domainspace.ResolvedMembership
+	denied := make([]domainspace.ResolvedMembership, 0, len(memberships))
 	for i := range memberships {
 		ok, permissionErr := s.hasPermission(ctx, memberships[i].RoleID, createPermission)
 		if permissionErr != nil {
-			s.writeFailure(ctx, domainaudit.ActionCreate, memberships[i].SpaceID, memberships[i].ID, userID, permissionErr)
+			denied = append(denied, memberships[i])
+			spaceID, memberID, metadata := auditCandidateDetails(denied)
+			s.writeFailureWithDetails(ctx, domainaudit.ActionCreate, spaceID, memberID, "", userID, metadata, permissionErr)
 			return nil, permissionErr
 		}
 		if ok {
 			actorMembership = &memberships[i]
 			break
 		}
+		denied = append(denied, memberships[i])
 	}
 	if actorMembership == nil {
 		err = ErrForbidden
-		s.writeFailure(ctx, domainaudit.ActionCreate, "", "", userID, err)
+		spaceID, memberID, metadata := auditCandidateDetails(denied)
+		s.writeFailureWithDetails(ctx, domainaudit.ActionCreate, spaceID, memberID, "", userID, metadata, err)
 		return nil, err
 	}
 
@@ -203,7 +212,7 @@ func (s *service) Create(ctx context.Context, userID string, input CreateInput) 
 		CreatedAt: now,
 	}
 	if err = s.spaces.CreateWithOwner(ctx, created, owner); err != nil {
-		s.writeFailure(ctx, domainaudit.ActionCreate, created.ID, actorMembership.ID, userID, err)
+		s.writeFailureWithDetails(ctx, domainaudit.ActionCreate, created.ID, actorMembership.ID, owner.ID, userID, nil, err)
 		return nil, err
 	}
 
@@ -300,10 +309,37 @@ func (s *service) writeSuccess(ctx context.Context, action, spaceID, memberID, u
 }
 
 func (s *service) writeFailure(ctx context.Context, action, spaceID, memberID, userID string, err error) {
-	event := s.newAuditEvent(ctx, action, spaceID, memberID, "", userID)
+	s.writeFailureWithDetails(ctx, action, spaceID, memberID, "", userID, nil, err)
+}
+
+func (s *service) writeFailureWithDetails(ctx context.Context, action, spaceID, memberID, ownerMemberID, userID string, metadata map[string]any, err error) {
+	event := s.newAuditEvent(ctx, action, spaceID, memberID, ownerMemberID, userID)
 	event.Status = domainaudit.StatusFailed
+	event.Metadata = utils.MergeMetadata(event.Metadata, metadata)
 	event.ErrorMessage = FailureCategory(err)
 	s.writeAudit(ctx, event)
+}
+
+func auditCandidateDetails(memberships []domainspace.ResolvedMembership) (spaceID, memberID string, metadata map[string]any) {
+	candidates := append([]domainspace.ResolvedMembership(nil), memberships...)
+	sort.Slice(candidates, func(i, j int) bool {
+		if candidates[i].SpaceID == candidates[j].SpaceID {
+			return candidates[i].ID < candidates[j].ID
+		}
+		return candidates[i].SpaceID < candidates[j].SpaceID
+	})
+
+	spaceIDs := make([]string, 0, len(candidates))
+	memberIDs := make([]string, 0, len(candidates))
+	for _, candidate := range candidates {
+		spaceIDs = append(spaceIDs, candidate.SpaceID)
+		memberIDs = append(memberIDs, candidate.ID)
+	}
+	metadata = map[string]any{"space_ids": spaceIDs, "member_ids": memberIDs}
+	if len(candidates) == 1 {
+		return candidates[0].SpaceID, candidates[0].ID, metadata
+	}
+	return "", "", metadata
 }
 
 func (s *service) newAuditEvent(ctx context.Context, action, spaceID, memberID, ownerMemberID, userID string) domainaudit.AuditEvent {
