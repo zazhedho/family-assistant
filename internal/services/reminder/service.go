@@ -11,6 +11,7 @@ import (
 	domainspace "family-assistant/internal/domain/space"
 	"family-assistant/internal/services/authorization"
 	serviceidentity "family-assistant/internal/services/identity"
+	"gorm.io/gorm"
 )
 
 const (
@@ -180,14 +181,20 @@ func (s *service) Complete(ctx context.Context, actor serviceidentity.ActorConte
 		return nil, authorization.ErrNotFound
 	}
 	reminder, err := s.reminders.FindByIDInSpace(ctx, spaceID, reminderID)
-	if err != nil || reminder == nil {
+	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, authorization.ErrNotFound
 	}
-	if reminder.Status != domainreminder.StatusPending {
-		return nil, ErrConflict
+	if err != nil {
+		return nil, err
+	}
+	if reminder == nil {
+		return nil, authorization.ErrNotFound
 	}
 	if !canComplete(actorMember.RoleName, actorMember.ID, reminder) {
 		return nil, authorization.ErrForbidden
+	}
+	if reminder.Status != domainreminder.StatusPending {
+		return nil, ErrConflict
 	}
 	now := time.Now().UTC()
 	if err := s.reminders.CompletePending(ctx, spaceID, reminderID, now); err != nil {

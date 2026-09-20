@@ -11,6 +11,7 @@ import (
 	domainspace "family-assistant/internal/domain/space"
 	"family-assistant/internal/services/authorization"
 	serviceidentity "family-assistant/internal/services/identity"
+	"gorm.io/gorm"
 )
 
 const (
@@ -26,6 +27,7 @@ type reminderRepositoryStub struct {
 	listed      []domainreminder.Reminder
 	listFilter  domainreminder.ListFilter
 	found       *domainreminder.Reminder
+	findErr     error
 	findSpace   string
 	findID      string
 	completed   bool
@@ -40,8 +42,11 @@ func (s *reminderRepositoryStub) Create(_ context.Context, reminder *domainremin
 
 func (s *reminderRepositoryStub) FindByIDInSpace(_ context.Context, spaceID, reminderID string) (*domainreminder.Reminder, error) {
 	s.findSpace, s.findID = spaceID, reminderID
+	if s.findErr != nil {
+		return nil, s.findErr
+	}
 	if s.found == nil {
-		return nil, domainreminder.ErrReminderRequired
+		return nil, gorm.ErrRecordNotFound
 	}
 	copy := *s.found
 	return &copy, nil
@@ -441,6 +446,37 @@ func TestCompleteTerminalReminderReturnsConflict(t *testing.T) {
 	}
 	if repo.completed {
 		t.Fatal("terminal reminder was updated")
+	}
+}
+
+func TestCompletePropagatesReminderLookupError(t *testing.T) {
+	lookupErr := errors.New("reminder store unavailable")
+	repo := &reminderRepositoryStub{findErr: lookupErr}
+	spaces := &spaceRepositoryStub{members: []domainspace.ResolvedMembership{
+		membership(sharedSpaceID, creatorID, "space_owner", "user-1"),
+	}}
+	service := newReminderService(repo, spaces, nil)
+	actor := actor(sharedSpaceID, domainspace.TypeShared, creatorID, "space_owner", "reminders:update")
+
+	_, err := service.Complete(context.Background(), actor, sharedSpaceID, reminderID)
+	if !errors.Is(err, lookupErr) {
+		t.Fatalf("complete error = %v, want lookup error", err)
+	}
+}
+
+func TestCompleteUnauthorizedMemberCannotLearnTerminalState(t *testing.T) {
+	repo := &reminderRepositoryStub{found: &domainreminder.Reminder{
+		ID: reminderID, SpaceID: sharedSpaceID, CreatedByMemberID: creatorID, Status: domainreminder.StatusCompleted,
+	}}
+	spaces := &spaceRepositoryStub{members: []domainspace.ResolvedMembership{
+		membership(sharedSpaceID, "member-other", "space_member", "user-1"),
+	}}
+	service := newReminderService(repo, spaces, nil)
+	actor := actor(sharedSpaceID, domainspace.TypeShared, "member-other", "space_member", "reminders:update")
+
+	_, err := service.Complete(context.Background(), actor, sharedSpaceID, reminderID)
+	if !errors.Is(err, authorization.ErrForbidden) {
+		t.Fatalf("complete error = %v, want forbidden", err)
 	}
 }
 
