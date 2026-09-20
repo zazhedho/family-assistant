@@ -146,6 +146,28 @@ Optional but recommended:
 - `GOOGLE_CLIENT_ID` or `GOOGLE_CLIENT_IDS` for Google login
 - SMTP settings for register OTP and password reset email flows. These stay optional; when SMTP connection env is set, `SMTP_HOST`, `SMTP_PASS`, `SMTP_FROM`, and `SMTP_PORT` format are validated.
 
+Personal and Shared Space settings:
+- `MIN_INDEPENDENT_ACCOUNT_AGE` sets the minimum registration age (default `18`).
+- `SPACE_INVITATION_TTL_SECONDS` controls pending invitation expiry (default `86400`).
+- `IDENTITY_LINK_TTL_SECONDS` controls one-time Hermes identity-link expiry (default `900`).
+
+### Local PostgreSQL databases
+
+Development uses the exact database name `family_assistant`. Integration tests use a
+separate exact database named `family_assistant_test`; create both databases with
+the credentials from the ignored `.env`, then run the normal migration command
+against `family_assistant`.
+
+The PostgreSQL integration test only accepts a local host and the exact test
+database path. Run it with an explicit URL ending exactly in:
+
+```text
+FAMILY_ASSISTANT_TEST_DATABASE_URL=postgres://<user>@127.0.0.1:5432/family_assistant_test?sslmode=disable
+```
+
+It refuses non-local hosts or any database other than `family_assistant_test`.
+Keep this URL local and never use it for a development or production database.
+
 ## Run Locally
 
 Install dependencies and prepare `.env`, then:
@@ -173,12 +195,22 @@ X-Hermes-Profile: <stable profile id>
 X-Hermes-Channel: whatsapp
 ```
 
-The endpoint is `http://127.0.0.1:8081/mcp` by default. Available tools are
-`family_get_member`, `reminder_create`, `reminder_list`, and
-`reminder_complete`. The profile header is resolved to the local family
-member; database IDs supplied as tool arguments are inputs only and are
-re-authorized for the requested family resource, never trusted as caller
-identity.
+The endpoint is `http://127.0.0.1:8081/mcp` by default. The exact tool allowlist
+is:
+
+- `identity_link`
+- `space_list`
+- `space_get_members`
+- `reminder_create`
+- `reminder_list`
+- `reminder_complete`
+
+`identity_link` consumes a one-time code issued through the authenticated HTTP
+endpoint. `X-Hermes-Profile` is resolved dynamically to the linked user, and
+`X-Hermes-Channel` is retained for audit provenance. Space selectors accept an
+authorized Space UUID or exact user-facing name; a blank selector uses the
+user's Personal Space. Every reminder operation re-authorizes the selected
+Space and resource.
 
 Default health check:
 
@@ -200,6 +232,23 @@ The current route set includes:
 - `POST /api/user/logout`
 - `GET /api/user`
 - `GET /api/users`
+
+`POST /api/user/register` requires `birth_date` in `YYYY-MM-DD` format and
+enforces `MIN_INDEPENDENT_ACCOUNT_AGE`.
+
+Personal and Shared Space routes:
+- `GET /api/spaces`
+- `POST /api/spaces`
+- `GET /api/spaces/:space_id/members`
+- `POST /api/spaces/:space_id/invitations`
+- `POST /api/invitations/accept`
+- `POST /api/hermes/link-codes`
+- `DELETE /api/hermes/link`
+
+Space-scoped reminder routes:
+- `POST /api/reminders`
+- `GET /api/reminders?space_id=<space-id>`
+- `POST /api/reminders/:reminder_id/complete?space_id=<space-id>`
 
 - `GET /api/roles`
 - `POST /api/role`
