@@ -45,6 +45,10 @@ type ReminderOutput struct {
 	ScheduledAt      string  `json:"scheduled_at"`
 }
 
+type ReminderListOutput struct {
+	Reminders []ReminderOutput `json:"reminders"`
+}
+
 func ReminderCreate(ctx context.Context, resolver serviceidentity.Resolver, service servicereminder.Service, input ReminderCreateInput) (ReminderOutput, error) {
 	actor, err := reminderActor(ctx, resolver, input.Space)
 	if err != nil {
@@ -189,9 +193,9 @@ func registerReminderTools(server *mcpsdk.Server, service servicereminder.Servic
 	})
 	mcpsdk.AddTool(server, &mcpsdk.Tool{
 		Name: "reminder_list", Description: "List reminders in an authorized Space.",
-	}, func(ctx context.Context, _ *mcpsdk.CallToolRequest, input ReminderListInput) (*mcpsdk.CallToolResult, []ReminderOutput, error) {
+	}, func(ctx context.Context, _ *mcpsdk.CallToolRequest, input ReminderListInput) (*mcpsdk.CallToolResult, ReminderListOutput, error) {
 		output, err := ReminderList(ctx, resolver, service, input)
-		return nil, output, err
+		return nil, ReminderListOutput{Reminders: output}, err
 	})
 	mcpsdk.AddTool(server, &mcpsdk.Tool{
 		Name: "reminder_complete", Description: "Complete an authorized Space reminder.",

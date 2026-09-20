@@ -15,6 +15,14 @@ type SpaceGetMembersInput struct {
 	Space string `json:"space,omitempty" jsonschema:"Space UUID or exact user-facing name; blank selects Personal Space"`
 }
 
+type SpaceListOutput struct {
+	Spaces []domainspace.ResolvedMembership `json:"spaces"`
+}
+
+type SpaceMembersOutput struct {
+	Members []domainspace.ResolvedMembership `json:"members"`
+}
+
 func SpaceList(ctx context.Context, resolver serviceidentity.Resolver, service servicespace.Service) ([]domainspace.ResolvedMembership, error) {
 	actor, err := RequireActor(ctx, resolver)
 	if err != nil {
@@ -68,14 +76,14 @@ func selectorPermissions(resolver serviceidentity.Resolver) serviceidentity.Perm
 func registerSpaceTools(server *mcpsdk.Server, resolver serviceidentity.Resolver, service servicespace.Service) {
 	mcpsdk.AddTool(server, &mcpsdk.Tool{
 		Name: "space_list", Description: "List the authenticated user's active Spaces.",
-	}, func(ctx context.Context, _ *mcpsdk.CallToolRequest, _ struct{}) (*mcpsdk.CallToolResult, []domainspace.ResolvedMembership, error) {
+	}, func(ctx context.Context, _ *mcpsdk.CallToolRequest, _ struct{}) (*mcpsdk.CallToolResult, SpaceListOutput, error) {
 		output, err := SpaceList(ctx, resolver, service)
-		return nil, output, err
+		return nil, SpaceListOutput{Spaces: output}, err
 	})
 	mcpsdk.AddTool(server, &mcpsdk.Tool{
 		Name: "space_get_members", Description: "List members of an authorized Space.",
-	}, func(ctx context.Context, _ *mcpsdk.CallToolRequest, input SpaceGetMembersInput) (*mcpsdk.CallToolResult, []domainspace.ResolvedMembership, error) {
+	}, func(ctx context.Context, _ *mcpsdk.CallToolRequest, input SpaceGetMembersInput) (*mcpsdk.CallToolResult, SpaceMembersOutput, error) {
 		output, err := SpaceGetMembers(ctx, resolver, service, input)
-		return nil, output, err
+		return nil, SpaceMembersOutput{Members: output}, err
 	})
 }

@@ -85,7 +85,8 @@ type mcpServerResponse struct {
 		StructuredOutput json.RawMessage `json:"structuredContent"`
 		IsError          bool            `json:"isError"`
 		Tools            []struct {
-			Name string `json:"name"`
+			Name         string          `json:"name"`
+			OutputSchema json.RawMessage `json:"outputSchema"`
 		} `json:"tools"`
 	} `json:"result,omitempty"`
 	Error *struct {
@@ -202,6 +203,29 @@ func TestHTTPHandlerExposesOnlyCurrentMCPToolsWhenRemindersAreAbsent(t *testing.
 	}
 }
 
+func TestHTTPHandlerToolOutputSchemasUseHermesObjectRoot(t *testing.T) {
+	handler := NewHTTPHandler(config.MCPConfig{ServerKey: "secret"}, &resolverStub{}, nil, nil, nil)
+	server := httptest.NewServer(handler)
+	t.Cleanup(server.Close)
+
+	initializeMCPServer(t, server.URL)
+	response := callMCPServer(t, server.URL, "profile", "secret", "tools/list", map[string]any{})
+	if response.Error != nil || response.Result == nil {
+		t.Fatalf("tools/list failed: %+v", response)
+	}
+	for _, tool := range response.Result.Tools {
+		var schema struct {
+			Type json.RawMessage `json:"type"`
+		}
+		if err := json.Unmarshal(tool.OutputSchema, &schema); err != nil {
+			t.Fatalf("decode %s output schema: %v", tool.Name, err)
+		}
+		if string(schema.Type) != `"object"` {
+			t.Errorf("%s output schema type = %q, want object: %s", tool.Name, schema.Type, tool.OutputSchema)
+		}
+	}
+}
+
 func TestHTTPHandlerProtectedSpaceToolMapsSuccessForbiddenAndNotFound(t *testing.T) {
 	spaceID := "00000000-0000-0000-0000-000000000201"
 	expectedMember := domainspace.ResolvedMembership{
@@ -245,12 +269,14 @@ func TestHTTPHandlerProtectedSpaceToolMapsSuccessForbiddenAndNotFound(t *testing
 				if service.membersCalls != 1 || service.membersUser != "user-1" || service.membersSpace != spaceID {
 					t.Fatalf("space service args = calls:%d user:%q space:%q, want one call for trusted user and selected Space", service.membersCalls, service.membersUser, service.membersSpace)
 				}
-				var got []domainspace.ResolvedMembership
-				if err := json.Unmarshal(response.Result.StructuredOutput, &got); err != nil {
+				var payload struct {
+					Members []domainspace.ResolvedMembership `json:"members"`
+				}
+				if err := json.Unmarshal(response.Result.StructuredOutput, &payload); err != nil {
 					t.Fatalf("decode success structured output: %v", err)
 				}
-				if len(got) != 1 || got[0] != expectedMember {
-					t.Fatalf("success payload = %+v, want %+v", got, []domainspace.ResolvedMembership{expectedMember})
+				if len(payload.Members) != 1 || payload.Members[0] != expectedMember {
+					t.Fatalf("success payload = %+v, want %+v", payload.Members, []domainspace.ResolvedMembership{expectedMember})
 				}
 				return
 			}
