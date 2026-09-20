@@ -262,21 +262,33 @@ func canComplete(role, memberID string, reminder *domainreminder.Reminder) bool 
 
 func auditEvent(actor serviceidentity.ActorContext, action, spaceID, resourceID, ownerID, status string, metadata map[string]any) domainaudit.AuditEvent {
 	if metadata == nil {
-		metadata = make(map[string]any, 1)
+		metadata = make(map[string]any, 2)
 	}
 	metadata["space_id"] = strings.TrimSpace(spaceID)
+	actorUserID := strings.TrimSpace(actor.UserID)
+	actorRole := strings.TrimSpace(actor.RoleName)
+	initiatorUserID := strings.TrimSpace(actor.InitiatorUserID)
+	if initiatorUserID != "" {
+		actorUserID = initiatorUserID
+		if subjectUserID := strings.TrimSpace(actor.UserID); subjectUserID != "" && subjectUserID != initiatorUserID {
+			metadata["subject_user_id"] = subjectUserID
+		}
+	}
+	if initiatorRole := strings.TrimSpace(actor.InitiatorRoleName); initiatorRole != "" {
+		actorRole = initiatorRole
+	}
 	profile := strings.TrimSpace(actor.ExternalID)
 	if profile == "" {
 		profile = strings.TrimSpace(actor.HermesProfileID)
 	}
 	return domainaudit.AuditEvent{
-		ActorUserID:           strings.TrimSpace(actor.UserID),
+		ActorUserID:           actorUserID,
 		ActorMemberID:         strings.TrimSpace(actor.MemberID),
 		ResourceOwnerMemberID: strings.TrimSpace(ownerID),
 		Source:                auditSource(actor.Source),
 		Channel:               strings.TrimSpace(actor.Channel),
 		AgentProfile:          profile,
-		ActorRole:             strings.TrimSpace(actor.RoleName),
+		ActorRole:             actorRole,
 		Action:                action,
 		Resource:              "reminder",
 		ResourceID:            strings.TrimSpace(resourceID),

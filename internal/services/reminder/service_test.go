@@ -279,6 +279,36 @@ func TestCreateAuditsSanitizedSpaceAndExternalMetadata(t *testing.T) {
 	}
 }
 
+func TestCreateAuditPreservesImpersonatorAndSubject(t *testing.T) {
+	repo := &reminderRepositoryStub{}
+	spaces := &spaceRepositoryStub{members: []domainspace.ResolvedMembership{
+		membership(personalSpaceID, creatorID, "space_member", "subject-user"),
+	}}
+	audit := &auditStoreStub{}
+	service := newReminderService(repo, spaces, audit)
+	actor := actor(personalSpaceID, domainspace.TypePersonal, creatorID, "space_member", "reminders:create")
+	actor.UserID = "subject-user"
+	actor.InitiatorUserID = "operator-user"
+	actor.InitiatorRoleName = "space_admin"
+
+	if _, err := service.Create(context.Background(), actor, CreateInput{
+		Title:       "Pay electricity bill",
+		ScheduledAt: time.Date(2026, 9, 20, 8, 0, 0, 0, time.UTC),
+	}); err != nil {
+		t.Fatalf("create reminder: %v", err)
+	}
+	if len(audit.events) != 1 {
+		t.Fatalf("audit events = %#v, want one success", audit.events)
+	}
+	event := audit.events[0]
+	if event.ActorUserID != "operator-user" || event.ActorRole != "space_admin" {
+		t.Fatalf("audit initiator = user %q role %q, want operator-user/space_admin", event.ActorUserID, event.ActorRole)
+	}
+	if event.Metadata["subject_user_id"] != "subject-user" {
+		t.Fatalf("subject metadata = %#v, want subject-user", event.Metadata)
+	}
+}
+
 func TestCreateValidationFailureAuditsSanitizedFailureMetadata(t *testing.T) {
 	repo := &reminderRepositoryStub{}
 	spaces := &spaceRepositoryStub{members: []domainspace.ResolvedMembership{
