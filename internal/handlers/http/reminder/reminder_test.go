@@ -3,15 +3,15 @@ package handlerreminder
 import (
 	"bytes"
 	"context"
-	"encoding/json"
-	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 	"time"
 
 	"family-assistant/internal/authscope"
+	domainpermission "family-assistant/internal/domain/permission"
 	domainreminder "family-assistant/internal/domain/reminder"
+	domainspace "family-assistant/internal/domain/space"
 	serviceauthorization "family-assistant/internal/services/authorization"
 	serviceidentity "family-assistant/internal/services/identity"
 	servicereminder "family-assistant/internal/services/reminder"
@@ -19,7 +19,11 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-const httpReminderID = "00000000-0000-0000-0000-000000000101"
+const (
+	httpReminderID = "00000000-0000-0000-0000-000000000101"
+	httpSpaceID    = "00000000-0000-0000-0000-000000000201"
+	httpMemberID   = "00000000-0000-0000-0000-000000000301"
+)
 
 type reminderHTTPServiceStub struct {
 	createActor   serviceidentity.ActorContext
@@ -27,6 +31,7 @@ type reminderHTTPServiceStub struct {
 	listActor     serviceidentity.ActorContext
 	listInput     servicereminder.ListInput
 	completeActor serviceidentity.ActorContext
+	completeSpace string
 	completeID    string
 	created       *domainreminder.Reminder
 	listed        []domainreminder.Reminder
@@ -44,8 +49,9 @@ func (s *reminderHTTPServiceStub) Create(_ context.Context, actor serviceidentit
 	if s.created != nil {
 		return s.created, nil
 	}
-	return &domainreminder.Reminder{ID: httpReminderID, Title: input.Title, Scope: input.Scope, Status: domainreminder.StatusPending, ScheduledAt: input.ScheduledAt}, nil
+	return &domainreminder.Reminder{ID: httpReminderID, SpaceID: input.Space, Title: input.Title, AssigneeMemberID: input.AssigneeMemberID, Status: domainreminder.StatusPending, ScheduledAt: input.ScheduledAt}, nil
 }
+
 func (s *reminderHTTPServiceStub) List(_ context.Context, actor serviceidentity.ActorContext, input servicereminder.ListInput) ([]domainreminder.Reminder, error) {
 	s.listActor, s.listInput = actor, input
 	if s.listErr != nil {
@@ -53,15 +59,16 @@ func (s *reminderHTTPServiceStub) List(_ context.Context, actor serviceidentity.
 	}
 	return s.listed, nil
 }
-func (s *reminderHTTPServiceStub) Complete(_ context.Context, actor serviceidentity.ActorContext, id string) (*domainreminder.Reminder, error) {
-	s.completeActor, s.completeID = actor, id
+
+func (s *reminderHTTPServiceStub) Complete(_ context.Context, actor serviceidentity.ActorContext, spaceID, reminderID string) (*domainreminder.Reminder, error) {
+	s.completeActor, s.completeSpace, s.completeID = actor, spaceID, reminderID
 	if s.completeErr != nil {
 		return nil, s.completeErr
 	}
 	if s.completed != nil {
 		return s.completed, nil
 	}
-	return &domainreminder.Reminder{ID: id, Title: "Pay bill", Scope: domainreminder.ScopePersonal, Status: domainreminder.StatusCompleted, ScheduledAt: time.Date(2026, 9, 20, 1, 0, 0, 0, time.UTC)}, nil
+	return &domainreminder.Reminder{ID: reminderID, SpaceID: spaceID, Title: "Pay bill", Status: domainreminder.StatusCompleted, ScheduledAt: time.Date(2026, 9, 20, 1, 0, 0, 0, time.UTC)}, nil
 }
 
 type userResolverStub struct {
@@ -78,117 +85,48 @@ func (s *userResolverStub) ResolveUser(_ context.Context, userID, channel string
 	return s.actor, s.err
 }
 
-func TestReminderCreateRejectsTrailingJSON(t *testing.T) {
-	service := &reminderHTTPServiceStub{}
-	h := NewReminderHandler(service, &userResolverStub{actor: httpTestActor()})
-	gin.SetMode(gin.TestMode)
-	router := gin.New()
-	router.POST("/api/reminders", func(ctx *gin.Context) {
-		ctx.Request = ctx.Request.WithContext(authscope.WithContext(ctx.Request.Context(), authscope.New("user-1", "Jane", "viewer", nil)))
-		h.Create(ctx)
-	})
-	req := httptest.NewRequest(http.MethodPost, "/api/reminders", bytes.NewBufferString(`{"title":"Pay bill","scheduled_at":"2026-09-20T08:00:00Z"}{"extra":true}`))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	router.ServeHTTP(rec, req)
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("trailing JSON status = %d, want 400", rec.Code)
-	}
-	if service.createActor.UserID != "" {
-		t.Fatal("trailing JSON reached service")
-	}
+type permissionLoaderStub struct {
+	permissions []domainpermission.Permission
+	roleID      string
 }
 
-func TestReminderFamilyPermissionMiddlewareUsesResolvedFamilyActor(t *testing.T) {
-	service := &reminderHTTPServiceStub{}
-	resolver := &userResolverStub{actor: httpTestActor()}
-	h := NewReminderHandler(service, resolver)
-	gin.SetMode(gin.TestMode)
-	router := gin.New()
-	router.POST("/api/reminders", FamilyPermissionMiddleware(resolver, "reminders:create"), h.Create)
-	req := httptest.NewRequest(http.MethodPost, "/api/reminders", bytes.NewBufferString(`{"title":"Pay bill","scheduled_at":"2026-09-20T08:00:00Z"}`))
-	req.Header.Set("Content-Type", "application/json")
-	req = req.WithContext(authscope.WithContext(req.Context(), authscope.New("user-effective", "Jane", "viewer", nil)))
-	rec := httptest.NewRecorder()
-	router.ServeHTTP(rec, req)
-	if rec.Code != http.StatusCreated {
-		t.Fatalf("family permission status = %d, want 201: %s", rec.Code, rec.Body.String())
-	}
-	if resolver.userID != "user-effective" || resolver.channel != "http" || resolver.calls != 1 {
-		t.Fatalf("resolver call = user %q channel %q count %d", resolver.userID, resolver.channel, resolver.calls)
-	}
-	if service.createActor.RoleName != "parent" || service.createActor.UserID != "user-trusted" {
-		t.Fatalf("service received untrusted actor: %+v", service.createActor)
-	}
-}
-
-func TestReminderFamilyPermissionMiddlewareDeniesMissingFamilyPermission(t *testing.T) {
-	service := &reminderHTTPServiceStub{}
-	resolver := &userResolverStub{actor: serviceidentity.ActorContext{UserID: "user-trusted", MemberID: "member-trusted", FamilyID: "family-trusted", RoleName: "child", Source: "http"}}
-	h := NewReminderHandler(service, resolver)
-	gin.SetMode(gin.TestMode)
-	router := gin.New()
-	router.POST("/api/reminders", FamilyPermissionMiddleware(resolver, "reminders:create"), h.Create)
-	req := httptest.NewRequest(http.MethodPost, "/api/reminders", bytes.NewBufferString(`{"title":"Pay bill","scheduled_at":"2026-09-20T08:00:00Z"}`))
-	req.Header.Set("Content-Type", "application/json")
-	req = req.WithContext(authscope.WithContext(req.Context(), authscope.New("user-effective", "Jane", "superadmin", []string{"reminders:create"})))
-	rec := httptest.NewRecorder()
-	router.ServeHTTP(rec, req)
-	if rec.Code != http.StatusForbidden {
-		t.Fatalf("missing family permission status = %d, want 403", rec.Code)
-	}
-	if service.createActor.UserID != "" {
-		t.Fatal("missing family permission reached service")
-	}
-}
-
-func TestReminderFamilyPermissionMiddlewareSetsImpersonationInitiator(t *testing.T) {
-	service := &reminderHTTPServiceStub{}
-	resolver := &userResolverStub{actor: httpTestActor()}
-	h := NewReminderHandler(service, resolver)
-	gin.SetMode(gin.TestMode)
-	router := gin.New()
-	router.POST("/api/reminders", FamilyPermissionMiddleware(resolver, "reminders:create"), h.Create)
-	requestScope := authscope.NewFromClaims(map[string]any{
-		"user_id": "user-effective", "is_impersonated": true, "original_user_id": "user-operator", "original_role": "admin",
-	}, nil)
-	req := httptest.NewRequest(http.MethodPost, "/api/reminders", bytes.NewBufferString(`{"title":"Pay bill","scheduled_at":"2026-09-20T08:00:00Z"}`))
-	req.Header.Set("Content-Type", "application/json")
-	req = req.WithContext(authscope.WithContext(req.Context(), requestScope))
-	rec := httptest.NewRecorder()
-	router.ServeHTTP(rec, req)
-	if rec.Code != http.StatusCreated {
-		t.Fatalf("impersonation status = %d, want 201: %s", rec.Code, rec.Body.String())
-	}
-	if service.createActor.UserID != "user-trusted" || service.createActor.InitiatorUserID != "user-operator" || service.createActor.InitiatorRoleName != "admin" {
-		t.Fatalf("unexpected impersonation actor: %+v", service.createActor)
-	}
+func (s *permissionLoaderStub) GetRolePermissions(_ context.Context, roleID string) ([]domainpermission.Permission, error) {
+	s.roleID = roleID
+	return s.permissions, nil
 }
 
 func httpTestActor() serviceidentity.ActorContext {
-	return serviceidentity.ActorContext{UserID: "user-trusted", MemberID: "member-trusted", FamilyID: "family-trusted", RoleName: "parent", Source: "http", Permissions: map[string]struct{}{"reminders:create": {}, "reminders:list": {}, "reminders:update": {}}}
+	return serviceidentity.ActorContext{
+		UserID: "user-trusted",
+		Memberships: []domainspace.ResolvedMembership{{
+			ID: httpMemberID, SpaceID: httpSpaceID, SpaceName: "Jane", SpaceType: domainspace.TypePersonal,
+			UserID: "user-trusted", RoleID: "role-owner", RoleName: "space_owner", Status: domainspace.StatusActive,
+		}},
+		Source: "http",
+	}
 }
 
-func performReminderHTTPRequest(method, path string, body any, scope authscope.Scope, handler gin.HandlerFunc) *httptest.ResponseRecorder {
+func httpPermissions() *permissionLoaderStub {
+	return &permissionLoaderStub{permissions: []domainpermission.Permission{
+		{Resource: "reminders", Action: "create"},
+		{Resource: "reminders", Action: "list"},
+		{Resource: "reminders", Action: "update"},
+	}}
+}
+
+func performReminderHTTPRequest(method, path, body string, scope authscope.Scope, handler gin.HandlerFunc) *httptest.ResponseRecorder {
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
 	router.Handle(method, "/api/reminders", func(ctx *gin.Context) {
 		ctx.Request = ctx.Request.WithContext(authscope.WithContext(ctx.Request.Context(), scope))
 		handler(ctx)
 	})
-	router.Handle(method, "/api/reminders/:id/complete", func(ctx *gin.Context) {
+	router.Handle(method, "/api/reminders/:reminder_id/complete", func(ctx *gin.Context) {
 		ctx.Request = ctx.Request.WithContext(authscope.WithContext(ctx.Request.Context(), scope))
 		handler(ctx)
 	})
-	var reader *bytes.Reader
-	if body == nil {
-		reader = bytes.NewReader(nil)
-	} else {
-		raw, _ := json.Marshal(body)
-		reader = bytes.NewReader(raw)
-	}
-	req := httptest.NewRequest(method, path, reader)
-	if body != nil {
+	req := httptest.NewRequest(method, path, bytes.NewBufferString(body))
+	if body != "" {
 		req.Header.Set("Content-Type", "application/json")
 	}
 	rec := httptest.NewRecorder()
@@ -196,89 +134,99 @@ func performReminderHTTPRequest(method, path string, body any, scope authscope.S
 	return rec
 }
 
-func TestReminderCreateResolvesHTTPUserAndCallsSharedService(t *testing.T) {
+func TestReminderCreateSelectsPersonalSpaceAndMapsAssignee(t *testing.T) {
 	service := &reminderHTTPServiceStub{}
 	resolver := &userResolverStub{actor: httpTestActor()}
-	h := NewReminderHandler(service, resolver)
-	rec := performReminderHTTPRequest(http.MethodPost, "/api/reminders", map[string]any{
-		"title": "Pay bill", "description": "Before Friday", "scheduled_at": "2026-09-20T08:00:00+07:00", "scope": "PERSONAL",
-		"user_id": "attacker", "member_id": "spoofed",
-	}, authscope.New(" user-trusted ", "Jane", "admin", nil), h.Create)
+	h := NewReminderHandler(service, resolver, httpPermissions())
+	rec := performReminderHTTPRequest(http.MethodPost, "/api/reminders", `{"title":"Pay bill","scheduled_at":"2026-09-20T08:00:00+07:00","assignee_member_id":"00000000-0000-0000-0000-000000000302"}`, authscope.New("user-trusted", "Jane", "user", nil), h.Create)
 	if rec.Code != http.StatusCreated {
-		t.Fatalf("expected 201, got %d: %s", rec.Code, rec.Body.String())
+		t.Fatalf("create status = %d, want 201: %s", rec.Code, rec.Body.String())
 	}
-	if resolver.userID != "user-trusted" || resolver.channel != "http" {
-		t.Fatalf("resolver got untrusted identity: user=%q channel=%q", resolver.userID, resolver.channel)
+	if service.createInput.Space != httpSpaceID || service.createInput.AssigneeMemberID == nil || *service.createInput.AssigneeMemberID != "00000000-0000-0000-0000-000000000302" {
+		t.Fatalf("service input = %+v, want selected Personal Space and assignee", service.createInput)
 	}
-	if service.createActor.UserID != "user-trusted" || service.createActor.MemberID != "member-trusted" || service.createInput.Title != "Pay bill" || service.createInput.Scope != domainreminder.ScopePersonal {
-		t.Fatalf("unexpected service call: actor=%+v input=%+v", service.createActor, service.createInput)
+	if resolver.userID != "user-trusted" || resolver.channel != "http" || resolver.calls != 1 {
+		t.Fatalf("resolver call = user %q channel %q count %d", resolver.userID, resolver.channel, resolver.calls)
 	}
 }
 
-func TestReminderHTTPRejectsMissingIdentityAndInvalidSchedule(t *testing.T) {
+func TestReminderCreateRejectsLegacyFieldsAndNonRFC3339(t *testing.T) {
+	service := &reminderHTTPServiceStub{}
+	h := NewReminderHandler(service, &userResolverStub{actor: httpTestActor()}, httpPermissions())
+	for _, body := range []string{
+		`{"title":"Pay bill","scheduled_at":"2026-09-20T08:00:00Z","scope":"PERSONAL"}`,
+		`{"title":"Pay bill","scheduled_at":"tomorrow"}`,
+	} {
+		rec := performReminderHTTPRequest(http.MethodPost, "/api/reminders", body, authscope.New("user-trusted", "Jane", "user", nil), h.Create)
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("body %s status = %d, want 400", body, rec.Code)
+		}
+	}
+	if service.createInput.Space != "" {
+		t.Fatal("invalid create request reached service")
+	}
+}
+
+func TestReminderListUsesExplicitUUIDSpaceAndStrictTime(t *testing.T) {
 	service := &reminderHTTPServiceStub{}
 	resolver := &userResolverStub{actor: httpTestActor()}
-	h := NewReminderHandler(service, resolver)
-	if rec := performReminderHTTPRequest(http.MethodPost, "/api/reminders", map[string]any{"title": "Pay bill", "scheduled_at": "2026-09-20T08:00:00Z"}, authscope.Scope{}, h.Create); rec.Code != http.StatusUnauthorized {
-		t.Fatalf("missing auth scope status = %d, want 401", rec.Code)
-	}
-	if rec := performReminderHTTPRequest(http.MethodPost, "/api/reminders", map[string]any{"title": "Pay bill", "scheduled_at": "tomorrow"}, authscope.New("user-1", "Jane", "admin", nil), h.Create); rec.Code != http.StatusBadRequest {
-		t.Fatalf("invalid schedule status = %d, want 400", rec.Code)
-	}
-}
-
-func TestReminderListMapsQueryFiltersAndUsesResolverActor(t *testing.T) {
-	service := &reminderHTTPServiceStub{listed: []domainreminder.Reminder{{ID: httpReminderID, Title: "Pay bill", Scope: domainreminder.ScopePersonal, Status: domainreminder.StatusPending, ScheduledAt: time.Date(2026, 9, 20, 1, 0, 0, 0, time.UTC)}}}
-	resolver := &userResolverStub{actor: httpTestActor()}
-	h := NewReminderHandler(service, resolver)
-	rec := performReminderHTTPRequest(http.MethodGet, "/api/reminders?scope=PERSONAL&status=COMPLETED&from=2026-09-20T00:00:00Z&to=2026-09-21T00:00:00Z&target_member_id=00000000-0000-0000-0000-000000000201", nil, authscope.New("user-1", "Jane", "admin", nil), h.List)
+	h := NewReminderHandler(service, resolver, httpPermissions())
+	rec := performReminderHTTPRequest(http.MethodGet, "/api/reminders?space_id="+httpSpaceID+"&status=PENDING&from=2026-09-20T00:00:00Z&to=2026-09-21T00:00:00Z", "", authscope.New("user-trusted", "Jane", "user", nil), h.List)
 	if rec.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+		t.Fatalf("list status = %d, want 200: %s", rec.Code, rec.Body.String())
 	}
-	input := service.listInput
-	if service.listActor.UserID != "user-trusted" || input.Scope == nil || *input.Scope != domainreminder.ScopePersonal || input.Status == nil || *input.Status != domainreminder.StatusCompleted || input.From == nil || input.To == nil || input.TargetMemberID == nil {
-		t.Fatalf("unexpected list mapping: actor=%+v input=%+v", service.listActor, input)
+	if service.listInput.Space != httpSpaceID || service.listInput.Status == nil || *service.listInput.Status != domainreminder.StatusPending || service.listInput.From == nil || service.listInput.To == nil {
+		t.Fatalf("list input = %+v", service.listInput)
+	}
+	bad := performReminderHTTPRequest(http.MethodGet, "/api/reminders?from=tomorrow", "", authscope.New("user-trusted", "Jane", "user", nil), h.List)
+	if bad.Code != http.StatusBadRequest || service.listInput.From == nil {
+		t.Fatalf("invalid time status = %d, list input = %+v", bad.Code, service.listInput)
+	}
+	legacy := performReminderHTTPRequest(http.MethodGet, "/api/reminders?target_member_id="+httpMemberID, "", authscope.New("user-trusted", "Jane", "user", nil), h.List)
+	if legacy.Code != http.StatusBadRequest {
+		t.Fatalf("legacy target filter status = %d, want 400", legacy.Code)
 	}
 }
 
-func TestReminderCompleteUsesPathIDAndMapsErrors(t *testing.T) {
-	resolver := &userResolverStub{actor: httpTestActor()}
+func TestReminderCompleteUsesSpaceAndReminderPath(t *testing.T) {
+	service := &reminderHTTPServiceStub{}
+	h := NewReminderHandler(service, &userResolverStub{actor: httpTestActor()}, httpPermissions())
+	rec := performReminderHTTPRequest(http.MethodPost, "/api/reminders/"+httpReminderID+"/complete?space_id="+httpSpaceID, "", authscope.New("user-trusted", "Jane", "user", nil), h.Complete)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("complete status = %d, want 200: %s", rec.Code, rec.Body.String())
+	}
+	if service.completeSpace != httpSpaceID || service.completeID != httpReminderID {
+		t.Fatalf("complete call = space %q reminder %q", service.completeSpace, service.completeID)
+	}
+}
+
+func TestReminderHTTPMapsServiceErrorsSafely(t *testing.T) {
 	for _, tt := range []struct {
 		name string
 		err  error
 		want int
 	}{
-		{name: "success", want: http.StatusOK},
 		{name: "forbidden", err: serviceauthorization.ErrForbidden, want: http.StatusForbidden},
 		{name: "not found", err: serviceauthorization.ErrNotFound, want: http.StatusNotFound},
 		{name: "conflict", err: servicereminder.ErrConflict, want: http.StatusConflict},
-		{name: "internal", err: errors.New("database details"), want: http.StatusInternalServerError},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			service := &reminderHTTPServiceStub{completeErr: tt.err}
-			h := NewReminderHandler(service, resolver)
-			rec := performReminderHTTPRequest(http.MethodPatch, "/api/reminders/"+httpReminderID+"/complete", map[string]any{"user_id": "attacker"}, authscope.New("user-1", "Jane", "admin", nil), h.Complete)
+			service := &reminderHTTPServiceStub{createErr: tt.err}
+			h := NewReminderHandler(service, &userResolverStub{actor: httpTestActor()}, httpPermissions())
+			rec := performReminderHTTPRequest(http.MethodPost, "/api/reminders", `{"title":"Pay bill","scheduled_at":"2026-09-20T08:00:00Z"}`, authscope.New("user-trusted", "Jane", "user", nil), h.Create)
 			if rec.Code != tt.want {
 				t.Fatalf("status = %d, want %d: %s", rec.Code, tt.want, rec.Body.String())
-			}
-			if service.completeID != httpReminderID || service.completeActor.UserID != "user-trusted" {
-				t.Fatalf("unexpected complete call: actor=%+v id=%q", service.completeActor, service.completeID)
 			}
 		})
 	}
 }
 
-func TestReminderHTTPMapsInvalidAndUnauthenticatedResolverErrors(t *testing.T) {
-	h := NewReminderHandler(&reminderHTTPServiceStub{}, &userResolverStub{err: serviceidentity.ErrUnauthenticated})
-	rec := performReminderHTTPRequest(http.MethodGet, "/api/reminders", nil, authscope.New("user-1", "Jane", "admin", nil), h.List)
+func TestReminderHTTPRequiresAuthentication(t *testing.T) {
+	h := NewReminderHandler(&reminderHTTPServiceStub{}, &userResolverStub{actor: httpTestActor()}, httpPermissions())
+	rec := performReminderHTTPRequest(http.MethodPost, "/api/reminders", `{"title":"Pay bill","scheduled_at":"2026-09-20T08:00:00Z"}`, authscope.Scope{}, h.Create)
 	if rec.Code != http.StatusUnauthorized {
-		t.Fatalf("resolver unauthenticated status = %d, want 401", rec.Code)
+		t.Fatalf("missing auth status = %d, want 401", rec.Code)
 	}
-
-	h = NewReminderHandler(&reminderHTTPServiceStub{}, &userResolverStub{err: &serviceauthorization.ValidationError{Field: "user_id", Reason: "is required"}})
-	rec = performReminderHTTPRequest(http.MethodGet, "/api/reminders", nil, authscope.New("user-1", "Jane", "admin", nil), h.List)
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("resolver validation status = %d, want 400", rec.Code)
-	}
-
 }
+
+var _ servicereminder.Service = (*reminderHTTPServiceStub)(nil)

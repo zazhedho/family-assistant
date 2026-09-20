@@ -20,12 +20,9 @@ func TestAuthorizerChecksValidationBeforePermission(t *testing.T) {
 
 func TestAuthorizerDoesNotAuthorizeLegacyFamilyResource(t *testing.T) {
 	actor := identity.ActorContext{
-		FamilyID:    "family-1",
 		Permissions: map[string]struct{}{"reminders:view": {}},
 	}
 	err := NewAuthorizer().Authorize(context.Background(), actor, "reminders:view", Resource{
-		FamilyID: "family-1",
-		Scope:    ScopeFamily,
 	})
 
 	var validationErr *ValidationError

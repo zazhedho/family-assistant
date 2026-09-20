@@ -9,7 +9,6 @@ import (
 	"strings"
 	"testing"
 
-	domainfamilymember "family-assistant/internal/domain/familymember"
 	domainpermission "family-assistant/internal/domain/permission"
 	serviceidentity "family-assistant/internal/services/identity"
 	"family-assistant/pkg/config"
@@ -33,28 +32,7 @@ type resolverStub struct {
 	profileID   string
 	channel     string
 	resolveCall int
-}
-
-type legacyFamilyResolverRepoStub struct {
-	member *domainfamilymember.ResolvedMember
-}
-
-func (s *legacyFamilyResolverRepoStub) FindActiveByHermesProfile(context.Context, string) (*domainfamilymember.ResolvedMember, error) {
-	return s.member, nil
-}
-
-func (s *legacyFamilyResolverRepoStub) FindActiveByUserID(context.Context, string) (*domainfamilymember.ResolvedMember, error) {
-	return s.member, nil
-}
-
-func (s *legacyFamilyResolverRepoStub) FindActiveByID(context.Context, string, string) (*domainfamilymember.FamilyMember, error) {
-	return nil, errors.New("not implemented")
-}
-
-type legacyPermissionResolverStub struct{}
-
-func (*legacyPermissionResolverStub) GetRolePermissions(context.Context, string) ([]domainpermission.Permission, error) {
-	return []domainpermission.Permission{{Resource: "reminders", Action: "view"}}, nil
+	permissions []domainpermission.Permission
 }
 
 func (s *resolverStub) Resolve(_ context.Context, profileID, channel string) (serviceidentity.ActorContext, error) {
@@ -64,21 +42,12 @@ func (s *resolverStub) Resolve(_ context.Context, profileID, channel string) (se
 	return s.actor, s.err
 }
 
-func TestMCPCompatibilityDispatchUsesLegacyResolverServiceMode(t *testing.T) {
-	resolver := serviceidentity.NewResolver(
-		&legacyFamilyResolverRepoStub{member: &domainfamilymember.ResolvedMember{
-			UserID: "user-1", MemberID: "member-1", FamilyID: "family-1", RoleID: "role-1", RoleName: "parent", HermesProfileID: "profile-1",
-		}},
-		&legacyPermissionResolverStub{},
-	)
+func (s *resolverStub) ResolveExternal(ctx context.Context, _ string, profileID, channel string) (serviceidentity.ActorContext, error) {
+	return s.Resolve(ctx, profileID, channel)
+}
 
-	actor, err := resolveActor(context.Background(), resolver, "profile-1", "whatsapp")
-	if err != nil {
-		t.Fatalf("legacy resolver dispatch: %v", err)
-	}
-	if actor.UserID != "user-1" || actor.FamilyID != "family-1" || actor.HermesProfileID != "profile-1" || !actor.HasPermission("reminders:view") {
-		t.Fatalf("unexpected legacy actor: %+v", actor)
-	}
+func (s *resolverStub) GetRolePermissions(context.Context, string) ([]domainpermission.Permission, error) {
+	return s.permissions, nil
 }
 
 func TestMCPAuthMiddlewareRejectsUnauthenticatedRequests(t *testing.T) {
@@ -100,13 +69,13 @@ func TestMCPAuthMiddlewareRejectsUnauthenticatedRequests(t *testing.T) {
 			middleware := NewAuthMiddleware(config.MCPConfig{
 				ServerKey:     "secret",
 				ProfileHeader: "X-Hermes-Profile",
-			}, resolver)
+			})
 			reached := false
 			handler := middleware.Handler(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
 				reached = true
 			}))
 
-			req := httptest.NewRequest(http.MethodPost, "/mcp?member_id=caller-controlled&family_id=other&role=admin", strings.NewReader(`{"member_id":"spoofed","family_id":"other","role":"admin"}`))
+			req := httptest.NewRequest(http.MethodPost, "/mcp?spoofed=caller-controlled&role=admin", strings.NewReader(`{"spoofed":"attacker","role":"admin"}`))
 			req.Header.Set("Authorization", tt.header)
 			tt.setup(req)
 			rec := httptest.NewRecorder()
@@ -129,14 +98,13 @@ func TestMCPAuthMiddlewareUsesConfiguredProfileHeaderAndAttachesTrustedExternalR
 	resolver := &resolverStub{actor: serviceidentity.ActorContext{
 		UserID:   "user-1",
 		MemberID: "member-1",
-		FamilyID: "family-1",
 		Source:   "mcp",
 		RoleName: "parent",
 	}}
 	middleware := NewAuthMiddleware(config.MCPConfig{
 		ServerKey:     "secret",
 		ProfileHeader: "X-Trusted-Profile",
-	}, resolver)
+	})
 
 	var got ExternalRequest
 	handler := middleware.Handler(http.HandlerFunc(func(_ http.ResponseWriter, req *http.Request) {
@@ -147,7 +115,7 @@ func TestMCPAuthMiddlewareUsesConfiguredProfileHeaderAndAttachesTrustedExternalR
 		}
 	}))
 
-	req := httptest.NewRequest(http.MethodPost, "/mcp?member_id=spoofed&family_id=other&role=admin", strings.NewReader(`{"member_id":"spoofed","family_id":"other","role":"admin"}`))
+	req := httptest.NewRequest(http.MethodPost, "/mcp?spoofed=caller-controlled&role=admin", strings.NewReader(`{"spoofed":"attacker","role":"admin"}`))
 	req.Header.Set("Authorization", "Bearer secret")
 	req.Header.Set("X-Trusted-Profile", "profile-parent")
 	req.Header.Set("X-Hermes-Profile", "attacker-profile")
@@ -171,7 +139,7 @@ func TestMCPAuthMiddlewareDoesNotResolveActor(t *testing.T) {
 	middleware := NewAuthMiddleware(config.MCPConfig{
 		ServerKey:     "secret",
 		ProfileHeader: "X-Hermes-Profile",
-	}, resolver)
+	})
 
 	req := httptest.NewRequest(http.MethodPost, "/mcp", nil)
 	req.Header.Set("Authorization", "Bearer secret")

@@ -14,6 +14,9 @@ import (
 	"testing"
 
 	domainidentity "family-assistant/internal/domain/identity"
+	domainpermission "family-assistant/internal/domain/permission"
+	domainspace "family-assistant/internal/domain/space"
+	serviceauthorization "family-assistant/internal/services/authorization"
 	serviceidentity "family-assistant/internal/services/identity"
 	"family-assistant/pkg/config"
 )
@@ -23,7 +26,7 @@ func TestListenPropagatesBindErrorSynchronously(t *testing.T) {
 	server, bound, err := listenMCP(config.MCPConfig{
 		Addr:      "127.0.0.1:8081",
 		ServerKey: "secret",
-	}, nil, nil, func(string, string) (net.Listener, error) {
+	}, nil, nil, nil, nil, func(string, string) (net.Listener, error) {
 		return nil, errAddressInUse
 	})
 	if !errors.Is(err, errAddressInUse) {
@@ -35,7 +38,7 @@ func TestListenPropagatesBindErrorSynchronously(t *testing.T) {
 }
 
 func TestHTTPServerUsesSafeTimeoutsWithoutWriteTimeout(t *testing.T) {
-	server := NewHTTPServer(config.MCPConfig{Addr: "127.0.0.1:0"}, nil, nil)
+	server := NewHTTPServer(config.MCPConfig{Addr: "127.0.0.1:0"}, nil, nil, nil, nil)
 	if server.ReadHeaderTimeout <= 0 {
 		t.Fatal("expected MCP ReadHeaderTimeout")
 	}
@@ -52,11 +55,10 @@ func TestHTTPHandlerMountsMCPOnlyAtExactPath(t *testing.T) {
 		actor: serviceidentity.ActorContext{
 			UserID:   "user-1",
 			MemberID: "member-1",
-			FamilyID: "family-1",
 			Source:   "mcp",
 			RoleName: "parent",
 		},
-	}, nil)
+	}, nil, nil, nil)
 
 	for _, path := range []string{"/", "/other", "/mcp/"} {
 		req := httptest.NewRequest(http.MethodPost, path, nil)
@@ -194,8 +196,50 @@ func TestHTTPHandlerExposesOnlyCurrentMCPToolsWhenRemindersAreAbsent(t *testing.
 		got = append(got, tool.Name)
 	}
 	sort.Strings(got)
-	want := []string{"identity_link", "space_get_members", "space_list"}
+	want := []string{"identity_link", "reminder_complete", "reminder_create", "reminder_list", "space_get_members", "space_list"}
 	if strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Fatalf("tools = %v, want %v", got, want)
+	}
+}
+
+func TestHTTPHandlerProtectedSpaceToolMapsSuccessForbiddenAndNotFound(t *testing.T) {
+	spaceID := "00000000-0000-0000-0000-000000000201"
+	resolver := &resolverStub{
+		actor: serviceidentity.ActorContext{UserID: "user-1", Memberships: []domainspace.ResolvedMembership{{
+			ID: "00000000-0000-0000-0000-000000000301", SpaceID: spaceID, SpaceName: "Jane", SpaceType: domainspace.TypePersonal,
+			UserID: "user-1", RoleID: "role-owner", RoleName: "space_owner", Status: domainspace.StatusActive,
+		}}},
+		permissions: []domainpermission.Permission{{Resource: "members", Action: "list"}},
+	}
+	for _, tt := range []struct {
+		name    string
+		members []domainspace.ResolvedMembership
+		err     error
+		want    string
+	}{
+		{name: "success", members: []domainspace.ResolvedMembership{{SpaceID: spaceID, UserID: "user-1"}}},
+		{name: "forbidden", err: serviceauthorization.ErrForbidden, want: "forbidden"},
+		{name: "not found", err: serviceauthorization.ErrNotFound, want: "not found"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			resolver.resolveCall = 0
+			service := &mcpSpaceServiceStub{members: tt.members, membersErr: tt.err}
+			handler := NewHTTPHandler(config.MCPConfig{ServerKey: "secret"}, resolver, nil, service, nil)
+			server := httptest.NewServer(handler)
+			t.Cleanup(server.Close)
+			initializeMCPServer(t, server.URL)
+			response := callMCPServer(t, server.URL, "profile", "secret", "tools/call", map[string]any{
+				"name": "space_get_members", "arguments": map[string]any{"space": spaceID},
+			})
+			if tt.err == nil {
+				if response.Error != nil || response.Result == nil || response.Result.IsError || len(response.Result.StructuredOutput) == 0 {
+					t.Fatalf("success response = %+v", response)
+				}
+				return
+			}
+			if response.Error != nil || response.Result == nil || !response.Result.IsError || len(response.Result.Content) == 0 || !strings.Contains(response.Result.Content[0].Text, tt.want) {
+				t.Fatalf("%s response = %+v", tt.name, response)
+			}
+		})
 	}
 }

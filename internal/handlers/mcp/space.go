@@ -15,7 +15,7 @@ type SpaceGetMembersInput struct {
 	Space string `json:"space,omitempty" jsonschema:"Space UUID or exact user-facing name; blank selects Personal Space"`
 }
 
-func SpaceList(ctx context.Context, resolver any, service servicespace.Service) ([]domainspace.ResolvedMembership, error) {
+func SpaceList(ctx context.Context, resolver serviceidentity.Resolver, service servicespace.Service) ([]domainspace.ResolvedMembership, error) {
 	actor, err := RequireActor(ctx, resolver)
 	if err != nil {
 		return nil, MapToolError(err)
@@ -33,7 +33,7 @@ func SpaceList(ctx context.Context, resolver any, service servicespace.Service) 
 	return memberships, nil
 }
 
-func SpaceGetMembers(ctx context.Context, resolver any, service servicespace.Service, input SpaceGetMembersInput) ([]domainspace.ResolvedMembership, error) {
+func SpaceGetMembers(ctx context.Context, resolver serviceidentity.Resolver, service servicespace.Service, input SpaceGetMembersInput) ([]domainspace.ResolvedMembership, error) {
 	actor, err := RequireActor(ctx, resolver)
 	if err != nil {
 		return nil, MapToolError(err)
@@ -55,7 +55,7 @@ func SpaceGetMembers(ctx context.Context, resolver any, service servicespace.Ser
 	return members, nil
 }
 
-func selectorPermissions(resolver any) serviceidentity.PermissionLoader {
+func selectorPermissions(resolver serviceidentity.Resolver) serviceidentity.PermissionLoader {
 	if resolver, ok := resolver.(*serviceidentity.ResolverService); ok && resolver != nil {
 		return resolver.PermissionService
 	}
@@ -65,7 +65,7 @@ func selectorPermissions(resolver any) serviceidentity.PermissionLoader {
 	return nil
 }
 
-func registerSpaceTools(server *mcpsdk.Server, resolver any, service servicespace.Service) {
+func registerSpaceTools(server *mcpsdk.Server, resolver serviceidentity.Resolver, service servicespace.Service) {
 	mcpsdk.AddTool(server, &mcpsdk.Tool{
 		Name: "space_list", Description: "List the authenticated user's active Spaces.",
 	}, func(ctx context.Context, _ *mcpsdk.CallToolRequest, _ struct{}) (*mcpsdk.CallToolResult, []domainspace.ResolvedMembership, error) {

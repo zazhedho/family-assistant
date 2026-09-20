@@ -278,9 +278,6 @@ func auditEvent(actor serviceidentity.ActorContext, action, spaceID, resourceID,
 		actorRole = initiatorRole
 	}
 	profile := strings.TrimSpace(actor.ExternalID)
-	if profile == "" {
-		profile = strings.TrimSpace(actor.HermesProfileID)
-	}
 	return domainaudit.AuditEvent{
 		ActorUserID:           actorUserID,
 		ActorMemberID:         strings.TrimSpace(actor.MemberID),

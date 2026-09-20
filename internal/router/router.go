@@ -1,6 +1,7 @@
 package router
 
 import (
+	"context"
 	"net/http"
 	"strings"
 	"time"
@@ -11,6 +12,7 @@ import (
 	"family-assistant/infrastructure/database"
 	mediaInfrastructure "family-assistant/infrastructure/media"
 	permissioncache "family-assistant/internal/cache/permission"
+	domainuser "family-assistant/internal/domain/user"
 	appConfigHandler "family-assistant/internal/handlers/http/appconfig"
 	auditHandler "family-assistant/internal/handlers/http/audit"
 	identityHandler "family-assistant/internal/handlers/http/identity"
@@ -68,6 +70,10 @@ import (
 type Routes struct {
 	App *gin.Engine
 	DB  *gorm.DB
+}
+
+type invitationUserRepository interface {
+	GetByID(context.Context, string) (domainuser.Users, error)
 }
 
 func NewRoutes() *Routes {
@@ -291,15 +297,15 @@ func (r *Routes) AuditRoutes() {
 	}
 }
 
-func (r *Routes) ReminderRoutes(service servicereminder.Service, resolver serviceidentity.UserResolver) {
-	h := reminderHandler.NewReminderHandler(service, resolver)
+func (r *Routes) ReminderRoutes(service servicereminder.Service, resolver serviceidentity.UserResolver, permissions serviceidentity.PermissionLoader) {
+	h := reminderHandler.NewReminderHandler(service, resolver, permissions)
 	mdw := r.middleware(r.permissionRepo())
 
 	reminder := r.App.Group("/api/reminders").Use(mdw.AuthMiddleware())
 	{
-		reminder.POST("", reminderHandler.FamilyPermissionMiddleware(resolver, "reminders:create"), h.Create)
-		reminder.GET("", reminderHandler.FamilyPermissionMiddleware(resolver, "reminders:list"), h.List)
-		reminder.PATCH("/:id/complete", reminderHandler.FamilyPermissionMiddleware(resolver, "reminders:update"), h.Complete)
+		reminder.POST("", h.Create)
+		reminder.GET("", h.List)
+		reminder.POST("/:reminder_id/complete", h.Complete)
 	}
 }
 
@@ -355,10 +361,17 @@ func (r *Routes) SpaceRoutes() {
 	permissionRepository := r.permissionRepo()
 	auditService := r.auditService()
 	svc := spaceSvc.NewService(repo, roleRepository, permissionRepository, auditService)
-	h := spaceHandler.NewSpaceHandler(svc, auditService)
 	invitations := invitationRepo.NewRepository(r.DB)
 	invitationService := invitationSvc.NewService(invitations, repo, roleRepository, permissionRepository, auditService, config.LoadInvitationConfig())
-	invitationHandler := invitationHandler.NewInvitationHandler(invitationService, userRepo.NewUserRepo(r.DB), auditService)
+	r.SpaceRoutesWithDependencies(svc, invitationService, userRepo.NewUserRepo(r.DB), nil)
+	r.IdentityRoutes()
+}
+
+func (r *Routes) SpaceRoutesWithDependencies(spaceService spaceSvc.Service, invitationService invitationSvc.Service, users invitationUserRepository, identityService serviceidentity.LinkService) {
+	auditService := r.auditService()
+	h := spaceHandler.NewSpaceHandler(spaceService, auditService)
+	invitationH := invitationHandler.NewInvitationHandler(invitationService, users, auditService)
+	permissionRepository := r.permissionRepo()
 	mdw := r.middleware(permissionRepository)
 
 	spaces := r.App.Group("/api/spaces").Use(mdw.AuthMiddleware())
@@ -366,23 +379,30 @@ func (r *Routes) SpaceRoutes() {
 		spaces.GET("", h.List)
 		spaces.POST("", h.Create)
 		spaces.GET("/:space_id/members", h.Members)
-		spaces.POST("/:space_id/invitations", invitationHandler.Create)
+		spaces.POST("/:space_id/invitations", invitationH.Create)
 	}
 
 	invitationRoutes := r.App.Group("/api/invitations").Use(mdw.AuthMiddleware())
 	{
-		invitationRoutes.POST("/accept", invitationHandler.Accept)
+		invitationRoutes.POST("/accept", invitationH.Accept)
 	}
 
-	r.IdentityRoutes()
+	if identityService != nil {
+		r.IdentityRoutesWithService(identityService)
+	}
 }
 
 func (r *Routes) IdentityRoutes() {
-	permissions := r.permissionRepo()
-	mdw := r.middleware(permissions)
 	repo := identityRepo.NewRepository(r.DB)
 	auditService := r.auditService()
 	service := serviceidentity.NewLinkService(repo, auditService, config.LoadIdentityConfig())
+	r.IdentityRoutesWithService(service)
+}
+
+func (r *Routes) IdentityRoutesWithService(service serviceidentity.LinkService) {
+	permissions := r.permissionRepo()
+	mdw := r.middleware(permissions)
+	auditService := r.auditService()
 	h := identityHandler.NewIdentityHandler(service, auditService)
 
 	hermes := r.App.Group("/api/hermes").Use(mdw.AuthMiddleware())

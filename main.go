@@ -6,14 +6,20 @@ import (
 	"errors"
 	"family-assistant/infrastructure/database"
 	mcpHandler "family-assistant/internal/handlers/mcp"
-	familyMemberRepo "family-assistant/internal/repositories/familymember"
+	identityRepo "family-assistant/internal/repositories/identity"
+	invitationRepo "family-assistant/internal/repositories/invitation"
 	permissionRepo "family-assistant/internal/repositories/permission"
 	reminderRepo "family-assistant/internal/repositories/reminder"
+	roleRepo "family-assistant/internal/repositories/role"
+	spaceRepo "family-assistant/internal/repositories/space"
+	userRepo "family-assistant/internal/repositories/user"
 	"family-assistant/internal/router"
 	authorizationService "family-assistant/internal/services/authorization"
 	identityService "family-assistant/internal/services/identity"
+	invitationService "family-assistant/internal/services/invitation"
 	permissionService "family-assistant/internal/services/permission"
 	reminderService "family-assistant/internal/services/reminder"
+	spaceService "family-assistant/internal/services/space"
 	"family-assistant/pkg/config"
 	"family-assistant/pkg/logger"
 	"family-assistant/utils"
@@ -125,13 +131,23 @@ func run() error {
 	routes.LocationRoutes()
 	FailOnError(routes.MediaRoutes(), "Failed to initialize media routes")
 
-	familyMembers := familyMemberRepo.NewRepository(routes.DB)
-	permissions := permissionService.NewPermissionService(permissionRepo.NewPermissionRepo(routes.DB))
-	identityResolver := identityService.NewResolver(familyMembers, permissions)
-	reminders := reminderService.NewReminderService(
-		reminderRepo.NewRepository(routes.DB), familyMembers, authorizationService.NewAuthorizer(), routes.AuditService(),
+	spaceRepository := spaceRepo.NewRepository(routes.DB)
+	roleRepository := roleRepo.NewRoleRepo(routes.DB)
+	permissionRepository := permissionRepo.NewPermissionRepo(routes.DB)
+	permissions := permissionService.NewPermissionService(permissionRepository)
+	audit := routes.AuditService()
+	spaces := spaceService.NewService(spaceRepository, roleRepository, permissionRepository, audit)
+	invitations := invitationService.NewService(
+		invitationRepo.NewRepository(routes.DB), spaceRepository, roleRepository, permissionRepository, audit, config.LoadInvitationConfig(),
 	)
-	routes.ReminderRoutes(reminders, identityResolver)
+	identityRepository := identityRepo.NewRepository(routes.DB)
+	identityLink := identityService.NewLinkService(identityRepository, audit, config.LoadIdentityConfig())
+	identityResolver := identityService.NewResolver(identityRepository, spaceRepository, permissions)
+	reminders := reminderService.NewReminderService(
+		reminderRepo.NewRepository(routes.DB), spaceRepository, authorizationService.NewAuthorizer(), audit,
+	)
+	routes.SpaceRoutesWithDependencies(spaces, invitations, userRepo.NewUserRepo(routes.DB), identityLink)
+	routes.ReminderRoutes(reminders, identityResolver, permissions)
 
 	// Register session routes if Redis is available
 	if redisClient != nil {
@@ -146,7 +162,7 @@ func run() error {
 	var mcpServer *http.Server
 	var mcpListener net.Listener
 	if mcpConfig.Enabled {
-		mcpServer, mcpListener, err = mcpHandler.Listen(mcpConfig, identityResolver, reminders)
+		mcpServer, mcpListener, err = mcpHandler.Listen(mcpConfig, identityResolver, identityLink, spaces, reminders)
 		FailOnError(err, "Failed to bind MCP server")
 	}
 

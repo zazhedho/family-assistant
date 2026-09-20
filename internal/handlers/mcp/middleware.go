@@ -64,7 +64,7 @@ type AuthMiddleware struct {
 	profileHeader string
 }
 
-func NewAuthMiddleware(cfg config.MCPConfig, _ ...any) *AuthMiddleware {
+func NewAuthMiddleware(cfg config.MCPConfig) *AuthMiddleware {
 	profileHeader := strings.TrimSpace(cfg.ProfileHeader)
 	if profileHeader == "" {
 		profileHeader = "X-Hermes-Profile"
@@ -75,8 +75,8 @@ func NewAuthMiddleware(cfg config.MCPConfig, _ ...any) *AuthMiddleware {
 	}
 }
 
-func NewMiddleware(cfg config.MCPConfig, resolver ...any) *AuthMiddleware {
-	return NewAuthMiddleware(cfg, resolver...)
+func NewMiddleware(cfg config.MCPConfig) *AuthMiddleware {
+	return NewAuthMiddleware(cfg)
 }
 
 func (m *AuthMiddleware) Handler(next http.Handler) http.Handler {
@@ -103,43 +103,26 @@ func (m *AuthMiddleware) Handler(next http.Handler) http.Handler {
 	})
 }
 
-type externalResolver interface {
-	ResolveExternal(context.Context, string, string, string) (serviceidentity.ActorContext, error)
-}
-
-type legacyResolver interface {
-	Resolve(context.Context, string, string) (serviceidentity.ActorContext, error)
-}
-
-func resolveActor(ctx context.Context, resolver any, externalID, channel string) (serviceidentity.ActorContext, error) {
+func resolveActor(ctx context.Context, resolver serviceidentity.Resolver, externalID, channel string) (serviceidentity.ActorContext, error) {
 	return resolveExternalActor(ctx, resolver, ExternalRequest{
 		Provider: domainidentity.ProviderHermes, ExternalID: externalID, Channel: channel,
 	})
 }
 
-func resolveExternalActor(ctx context.Context, resolver any, request ExternalRequest) (serviceidentity.ActorContext, error) {
+func resolveExternalActor(ctx context.Context, resolver serviceidentity.Resolver, request ExternalRequest) (serviceidentity.ActorContext, error) {
 	provider := strings.TrimSpace(request.Provider)
 	if provider == "" {
 		provider = domainidentity.ProviderHermes
 	}
 	externalID := strings.TrimSpace(request.ExternalID)
 	channel := strings.TrimSpace(request.Channel)
-	switch resolver := resolver.(type) {
-	case *serviceidentity.ResolverService:
-		if resolver == nil || resolver.IdentityRepo == nil {
-			return resolver.Resolve(ctx, externalID, channel)
-		}
-		return resolver.ResolveExternal(ctx, provider, externalID, channel)
-	case externalResolver:
-		return resolver.ResolveExternal(ctx, provider, externalID, channel)
-	case legacyResolver:
-		return resolver.Resolve(ctx, externalID, channel)
-	default:
+	if resolver == nil {
 		return serviceidentity.ActorContext{}, serviceidentity.ErrResolverMisconfigured
 	}
+	return resolver.ResolveExternal(ctx, provider, externalID, channel)
 }
 
-func RequireActor(ctx context.Context, resolver any) (serviceidentity.ActorContext, error) {
+func RequireActor(ctx context.Context, resolver serviceidentity.Resolver) (serviceidentity.ActorContext, error) {
 	request, ok := ExternalRequestFromContext(ctx)
 	if !ok || strings.TrimSpace(request.Provider) == "" || strings.TrimSpace(request.ExternalID) == "" || strings.TrimSpace(request.Channel) == "" {
 		return serviceidentity.ActorContext{}, serviceidentity.ErrUnauthenticated

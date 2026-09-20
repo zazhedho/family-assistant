@@ -18,11 +18,6 @@ type ActorContext struct {
 	Channel           string
 	InitiatorUserID   string
 	InitiatorRoleName string
-
-	// Deprecated family fields stay until the reminder vertical slice moves to
-	// Space-scoped storage. New authorization code must use SpaceID.
-	FamilyID        string
-	HermesProfileID string
 }
 
 func (a ActorContext) HasPermission(permission string) bool {
