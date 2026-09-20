@@ -57,7 +57,7 @@ func (r *Repository) Accept(ctx context.Context, tokenHash, userID, normalizedEm
 			return err
 		}
 		if invitation.Status != domaininvitation.StatusPending || invitation.AcceptedAt != nil ||
-			strings.TrimSpace(invitation.AcceptedByUserID) != "" || !now.Before(invitation.ExpiresAt) {
+			(invitation.AcceptedByUserID != nil && strings.TrimSpace(*invitation.AcceptedByUserID) != "") || !now.Before(invitation.ExpiresAt) {
 			return domaininvitation.ErrInvalidInvitation
 		}
 		if strings.TrimSpace(invitation.InvitedEmail) != "" &&

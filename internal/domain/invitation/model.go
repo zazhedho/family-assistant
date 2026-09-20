@@ -35,7 +35,7 @@ type Invitation struct {
 	Status            string         `json:"status" gorm:"column:status"`
 	ExpiresAt         time.Time      `json:"expires_at" gorm:"column:expires_at"`
 	AcceptedAt        *time.Time     `json:"accepted_at,omitempty" gorm:"column:accepted_at"`
-	AcceptedByUserID  string         `json:"accepted_by_user_id,omitempty" gorm:"column:accepted_by_user_id"`
+	AcceptedByUserID  *string        `json:"accepted_by_user_id,omitempty" gorm:"column:accepted_by_user_id"`
 	CreatedAt         time.Time      `json:"created_at" gorm:"column:created_at"`
 	UpdatedAt         time.Time      `json:"updated_at" gorm:"column:updated_at"`
 	DeletedAt         gorm.DeletedAt `json:"-" gorm:"column:deleted_at"`
