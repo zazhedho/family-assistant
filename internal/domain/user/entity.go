@@ -18,7 +18,6 @@ type Users struct {
 	Password              string         `json:"-" gorm:"column:password"`
 	Role                  string         `json:"role,omitempty" gorm:"column:role"`
 	RoleId                *string        `json:"role_id,omitempty" gorm:"column:role_id"`
-	HermesProfileID       *string        `json:"hermes_profile_id,omitempty" gorm:"column:hermes_profile_id;uniqueIndex"`
 	EmailVerifiedAt       *time.Time     `json:"email_verified_at,omitempty" gorm:"column:email_verified_at"`
 	PhoneVerifiedAt       *time.Time     `json:"phone_verified_at,omitempty" gorm:"column:phone_verified_at"`
 	LastLoginAt           *time.Time     `json:"last_login_at,omitempty" gorm:"column:last_login_at"`

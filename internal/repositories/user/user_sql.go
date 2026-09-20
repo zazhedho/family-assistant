@@ -41,9 +41,6 @@ func storeUser(db *gorm.DB, ctx context.Context, user domainuser.Users) error {
 	if strings.TrimSpace(user.Phone) == "" {
 		omit = append(omit, "phone")
 	}
-	if user.HermesProfileID == nil {
-		omit = append(omit, "hermes_profile_id")
-	}
 	if user.BirthDate == nil {
 		omit = append(omit, "birth_date")
 	}
