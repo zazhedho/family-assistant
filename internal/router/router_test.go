@@ -3,9 +3,12 @@ package router
 import (
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
+	"family-assistant/internal/authscope"
 	"github.com/DATA-DOG/go-sqlmock"
+	"github.com/gin-gonic/gin"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 )
@@ -116,6 +119,35 @@ func TestIdentityRoutesRequireAuthentication(t *testing.T) {
 		routes.App.ServeHTTP(rec, req)
 		if rec.Code != http.StatusUnauthorized {
 			t.Fatalf("unauthenticated identity request %s %s = %d, want 401: %s", tt.method, tt.path, rec.Code, rec.Body.String())
+		}
+	}
+}
+
+func TestIdentityRouteMiddlewareRejectsFakeScopeWithoutJWT(t *testing.T) {
+	routes := NewRoutes()
+	routes.App.Use(func(ctx *gin.Context) {
+		ctx.Request = ctx.Request.WithContext(authscope.WithContext(ctx.Request.Context(), authscope.New("fake-user", "Fake", "user", nil)))
+		ctx.Next()
+	})
+	routes.DB = newRouterDryRunDB(t)
+	routes.IdentityRoutes()
+
+	for _, tt := range []struct {
+		method string
+		path   string
+		body   string
+	}{
+		{method: http.MethodPost, path: "/api/hermes/link-codes"},
+		{method: http.MethodDelete, path: "/api/hermes/link", body: `{"external_id":"profile-a"}`},
+	} {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(tt.method, tt.path, strings.NewReader(tt.body))
+		if tt.body != "" {
+			req.Header.Set("Content-Type", "application/json")
+		}
+		routes.App.ServeHTTP(rec, req)
+		if rec.Code != http.StatusUnauthorized {
+			t.Fatalf("fake-scope identity request %s %s = %d, want 401: %s", tt.method, tt.path, rec.Code, rec.Body.String())
 		}
 	}
 }

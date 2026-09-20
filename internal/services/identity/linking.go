@@ -110,9 +110,9 @@ func (s *service) Issue(ctx context.Context, userID, provider string) (string, e
 		UpdatedAt: now,
 	}
 	if err := s.repository.CreateLinkToken(ctx, token); err != nil {
-		return s.issueFailure(ctx, provider, userID, err)
+		return s.issueFailure(ctx, provider, userID, err, rawCode, token.TokenHash)
 	}
-	s.writeAudit(ctx, s.auditEvent(ctx, domainaudit.ActionCreate, "identity_link_token", token.ID, userID, provider, domainaudit.StatusSuccess, "Issued identity link code", "", "http"))
+	s.writeAudit(ctx, s.auditEvent(ctx, domainaudit.ActionCreate, "identity_link_token", token.ID, userID, provider, domainaudit.StatusSuccess, "Issued identity link code", "", "http", rawCode, token.TokenHash))
 	return rawCode, nil
 }
 
@@ -120,27 +120,33 @@ func (s *service) Link(ctx context.Context, rawCode, provider, externalID string
 	rawCode = strings.TrimSpace(rawCode)
 	provider = domainidentity.NormalizeProvider(provider)
 	externalID = strings.TrimSpace(externalID)
+	secrets := []string{rawCode}
+	if rawCode != "" {
+		hash := sha256.Sum256([]byte(rawCode))
+		secrets = append(secrets, hex.EncodeToString(hash[:]))
+	}
 	if rawCode == "" {
-		return s.linkFailure(ctx, provider, "", domainidentity.ErrInvalidLinkToken)
+		return s.linkFailure(ctx, provider, "", domainidentity.ErrInvalidLinkToken, secrets...)
 	}
 	if provider == "" {
-		return s.linkFailure(ctx, provider, "", ErrInvalidIdentityProvider)
+		return s.linkFailure(ctx, provider, "", ErrInvalidIdentityProvider, secrets...)
 	}
 	if externalID == "" {
-		return s.linkFailure(ctx, provider, "", ErrInvalidExternalIdentity)
+		return s.linkFailure(ctx, provider, "", ErrInvalidExternalIdentity, secrets...)
 	}
 	if s.repository == nil {
-		return s.linkFailure(ctx, provider, "", errors.New("identity repository is not configured"))
+		return s.linkFailure(ctx, provider, "", errors.New("identity repository is not configured"), secrets...)
 	}
 	hash := sha256.Sum256([]byte(rawCode))
-	identity, err := s.repository.ConsumeAndLink(ctx, hex.EncodeToString(hash[:]), provider, externalID, s.now().UTC())
+	tokenHash := hex.EncodeToString(hash[:])
+	identity, err := s.repository.ConsumeAndLink(ctx, tokenHash, provider, externalID, s.now().UTC())
 	if err != nil {
-		return s.linkFailure(ctx, provider, "", err)
+		return s.linkFailure(ctx, provider, "", err, secrets...)
 	}
 	if identity == nil || strings.TrimSpace(identity.ID) == "" || strings.TrimSpace(identity.UserID) == "" {
-		return s.linkFailure(ctx, provider, "", domainidentity.ErrInvalidLinkToken)
+		return s.linkFailure(ctx, provider, "", domainidentity.ErrInvalidLinkToken, secrets...)
 	}
-	s.writeAudit(ctx, s.auditEvent(ctx, domainaudit.ActionCreate, "external_identity", identity.ID, identity.UserID, provider, domainaudit.StatusSuccess, "Linked external identity", "", "mcp"))
+	s.writeAudit(ctx, s.auditEvent(ctx, domainaudit.ActionCreate, "external_identity", identity.ID, identity.UserID, provider, domainaudit.StatusSuccess, "Linked external identity", "", "mcp", secrets...))
 	return identity, nil
 }
 
@@ -187,17 +193,17 @@ func newLinkCode() (string, error) {
 	return base64.RawURLEncoding.EncodeToString(buf), nil
 }
 
-func (s *service) issueFailure(ctx context.Context, provider, userID string, err error) (string, error) {
-	s.writeAudit(ctx, s.auditEvent(ctx, domainaudit.ActionCreate, "identity_link_token", "", userID, provider, domainaudit.StatusFailed, "Failed to issue identity link code", FailureCategory(err), "http"))
+func (s *service) issueFailure(ctx context.Context, provider, userID string, err error, secrets ...string) (string, error) {
+	s.writeAudit(ctx, s.auditEvent(ctx, domainaudit.ActionCreate, "identity_link_token", "", userID, provider, domainaudit.StatusFailed, "Failed to issue identity link code", FailureCategory(err), "http", secrets...))
 	return "", err
 }
 
-func (s *service) linkFailure(ctx context.Context, provider, userID string, err error) (*domainidentity.ExternalIdentity, error) {
-	s.writeAudit(ctx, s.auditEvent(ctx, domainaudit.ActionCreate, "external_identity", "", userID, provider, domainaudit.StatusFailed, "Failed to link external identity", FailureCategory(err), "mcp"))
+func (s *service) linkFailure(ctx context.Context, provider, userID string, err error, secrets ...string) (*domainidentity.ExternalIdentity, error) {
+	s.writeAudit(ctx, s.auditEvent(ctx, domainaudit.ActionCreate, "external_identity", "", userID, provider, domainaudit.StatusFailed, "Failed to link external identity", FailureCategory(err), "mcp", secrets...))
 	return nil, err
 }
 
-func (s *service) auditEvent(ctx context.Context, action, resource, resourceID, subjectUserID, provider, status, message, failure, defaultSource string) domainaudit.AuditEvent {
+func (s *service) auditEvent(ctx context.Context, action, resource, resourceID, subjectUserID, provider, status, message, failure, defaultSource string, secrets ...string) domainaudit.AuditEvent {
 	scope := authscope.FromContext(ctx)
 	actorUserID := scope.ActorUserID()
 	if actorUserID == "" {
@@ -208,7 +214,7 @@ func (s *service) auditEvent(ctx context.Context, action, resource, resourceID, 
 	if source == "" {
 		source = defaultSource
 	}
-	metadata := utils.MergeMetadata(provenance.Metadata, map[string]any{"provider": provider})
+	metadata := utils.MergeMetadata(sanitizeAuditMetadata(provenance.Metadata, secrets...), map[string]any{"provider": provider})
 	if scope.IsImpersonated && strings.TrimSpace(scope.UserID) != actorUserID && strings.TrimSpace(subjectUserID) != "" {
 		metadata = utils.MergeMetadata(metadata, map[string]any{"subject_user_id": strings.TrimSpace(subjectUserID)})
 	}
@@ -226,6 +232,66 @@ func (s *service) auditEvent(ctx context.Context, action, resource, resourceID, 
 		IPAddress:    provenance.IPAddress,
 		UserAgent:    provenance.UserAgent,
 		Metadata:     metadata,
+	}
+}
+
+func sanitizeAuditMetadata(metadata map[string]any, secrets ...string) map[string]any {
+	if len(metadata) == 0 {
+		return nil
+	}
+	secretValues := make([]string, 0, len(secrets))
+	for _, secret := range secrets {
+		if strings.TrimSpace(secret) != "" {
+			secretValues = append(secretValues, secret)
+		}
+	}
+	cleaned, _ := sanitizeAuditValue(metadata, secretValues)
+	result, _ := cleaned.(map[string]any)
+	return result
+}
+
+func sanitizeAuditValue(value any, secrets []string) (any, bool) {
+	switch current := value.(type) {
+	case map[string]any:
+		out := make(map[string]any, len(current))
+		for key, nested := range current {
+			if sensitiveAuditKey(key) {
+				continue
+			}
+			if clean, ok := sanitizeAuditValue(nested, secrets); ok {
+				out[key] = clean
+			}
+		}
+		return out, true
+	case []any:
+		out := make([]any, 0, len(current))
+		for _, nested := range current {
+			if clean, ok := sanitizeAuditValue(nested, secrets); ok {
+				out = append(out, clean)
+			}
+		}
+		return out, true
+	case string:
+		clean := current
+		for _, secret := range secrets {
+			clean = strings.ReplaceAll(clean, secret, "[REDACTED]")
+		}
+		return clean, true
+	default:
+		return value, true
+	}
+}
+
+func sensitiveAuditKey(key string) bool {
+	key = strings.ToLower(strings.TrimSpace(key))
+	if utils.IsSensitiveKey(key) {
+		return true
+	}
+	switch key {
+	case "code", "link_code", "raw_code", "hash", "token_hash", "bearer", "bearer_key", "authorization", "body", "request_body", "payload", "raw_body":
+		return true
+	default:
+		return false
 	}
 }
 
