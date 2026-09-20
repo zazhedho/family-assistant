@@ -10,9 +10,7 @@ import (
 
 func TestAuthorizerChecksValidationBeforePermission(t *testing.T) {
 	actor := identity.ActorContext{Permissions: map[string]struct{}{}}
-	err := NewAuthorizer().Authorize(context.Background(), actor, "reminders:view", Resource{
-		Scope: ScopePersonal,
-	})
+	err := NewAuthorizer().Authorize(context.Background(), actor, "reminders:view", Resource{})
 
 	var validationErr *ValidationError
 	if !errors.As(err, &validationErr) {
@@ -20,48 +18,50 @@ func TestAuthorizerChecksValidationBeforePermission(t *testing.T) {
 	}
 }
 
-func TestAuthorizerChecksPermissionBeforeFamily(t *testing.T) {
-	actor := task5Actor("child", "child-1", "family-1", "reminders:list")
-	err := NewAuthorizer().Authorize(context.Background(), actor, "reminders:view", Resource{
-		FamilyID: "family-2",
-		Scope:    ScopeFamily,
-	})
+func TestAuthorizerChecksPermissionBeforeCrossSpace(t *testing.T) {
+	actor := spaceActor("space-1", "reminders:list")
+	err := NewAuthorizer().Authorize(context.Background(), actor, "reminders:view", Resource{SpaceID: "space-2"})
 
 	if !errors.Is(err, ErrForbidden) {
-		t.Fatalf("Authorize() error = %v, want ErrForbidden before cross-family check", err)
+		t.Fatalf("Authorize() error = %v, want ErrForbidden before cross-Space check", err)
+	}
+}
+
+func TestAuthorizerRejectsCrossSpaceResourceAsNotFound(t *testing.T) {
+	actor := spaceActor("space-1", "reminders:view")
+	err := NewAuthorizer().Authorize(context.Background(), actor, "reminders:view", Resource{SpaceID: "space-2"})
+
+	if !errors.Is(err, ErrNotFound) {
+		t.Fatalf("Authorize() error = %v, want ErrNotFound", err)
+	}
+}
+
+func TestAuthorizerAllowsAccessibleResourceWithPermission(t *testing.T) {
+	actor := spaceActor("space-1", "reminders:view")
+	err := NewAuthorizer().Authorize(context.Background(), actor, "reminders:view", Resource{
+		SpaceID:           "space-1",
+		CreatedByMemberID: "member-1",
+		AssigneeMemberID:  "member-2",
+	})
+	if err != nil {
+		t.Fatalf("Authorize() error = %v", err)
 	}
 }
 
 func TestAuthorizerRejectsBlankPermission(t *testing.T) {
-	permission := " \t"
-	actor := identity.ActorContext{
-		FamilyID:    "family-1",
-		Permissions: map[string]struct{}{permission: {}},
-	}
-	err := NewAuthorizer().Authorize(context.Background(), actor, permission, Resource{
-		FamilyID: "family-1",
-		Scope:    ScopeFamily,
-	})
-
+	actor := spaceActor("space-1", "")
+	err := NewAuthorizer().Authorize(context.Background(), actor, " \t", Resource{SpaceID: "space-1"})
 	if !errors.Is(err, ErrForbidden) {
 		t.Fatalf("Authorize() error = %v, want ErrForbidden", err)
 	}
 }
 
-func TestAuthorizerRequiresPermissionForFamilyResource(t *testing.T) {
-	actor := identity.ActorContext{
-		MemberID:    "member-1",
-		FamilyID:    "family-1",
-		Permissions: map[string]struct{}{},
+func spaceActor(spaceID, permission string) identity.ActorContext {
+	permissions := map[string]struct{}{}
+	if permission != "" {
+		permissions[permission] = struct{}{}
 	}
-	err := NewAuthorizer().Authorize(context.Background(), actor, "reminders:view", Resource{
-		FamilyID: "family-1",
-		Scope:    ScopeFamily,
-	})
-
-	if !errors.Is(err, ErrForbidden) {
-		t.Fatalf("Authorize() error = %v, want ErrForbidden", err)
-	}
+	return identity.ActorContext{SpaceID: spaceID, Permissions: permissions}
 }
 
 func TestAuthorizerImplementsInterface(t *testing.T) {

@@ -33,11 +33,11 @@ func ActorFromContext(ctx context.Context) (serviceidentity.ActorContext, bool) 
 type AuthMiddleware struct {
 	serverKey     string
 	profileHeader string
-	resolver      serviceidentity.Resolver
+	resolver      any
 	logger        *slog.Logger
 }
 
-func NewAuthMiddleware(cfg config.MCPConfig, resolver serviceidentity.Resolver) *AuthMiddleware {
+func NewAuthMiddleware(cfg config.MCPConfig, resolver any) *AuthMiddleware {
 	profileHeader := strings.TrimSpace(cfg.ProfileHeader)
 	if profileHeader == "" {
 		profileHeader = "X-Hermes-Profile"
@@ -50,7 +50,7 @@ func NewAuthMiddleware(cfg config.MCPConfig, resolver serviceidentity.Resolver) 
 	}
 }
 
-func NewMiddleware(cfg config.MCPConfig, resolver serviceidentity.Resolver) *AuthMiddleware {
+func NewMiddleware(cfg config.MCPConfig, resolver any) *AuthMiddleware {
 	return NewAuthMiddleware(cfg, resolver)
 }
 
@@ -72,14 +72,13 @@ func (m *AuthMiddleware) Handler(next http.Handler) http.Handler {
 		if channel == "" {
 			channel = "whatsapp"
 		}
-		if m.resolver == nil {
-			m.logger.Error("mcp identity resolver is not configured")
-			writeHTTPError(w, http.StatusInternalServerError, "internal server error")
-			return
-		}
-
-		actor, err := m.resolver.Resolve(r.Context(), profileID, channel)
+		actor, err := resolveActor(r.Context(), m.resolver, profileID, channel)
 		if err != nil {
+			if errors.Is(err, serviceidentity.ErrResolverMisconfigured) {
+				m.logger.Error("mcp identity resolver is not configured")
+				writeHTTPError(w, http.StatusInternalServerError, "internal server error")
+				return
+			}
 			if errors.Is(err, serviceidentity.ErrUnauthenticated) {
 				writeHTTPError(w, http.StatusUnauthorized, "authentication required")
 				return
@@ -91,6 +90,25 @@ func (m *AuthMiddleware) Handler(next http.Handler) http.Handler {
 
 		next.ServeHTTP(w, r.WithContext(WithActorContext(r.Context(), actor)))
 	})
+}
+
+type externalResolver interface {
+	ResolveExternal(context.Context, string, string, string) (serviceidentity.ActorContext, error)
+}
+
+type legacyResolver interface {
+	Resolve(context.Context, string, string) (serviceidentity.ActorContext, error)
+}
+
+func resolveActor(ctx context.Context, resolver any, externalID, channel string) (serviceidentity.ActorContext, error) {
+	switch resolver := resolver.(type) {
+	case externalResolver:
+		return resolver.ResolveExternal(ctx, "hermes", externalID, channel)
+	case legacyResolver:
+		return resolver.Resolve(ctx, externalID, channel)
+	default:
+		return serviceidentity.ActorContext{}, serviceidentity.ErrResolverMisconfigured
+	}
 }
 
 func bearerSecret(value string) (string, bool) {
