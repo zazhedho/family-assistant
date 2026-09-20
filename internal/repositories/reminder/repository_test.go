@@ -2,7 +2,6 @@ package repositoryreminder
 
 import (
 	"context"
-	"database/sql/driver"
 	"errors"
 	"regexp"
 	"testing"
@@ -14,6 +13,12 @@ import (
 	"github.com/google/uuid"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
+)
+
+const (
+	reminderID = "00000000-0000-4000-8000-000000000101"
+	spaceID    = "00000000-0000-4000-8000-000000000201"
+	memberID   = "00000000-0000-4000-8000-000000000301"
 )
 
 func newReminderMockDB(t *testing.T) (*gorm.DB, sqlmock.Sqlmock) {
@@ -34,12 +39,12 @@ func newReminderMockDB(t *testing.T) (*gorm.DB, sqlmock.Sqlmock) {
 }
 
 func reminderFixture() *domainreminder.Reminder {
+	assignee := memberID
 	return &domainreminder.Reminder{
-		ID:                "reminder-1",
-		FamilyID:          "family-1",
-		OwnerMemberID:     "member-1",
-		CreatedByMemberID: "member-2",
-		Scope:             domainreminder.ScopePersonal,
+		ID:                reminderID,
+		SpaceID:           spaceID,
+		CreatedByMemberID: memberID,
+		AssigneeMemberID:  &assignee,
 		Title:             "Pay electricity bill",
 		Description:       "Before the due date",
 		ScheduledAt:       time.Date(2026, 9, 20, 8, 0, 0, 0, time.UTC),
@@ -49,35 +54,30 @@ func reminderFixture() *domainreminder.Reminder {
 	}
 }
 
-type updatedAtMatcher struct {
-	got *time.Time
-	min time.Time
-	max time.Time
+func reminderColumns() []string {
+	return []string{
+		"id", "space_id", "created_by_member_id", "assignee_member_id", "title", "description",
+		"scheduled_at", "status", "completed_at", "created_at", "updated_at", "deleted_at",
+	}
 }
 
-func (m updatedAtMatcher) Match(value driver.Value) bool {
-	actual, ok := value.(time.Time)
-	if !ok {
-		return false
-	}
-	if m.got != nil {
-		*m.got = actual
-	}
-	return !actual.Before(m.min) && !actual.After(m.max)
+func expectComplete(mock sqlmock.Sqlmock, completedAt time.Time, rows int64) {
+	mock.ExpectExec(`UPDATE "reminders" SET .* WHERE \(id = \$4 AND space_id = \$5 AND status = \$6\) AND .*deleted_at.*IS NULL`).
+		WithArgs(completedAt, domainreminder.StatusCompleted, completedAt, reminderID, spaceID, domainreminder.StatusPending).
+		WillReturnResult(sqlmock.NewResult(0, rows))
 }
 
-func TestCreatePersistsOwnershipScopeAndStatus(t *testing.T) {
+func TestCreatePersistsSpaceAndOptionalAssignee(t *testing.T) {
 	db, mock := newReminderMockDB(t)
 	repo := NewRepository(db)
 	reminder := reminderFixture()
 
-	mock.ExpectExec(regexp.QuoteMeta(`INSERT INTO "reminders" ("id","family_id","owner_member_id","created_by_member_id","scope","title","description","scheduled_at","status","completed_at","created_at","updated_at") VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`)).
+	mock.ExpectExec(regexp.QuoteMeta(`INSERT INTO "reminders" ("id","space_id","created_by_member_id","assignee_member_id","title","description","scheduled_at","status","completed_at","created_at","updated_at") VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`)).
 		WithArgs(
 			reminder.ID,
-			reminder.FamilyID,
-			reminder.OwnerMemberID,
+			reminder.SpaceID,
 			reminder.CreatedByMemberID,
-			reminder.Scope,
+			reminder.AssigneeMemberID,
 			reminder.Title,
 			reminder.Description,
 			reminder.ScheduledAt,
@@ -102,13 +102,12 @@ func TestCreateGeneratesUUIDWhenIDIsEmpty(t *testing.T) {
 	reminder := reminderFixture()
 	reminder.ID = ""
 
-	mock.ExpectExec(regexp.QuoteMeta(`INSERT INTO "reminders" ("id","family_id","owner_member_id","created_by_member_id","scope","title","description","scheduled_at","status","completed_at","created_at","updated_at") VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`)).
+	mock.ExpectExec(regexp.QuoteMeta(`INSERT INTO "reminders" ("id","space_id","created_by_member_id","assignee_member_id","title","description","scheduled_at","status","completed_at","created_at","updated_at") VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`)).
 		WithArgs(
 			sqlmock.AnyArg(),
-			reminder.FamilyID,
-			reminder.OwnerMemberID,
+			reminder.SpaceID,
 			reminder.CreatedByMemberID,
-			reminder.Scope,
+			reminder.AssigneeMemberID,
 			reminder.Title,
 			reminder.Description,
 			reminder.ScheduledAt,
@@ -143,17 +142,15 @@ func TestCreateRejectsNilReminderBeforeQuery(t *testing.T) {
 	}
 }
 
-func TestFindByIDInFamilyCannotReturnAnotherFamily(t *testing.T) {
+func TestFindByIDInSpaceCannotReturnAnotherSpaceOrDeletedRow(t *testing.T) {
 	db, mock := newReminderMockDB(t)
 	repo := NewRepository(db)
 
-	mock.ExpectQuery(`SELECT .* FROM "reminders" WHERE family_id = \$1 AND id = \$2.*LIMIT \$3`).
-		WithArgs("family-a", "reminder-in-family-b", 1).
-		WillReturnRows(sqlmock.NewRows([]string{
-			"id", "family_id", "owner_member_id", "created_by_member_id", "scope", "title", "description", "scheduled_at", "status", "completed_at", "created_at", "updated_at",
-		}))
+	mock.ExpectQuery(`SELECT .* FROM "reminders" WHERE \(space_id = \$1 AND id = \$2\) AND .*deleted_at.*IS NULL.*LIMIT \$3`).
+		WithArgs(spaceID, reminderID, 1).
+		WillReturnRows(sqlmock.NewRows(reminderColumns()))
 
-	_, err := repo.FindByIDInFamily(context.Background(), "family-a", "reminder-in-family-b")
+	_, err := repo.FindByIDInSpace(context.Background(), spaceID, reminderID)
 	if !errors.Is(err, gorm.ErrRecordNotFound) {
 		t.Fatalf("expected record not found, got %v", err)
 	}
@@ -162,70 +159,25 @@ func TestFindByIDInFamilyCannotReturnAnotherFamily(t *testing.T) {
 	}
 }
 
-func TestListWithOwnerMemberIDReturnsOnlyThatOwner(t *testing.T) {
-	db, mock := newReminderMockDB(t)
-	repo := NewRepository(db)
-	owner := "member-1"
-
-	mock.ExpectQuery(`SELECT .* FROM "reminders" WHERE family_id = \$1 AND owner_member_id = \$2`).
-		WithArgs("family-1", owner).
-		WillReturnRows(sqlmock.NewRows([]string{
-			"id", "family_id", "owner_member_id", "created_by_member_id", "scope", "title", "description", "scheduled_at", "status", "completed_at", "created_at", "updated_at",
-		}).AddRow("reminder-1", "family-1", owner, "member-2", "PERSONAL", "Own reminder", "", time.Now(), "PENDING", nil, time.Now(), time.Now()))
-
-	got, err := repo.List(context.Background(), domainreminder.ListFilter{FamilyID: "family-1", OwnerMemberID: &owner})
-	if err != nil {
-		t.Fatalf("list reminders: %v", err)
-	}
-	if len(got) != 1 || got[0].OwnerMemberID != owner {
-		t.Fatalf("unexpected reminders: %#v", got)
-	}
-	if err := mock.ExpectationsWereMet(); err != nil {
-		t.Fatalf("sql expectations: %v", err)
-	}
-}
-
-func TestListWithFamilyScopeReturnsOnlyFamilyRows(t *testing.T) {
-	db, mock := newReminderMockDB(t)
-	repo := NewRepository(db)
-	scope := domainreminder.ScopeFamily
-
-	mock.ExpectQuery(`SELECT .* FROM "reminders" WHERE family_id = \$1 AND scope = \$2`).
-		WithArgs("family-1", scope).
-		WillReturnRows(sqlmock.NewRows([]string{
-			"id", "family_id", "owner_member_id", "created_by_member_id", "scope", "title", "description", "scheduled_at", "status", "completed_at", "created_at", "updated_at",
-		}).AddRow("reminder-1", "family-1", "member-1", "member-1", "FAMILY", "Family reminder", "", time.Now(), "PENDING", nil, time.Now(), time.Now()))
-
-	got, err := repo.List(context.Background(), domainreminder.ListFilter{FamilyID: "family-1", Scope: &scope})
-	if err != nil {
-		t.Fatalf("list reminders: %v", err)
-	}
-	if len(got) != 1 || got[0].Scope != scope || got[0].FamilyID != "family-1" {
-		t.Fatalf("unexpected reminders: %#v", got)
-	}
-	if err := mock.ExpectationsWereMet(); err != nil {
-		t.Fatalf("sql expectations: %v", err)
-	}
-}
-
-func TestListAppliesStatusAndDateRangeTogether(t *testing.T) {
+func TestListScopesBySpaceStatusAndScheduleAndExcludesDeletedRows(t *testing.T) {
 	db, mock := newReminderMockDB(t)
 	repo := NewRepository(db)
 	status := domainreminder.StatusPending
 	from := time.Date(2026, 9, 17, 0, 0, 0, 0, time.UTC)
 	to := time.Date(2026, 9, 30, 23, 59, 59, 0, time.UTC)
 
-	mock.ExpectQuery(`SELECT .* FROM "reminders" WHERE family_id = \$1 AND status = \$2 AND scheduled_at >= \$3 AND scheduled_at <= \$4`).
-		WithArgs("family-1", status, from, to).
-		WillReturnRows(sqlmock.NewRows([]string{
-			"id", "family_id", "owner_member_id", "created_by_member_id", "scope", "title", "description", "scheduled_at", "status", "completed_at", "created_at", "updated_at",
-		}).AddRow("reminder-1", "family-1", "member-1", "member-1", "PERSONAL", "Pay bill", "", time.Date(2026, 9, 20, 8, 0, 0, 0, time.UTC), "PENDING", nil, from, from))
+	mock.ExpectQuery(`SELECT .* FROM "reminders" WHERE space_id = \$1 AND status = \$2 AND scheduled_at >= \$3 AND scheduled_at <= \$4 AND .*deleted_at.*IS NULL`).
+		WithArgs(spaceID, status, from, to).
+		WillReturnRows(sqlmock.NewRows(reminderColumns()).AddRow(
+			reminderID, spaceID, memberID, nil, "Pay bill", "", time.Date(2026, 9, 20, 8, 0, 0, 0, time.UTC),
+			"PENDING", nil, from, from, nil,
+		))
 
-	got, err := repo.List(context.Background(), domainreminder.ListFilter{FamilyID: "family-1", Status: &status, From: &from, To: &to})
+	got, err := repo.List(context.Background(), domainreminder.ListFilter{SpaceID: spaceID, Status: &status, From: &from, To: &to})
 	if err != nil {
 		t.Fatalf("list reminders: %v", err)
 	}
-	if len(got) != 1 || got[0].Status != status {
+	if len(got) != 1 || got[0].SpaceID != spaceID || got[0].Status != status {
 		t.Fatalf("unexpected reminders: %#v", got)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
@@ -233,79 +185,43 @@ func TestListAppliesStatusAndDateRangeTogether(t *testing.T) {
 	}
 }
 
-func TestListRejectsUnscopedFamilyIDBeforeQuery(t *testing.T) {
+func TestListRejectsUnscopedSpaceBeforeQuery(t *testing.T) {
 	db, mock := newReminderMockDB(t)
 	repo := NewRepository(db)
 
-	_, err := repo.List(context.Background(), domainreminder.ListFilter{FamilyID: " \t"})
-	if err == nil {
-		t.Fatal("expected blank family ID to be rejected")
+	_, err := repo.List(context.Background(), domainreminder.ListFilter{SpaceID: " \t"})
+	if !errors.Is(err, domainreminder.ErrSpaceIDRequired) {
+		t.Fatalf("expected space ID required, got %v", err)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("unexpected database query: %v", err)
 	}
 }
 
-func TestUpdateUsesMutableAllowlistAndAllowsNullCompletedAt(t *testing.T) {
+func TestCompletePendingScopesBySpaceAndStatus(t *testing.T) {
 	db, mock := newReminderMockDB(t)
 	repo := NewRepository(db)
-	reminder := reminderFixture()
-	reminder.Status = domainreminder.StatusCompleted
-	reminder.CompletedAt = nil
-	reminder.UpdatedAt = time.Date(2026, 9, 18, 8, 0, 0, 0, time.UTC)
-	reminder.Title = "must not be updated"
-	reminder.OwnerMemberID = "must-not-mutate-owner"
+	now := time.Date(2026, 9, 20, 8, 0, 0, 0, time.UTC)
 
-	mock.ExpectExec(regexp.QuoteMeta(`UPDATE "reminders" SET "completed_at"=$1,"status"=$2,"updated_at"=$3 WHERE id = $4 AND family_id = $5 AND status = $6`)).
-		WithArgs(nil, reminder.Status, sqlmock.AnyArg(), reminder.ID, reminder.FamilyID, domainreminder.StatusPending).
+	mock.ExpectExec(`UPDATE "reminders" SET .* WHERE \(id = \$4 AND space_id = \$5 AND status = \$6\) AND .*deleted_at.*IS NULL`).
+		WithArgs(now, domainreminder.StatusCompleted, now, reminderID, spaceID, domainreminder.StatusPending).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 
-	if err := repo.Update(context.Background(), reminder); err != nil {
-		t.Fatalf("update reminder: %v", err)
+	if err := repo.CompletePending(context.Background(), spaceID, reminderID, now); err != nil {
+		t.Fatalf("complete reminder: %v", err)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("sql expectations: %v", err)
 	}
 }
 
-func TestUpdateOwnsFreshUpdatedAtAndPersistsItOnModel(t *testing.T) {
+func TestCompletePendingReturnsStatusConflictWhenNoPendingRow(t *testing.T) {
 	db, mock := newReminderMockDB(t)
 	repo := NewRepository(db)
-	reminder := reminderFixture()
-	stale := time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC)
-	reminder.UpdatedAt = stale
-	before := time.Now().UTC()
-	var persisted time.Time
+	now := time.Date(2026, 9, 20, 8, 0, 0, 0, time.UTC)
+	expectComplete(mock, now, 0)
 
-	mock.ExpectExec(regexp.QuoteMeta(`UPDATE "reminders" SET "completed_at"=$1,"status"=$2,"updated_at"=$3 WHERE id = $4 AND family_id = $5 AND status = $6`)).
-		WithArgs(nil, reminder.Status, updatedAtMatcher{got: &persisted, min: before, max: before.Add(5 * time.Second)}, reminder.ID, reminder.FamilyID, domainreminder.StatusPending).
-		WillReturnResult(sqlmock.NewResult(0, 1))
-
-	if err := repo.Update(context.Background(), reminder); err != nil {
-		t.Fatalf("update reminder: %v", err)
-	}
-	after := time.Now().UTC()
-	if reminder.UpdatedAt.IsZero() || reminder.UpdatedAt.Equal(stale) || reminder.UpdatedAt.Before(before) || reminder.UpdatedAt.After(after) {
-		t.Fatalf("expected fresh repository timestamp, got %v (bounds %v..%v)", reminder.UpdatedAt, before, after)
-	}
-	if !persisted.Equal(reminder.UpdatedAt) {
-		t.Fatalf("persisted timestamp %v differs from model %v", persisted, reminder.UpdatedAt)
-	}
-	if err := mock.ExpectationsWereMet(); err != nil {
-		t.Fatalf("sql expectations: %v", err)
-	}
-}
-
-func TestUpdateReturnsStatusConflictWhenPendingFamilyScopedRowIsMissing(t *testing.T) {
-	db, mock := newReminderMockDB(t)
-	repo := NewRepository(db)
-	reminder := reminderFixture()
-
-	mock.ExpectExec(regexp.QuoteMeta(`UPDATE "reminders" SET "completed_at"=$1,"status"=$2,"updated_at"=$3 WHERE id = $4 AND family_id = $5 AND status = $6`)).
-		WithArgs(nil, reminder.Status, sqlmock.AnyArg(), reminder.ID, reminder.FamilyID, domainreminder.StatusPending).
-		WillReturnResult(sqlmock.NewResult(0, 0))
-
-	err := repo.Update(context.Background(), reminder)
+	err := repo.CompletePending(context.Background(), spaceID, reminderID, now)
 	if !errors.Is(err, domainreminder.ErrStatusConflict) {
 		t.Fatalf("expected status conflict, got %v", err)
 	}
@@ -314,27 +230,15 @@ func TestUpdateReturnsStatusConflictWhenPendingFamilyScopedRowIsMissing(t *testi
 	}
 }
 
-func TestUpdateRejectsNilReminderBeforeQuery(t *testing.T) {
+func TestCompletePendingRejectsBlankScopeOrReminderIDBeforeQuery(t *testing.T) {
 	db, mock := newReminderMockDB(t)
 	repo := NewRepository(db)
+	now := time.Now().UTC()
 
-	err := repo.Update(context.Background(), nil)
-	if !errors.Is(err, domainreminder.ErrReminderRequired) {
-		t.Fatalf("expected reminder required, got %v", err)
+	if err := repo.CompletePending(context.Background(), " \t", reminderID, now); !errors.Is(err, domainreminder.ErrSpaceIDRequired) {
+		t.Fatalf("expected space ID required, got %v", err)
 	}
-	if err := mock.ExpectationsWereMet(); err != nil {
-		t.Fatalf("unexpected database query: %v", err)
-	}
-}
-
-func TestUpdateRejectsBlankReminderIDBeforeQuery(t *testing.T) {
-	db, mock := newReminderMockDB(t)
-	repo := NewRepository(db)
-	reminder := reminderFixture()
-	reminder.ID = " \t"
-
-	err := repo.Update(context.Background(), reminder)
-	if !errors.Is(err, domainreminder.ErrReminderIDRequired) {
+	if err := repo.CompletePending(context.Background(), spaceID, " \t", now); !errors.Is(err, domainreminder.ErrReminderIDRequired) {
 		t.Fatalf("expected reminder ID required, got %v", err)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {

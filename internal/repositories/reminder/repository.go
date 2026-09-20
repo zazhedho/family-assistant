@@ -25,22 +25,28 @@ func (r *Repository) Create(ctx context.Context, reminder *domainreminder.Remind
 	if reminder == nil {
 		return domainreminder.ErrReminderRequired
 	}
+	if err := validateSpaceID(reminder.SpaceID); err != nil {
+		return err
+	}
 	if strings.TrimSpace(reminder.ID) == "" {
 		reminder.ID = utils.CreateUUID()
 	}
 	return r.DB.WithContext(ctx).
-		Select("id", "family_id", "owner_member_id", "created_by_member_id", "scope", "title", "description", "scheduled_at", "status", "completed_at", "created_at", "updated_at").
+		Select("id", "space_id", "created_by_member_id", "assignee_member_id", "title", "description", "scheduled_at", "status", "completed_at", "created_at", "updated_at").
 		Create(reminder).Error
 }
 
-func (r *Repository) FindByIDInFamily(ctx context.Context, familyID, reminderID string) (*domainreminder.Reminder, error) {
-	if err := validateFamilyID(familyID); err != nil {
+func (r *Repository) FindByIDInSpace(ctx context.Context, spaceID, reminderID string) (*domainreminder.Reminder, error) {
+	if err := validateSpaceID(spaceID); err != nil {
 		return nil, err
+	}
+	if strings.TrimSpace(reminderID) == "" {
+		return nil, domainreminder.ErrReminderIDRequired
 	}
 
 	var reminder domainreminder.Reminder
 	if err := r.DB.WithContext(ctx).
-		Where("family_id = ? AND id = ?", familyID, reminderID).
+		Where("space_id = ? AND id = ?", spaceID, reminderID).
 		First(&reminder).Error; err != nil {
 		return nil, err
 	}
@@ -48,17 +54,11 @@ func (r *Repository) FindByIDInFamily(ctx context.Context, familyID, reminderID 
 }
 
 func (r *Repository) List(ctx context.Context, filter domainreminder.ListFilter) ([]domainreminder.Reminder, error) {
-	if err := validateFamilyID(filter.FamilyID); err != nil {
+	if err := validateSpaceID(filter.SpaceID); err != nil {
 		return nil, err
 	}
 
-	query := r.DB.WithContext(ctx).Where("family_id = ?", filter.FamilyID)
-	if filter.OwnerMemberID != nil {
-		query = query.Where("owner_member_id = ?", *filter.OwnerMemberID)
-	}
-	if filter.Scope != nil {
-		query = query.Where("scope = ?", *filter.Scope)
-	}
+	query := r.DB.WithContext(ctx).Where("space_id = ?", filter.SpaceID)
 	if filter.Status != nil {
 		query = query.Where("status = ?", *filter.Status)
 	}
@@ -76,25 +76,21 @@ func (r *Repository) List(ctx context.Context, filter domainreminder.ListFilter)
 	return reminders, nil
 }
 
-func (r *Repository) Update(ctx context.Context, reminder *domainreminder.Reminder) error {
-	if reminder == nil {
-		return domainreminder.ErrReminderRequired
-	}
-	if err := validateFamilyID(reminder.FamilyID); err != nil {
+func (r *Repository) CompletePending(ctx context.Context, spaceID, reminderID string, completedAt time.Time) error {
+	if err := validateSpaceID(spaceID); err != nil {
 		return err
 	}
-	if strings.TrimSpace(reminder.ID) == "" {
+	if strings.TrimSpace(reminderID) == "" {
 		return domainreminder.ErrReminderIDRequired
 	}
-	reminder.UpdatedAt = time.Now().UTC()
 
 	result := r.DB.WithContext(ctx).
 		Model(&domainreminder.Reminder{}).
-		Where("id = ? AND family_id = ? AND status = ?", reminder.ID, reminder.FamilyID, domainreminder.StatusPending).
+		Where("id = ? AND space_id = ? AND status = ?", reminderID, spaceID, domainreminder.StatusPending).
 		Updates(map[string]any{
-			"status":       reminder.Status,
-			"completed_at": reminder.CompletedAt,
-			"updated_at":   reminder.UpdatedAt,
+			"completed_at": completedAt,
+			"status":       domainreminder.StatusCompleted,
+			"updated_at":   completedAt,
 		})
 	if result.Error != nil {
 		return result.Error
@@ -105,9 +101,9 @@ func (r *Repository) Update(ctx context.Context, reminder *domainreminder.Remind
 	return nil
 }
 
-func validateFamilyID(familyID string) error {
-	if strings.TrimSpace(familyID) == "" {
-		return domainreminder.ErrFamilyIDRequired
+func validateSpaceID(spaceID string) error {
+	if strings.TrimSpace(spaceID) == "" {
+		return domainreminder.ErrSpaceIDRequired
 	}
 	return nil
 }

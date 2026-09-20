@@ -1,12 +1,9 @@
 package domainreminder
 
-import "time"
+import (
+	"time"
 
-type Scope string
-
-const (
-	ScopePersonal Scope = "PERSONAL"
-	ScopeFamily   Scope = "FAMILY"
+	"gorm.io/gorm"
 )
 
 type Status string
@@ -22,16 +19,16 @@ func (Reminder) TableName() string {
 }
 
 type Reminder struct {
-	ID                string     `json:"id" gorm:"column:id;primaryKey"`
-	FamilyID          string     `json:"family_id" gorm:"column:family_id"`
-	OwnerMemberID     string     `json:"owner_member_id" gorm:"column:owner_member_id"`
-	CreatedByMemberID string     `json:"created_by_member_id" gorm:"column:created_by_member_id"`
-	Scope             Scope      `json:"scope" gorm:"column:scope"`
-	Title             string     `json:"title" gorm:"column:title"`
-	Description       string     `json:"description" gorm:"column:description"`
-	ScheduledAt       time.Time  `json:"scheduled_at" gorm:"column:scheduled_at"`
-	Status            Status     `json:"status" gorm:"column:status"`
-	CompletedAt       *time.Time `json:"completed_at,omitempty" gorm:"column:completed_at"`
-	CreatedAt         time.Time  `json:"created_at" gorm:"column:created_at"`
-	UpdatedAt         time.Time  `json:"updated_at" gorm:"column:updated_at"`
+	ID                string         `json:"id" gorm:"column:id;primaryKey"`
+	SpaceID           string         `json:"space_id" gorm:"column:space_id"`
+	CreatedByMemberID string         `json:"created_by_member_id" gorm:"column:created_by_member_id"`
+	AssigneeMemberID  *string        `json:"assignee_member_id,omitempty" gorm:"column:assignee_member_id"`
+	Title             string         `json:"title" gorm:"column:title"`
+	Description       string         `json:"description" gorm:"column:description"`
+	ScheduledAt       time.Time      `json:"scheduled_at" gorm:"column:scheduled_at"`
+	Status            Status         `json:"status" gorm:"column:status"`
+	CompletedAt       *time.Time     `json:"completed_at,omitempty" gorm:"column:completed_at"`
+	CreatedAt         time.Time      `json:"created_at" gorm:"column:created_at"`
+	UpdatedAt         time.Time      `json:"updated_at" gorm:"column:updated_at"`
+	DeletedAt         gorm.DeletedAt `json:"deleted_at,omitempty" gorm:"column:deleted_at"`
 }
