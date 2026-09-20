@@ -33,22 +33,7 @@ func (authorizer) Authorize(_ context.Context, actor serviceidentity.ActorContex
 		}
 		return nil
 	}
-
-	// Compatibility branch for the unreleased family reminder service. It is
-	// removed with the family consumers in Task 11.
-	if actor.FamilyID != resource.FamilyID {
-		return ErrNotFound
-	}
-	if resource.Scope == ScopeFamily {
-		return nil
-	}
-	if actor.MemberID != "" && actor.MemberID == resource.OwnerMemberID {
-		return nil
-	}
-	if actor.RoleName == "parent" && resource.OwnerRoleName == "child" {
-		return nil
-	}
-	return ErrForbidden
+	return ErrNotFound
 }
 
 var _ Authorizer = authorizer{}

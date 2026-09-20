@@ -122,12 +122,7 @@ func (s *service) Create(ctx context.Context, actor identity.ActorContext, input
 		}
 	}
 
-	if err := s.authorize.Authorize(ctx, actor, createPermission, authorization.Resource{
-		FamilyID:      actor.FamilyID,
-		OwnerMemberID: ownerID,
-		OwnerRoleName: ownerRole,
-		Scope:         toAuthorizationScope(scope),
-	}); err != nil {
+	if err := s.authorizeFamily(ctx, actor, createPermission, actor.FamilyID, ownerID, ownerRole, scope); err != nil {
 		return nil, err
 	}
 
@@ -186,12 +181,7 @@ func (s *service) List(ctx context.Context, actor identity.ActorContext, input L
 		ownerRole = target.RoleName
 	}
 
-	if err := s.authorize.Authorize(ctx, actor, listPermission, authorization.Resource{
-		FamilyID:      actor.FamilyID,
-		OwnerMemberID: ownerID,
-		OwnerRoleName: ownerRole,
-		Scope:         toAuthorizationScope(scope),
-	}); err != nil {
+	if err := s.authorizeFamily(ctx, actor, listPermission, actor.FamilyID, ownerID, ownerRole, scope); err != nil {
 		return nil, err
 	}
 
@@ -248,12 +238,7 @@ func (s *service) Complete(ctx context.Context, actor identity.ActorContext, rem
 		}
 		ownerRole = owner.RoleName
 	}
-	if err := s.authorize.Authorize(ctx, actor, updatePermission, authorization.Resource{
-		FamilyID:      actor.FamilyID,
-		OwnerMemberID: reminder.OwnerMemberID,
-		OwnerRoleName: ownerRole,
-		Scope:         toAuthorizationScope(reminder.Scope),
-	}); err != nil {
+	if err := s.authorizeFamily(ctx, actor, updatePermission, actor.FamilyID, reminder.OwnerMemberID, ownerRole, reminder.Scope); err != nil {
 		return nil, err
 	}
 	if reminder.Status != domainreminder.StatusPending {
@@ -339,12 +324,37 @@ func validateUUID(value, field string) error {
 	return nil
 }
 
-func toAuthorizationScope(scope domainreminder.Scope) authorization.Scope {
-	return authorization.Scope(scope)
-}
-
 func scopePointer(scope domainreminder.Scope) *domainreminder.Scope {
 	return &scope
+}
+
+// authorizeFamily is a transitional adapter for the unreleased family
+// reminder consumer. Generic authorization remains Space-only; this boundary
+// maps the old family ID to a synthetic Space check, then applies its legacy
+// owner relationship until the reminder service moves to Spaces.
+func (s *service) authorizeFamily(ctx context.Context, actor identity.ActorContext, permission, familyID, ownerID, ownerRole string, scope domainreminder.Scope) error {
+	familyID = strings.TrimSpace(familyID)
+	if strings.TrimSpace(actor.FamilyID) != familyID {
+		return authorization.ErrNotFound
+	}
+	if s.authorize == nil {
+		return errors.New("authorizer is not configured")
+	}
+	scopedActor := actor
+	scopedActor.SpaceID = familyID
+	if err := s.authorize.Authorize(ctx, scopedActor, permission, authorization.Resource{SpaceID: familyID}); err != nil {
+		return err
+	}
+	if scope == domainreminder.ScopeFamily {
+		return nil
+	}
+	if strings.TrimSpace(actor.MemberID) != "" && strings.TrimSpace(actor.MemberID) == strings.TrimSpace(ownerID) {
+		return nil
+	}
+	if strings.TrimSpace(actor.RoleName) == "parent" && strings.TrimSpace(ownerRole) == "child" {
+		return nil
+	}
+	return authorization.ErrForbidden
 }
 
 func mapNotFound(err error) error {

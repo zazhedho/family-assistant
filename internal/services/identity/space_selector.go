@@ -7,6 +7,8 @@ import (
 
 	"family-assistant/internal/authscope"
 	domainspace "family-assistant/internal/domain/space"
+
+	"github.com/google/uuid"
 )
 
 var (
@@ -39,7 +41,7 @@ func SelectSpace(ctx context.Context, actor ActorContext, selector string, permi
 		return ActorContext{}, ErrUnauthenticated
 	}
 
-	active := activeMemberships(actor.Memberships)
+	active := activeMembershipsForUser(actor.UserID, actor.Memberships)
 	if len(active) == 0 {
 		return ActorContext{}, ErrNotFound
 	}
@@ -60,16 +62,15 @@ func SelectSpace(ctx context.Context, actor ActorContext, selector string, permi
 		}
 	} else {
 		for i := range active {
-			if strings.TrimSpace(active[i].SpaceID) == selector {
+			if sameSpaceID(active[i].SpaceID, selector) {
 				selected = &active[i]
 				break
 			}
 		}
 		if selected == nil {
-			name := normalizeSpaceName(selector)
 			matches := make([]*domainspace.ResolvedMembership, 0, 1)
 			for i := range active {
-				if normalizeSpaceName(active[i].SpaceName) == name {
+				if sameSpaceName(active[i].SpaceName, selector) {
 					matches = append(matches, &active[i])
 				}
 			}
@@ -107,18 +108,30 @@ func SelectSpace(ctx context.Context, actor ActorContext, selector string, permi
 	return selectedActor, nil
 }
 
-func activeMemberships(memberships []domainspace.ResolvedMembership) []domainspace.ResolvedMembership {
+func activeMembershipsForUser(userID string, memberships []domainspace.ResolvedMembership) []domainspace.ResolvedMembership {
 	active := make([]domainspace.ResolvedMembership, 0, len(memberships))
+	userID = strings.TrimSpace(userID)
 	for _, membership := range memberships {
-		if strings.EqualFold(strings.TrimSpace(membership.Status), domainspace.StatusActive) {
+		if strings.EqualFold(strings.TrimSpace(membership.Status), domainspace.StatusActive) && strings.TrimSpace(membership.UserID) == userID {
 			active = append(active, membership)
 		}
 	}
 	return active
 }
 
-func normalizeSpaceName(name string) string {
-	return strings.ToLower(strings.TrimSpace(name))
+func sameSpaceID(left, right string) bool {
+	left = strings.TrimSpace(left)
+	right = strings.TrimSpace(right)
+	leftUUID, leftErr := uuid.Parse(left)
+	rightUUID, rightErr := uuid.Parse(right)
+	if leftErr == nil && rightErr == nil {
+		return leftUUID == rightUUID
+	}
+	return left == right
+}
+
+func sameSpaceName(left, right string) bool {
+	return strings.EqualFold(strings.TrimSpace(left), strings.TrimSpace(right))
 }
 
 func permissionsForRole(ctx context.Context, loader PermissionLoader, roleID string) (map[string]struct{}, error) {

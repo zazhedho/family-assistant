@@ -93,6 +93,7 @@ func TestResolverResolveExternalReturnsUserAndAllActiveMemberships(t *testing.T)
 	memberships := []domainspace.ResolvedMembership{
 		activeMembership("member-personal", "space-personal", "Jane", domainspace.TypePersonal, "user-1", "role-owner", "space_owner"),
 		activeMembership("member-shared", "space-shared", "Trading", domainspace.TypeShared, "user-1", "role-member", "space_member"),
+		activeMembership("member-other", "space-other", "Other", domainspace.TypeShared, "user-2", "role-other", "space_admin"),
 		{ID: "member-inactive", SpaceID: "space-old", UserID: "user-1", RoleID: "role-old", RoleName: "space_member", Status: domainspace.StatusInactive},
 	}
 	resolver := newResolver(&domainidentity.ExternalIdentity{
@@ -130,8 +131,56 @@ func TestResolverResolveUserReturnsAllActiveMembershipsWithoutPermissions(t *tes
 	if got.UserID != "user-1" || got.Source != "http" || got.Channel != "http" || len(got.Memberships) != 1 {
 		t.Fatalf("unexpected HTTP actor: %+v", got)
 	}
+	if resolver.SpaceRepo.(*spaceRepositoryStub).userID != "user-1" {
+		t.Fatalf("space lookup user ID = %q, want user-1", resolver.SpaceRepo.(*spaceRepositoryStub).userID)
+	}
 	if got.ExternalProvider != "" || got.ExternalID != "" || permissions.calls != 0 {
 		t.Fatalf("unexpected external identity or permission state: %+v calls=%d", got, permissions.calls)
+	}
+}
+
+func TestResolverResolveExternalRejectsMismatchedReturnedIdentity(t *testing.T) {
+	for _, tt := range []struct {
+		name     string
+		identity *domainidentity.ExternalIdentity
+	}{
+		{
+			name: "revoked",
+			identity: &domainidentity.ExternalIdentity{
+				UserID: "user-1", Provider: domainidentity.ProviderHermes, ExternalID: "profile-1", Status: domainidentity.StatusRevoked,
+			},
+		},
+		{
+			name: "provider mismatch",
+			identity: &domainidentity.ExternalIdentity{
+				UserID: "user-1", Provider: "other", ExternalID: "profile-1", Status: domainidentity.StatusActive,
+			},
+		},
+		{
+			name: "external ID mismatch",
+			identity: &domainidentity.ExternalIdentity{
+				UserID: "user-1", Provider: domainidentity.ProviderHermes, ExternalID: "profile-other", Status: domainidentity.StatusActive,
+			},
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			spaces := &spaceRepositoryStub{memberships: []domainspace.ResolvedMembership{
+				activeMembership("member-1", "space-1", "Home", domainspace.TypePersonal, "user-1", "role-1", "space_owner"),
+			}}
+			resolver := NewResolver(
+				&identityRepositoryStub{identity: tt.identity},
+				spaces,
+				&permissionServiceStub{},
+			)
+
+			_, err := resolver.ResolveExternal(context.Background(), " HERMES ", " profile-1 ", "whatsapp")
+			if !errors.Is(err, ErrUnauthenticated) {
+				t.Fatalf("error = %v, want ErrUnauthenticated", err)
+			}
+			if spaces.userID != "" {
+				t.Fatalf("mismatched identity reached membership lookup for %q", spaces.userID)
+			}
+		})
 	}
 }
 

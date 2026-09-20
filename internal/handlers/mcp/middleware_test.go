@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 
+	domainfamilymember "family-assistant/internal/domain/familymember"
+	domainpermission "family-assistant/internal/domain/permission"
 	serviceidentity "family-assistant/internal/services/identity"
 	"family-assistant/pkg/config"
 )
@@ -33,11 +35,50 @@ type resolverStub struct {
 	resolveCall int
 }
 
+type legacyFamilyResolverRepoStub struct {
+	member *domainfamilymember.ResolvedMember
+}
+
+func (s *legacyFamilyResolverRepoStub) FindActiveByHermesProfile(context.Context, string) (*domainfamilymember.ResolvedMember, error) {
+	return s.member, nil
+}
+
+func (s *legacyFamilyResolverRepoStub) FindActiveByUserID(context.Context, string) (*domainfamilymember.ResolvedMember, error) {
+	return s.member, nil
+}
+
+func (s *legacyFamilyResolverRepoStub) FindActiveByID(context.Context, string, string) (*domainfamilymember.FamilyMember, error) {
+	return nil, errors.New("not implemented")
+}
+
+type legacyPermissionResolverStub struct{}
+
+func (*legacyPermissionResolverStub) GetRolePermissions(context.Context, string) ([]domainpermission.Permission, error) {
+	return []domainpermission.Permission{{Resource: "reminders", Action: "view"}}, nil
+}
+
 func (s *resolverStub) Resolve(_ context.Context, profileID, channel string) (serviceidentity.ActorContext, error) {
 	s.resolveCall++
 	s.profileID = profileID
 	s.channel = channel
 	return s.actor, s.err
+}
+
+func TestMCPCompatibilityDispatchUsesLegacyResolverServiceMode(t *testing.T) {
+	resolver := serviceidentity.NewResolver(
+		&legacyFamilyResolverRepoStub{member: &domainfamilymember.ResolvedMember{
+			UserID: "user-1", MemberID: "member-1", FamilyID: "family-1", RoleID: "role-1", RoleName: "parent", HermesProfileID: "profile-1",
+		}},
+		&legacyPermissionResolverStub{},
+	)
+
+	actor, err := resolveActor(context.Background(), resolver, "profile-1", "whatsapp")
+	if err != nil {
+		t.Fatalf("legacy resolver dispatch: %v", err)
+	}
+	if actor.UserID != "user-1" || actor.FamilyID != "family-1" || actor.HermesProfileID != "profile-1" || !actor.HasPermission("reminders:view") {
+		t.Fatalf("unexpected legacy actor: %+v", actor)
+	}
 }
 
 func TestMCPAuthMiddlewareRejectsUnauthenticatedRequests(t *testing.T) {

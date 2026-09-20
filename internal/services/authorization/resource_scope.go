@@ -23,25 +23,8 @@ type Resource struct {
 }
 
 func ValidateResource(resource Resource) error {
-	if strings.TrimSpace(resource.SpaceID) != "" {
-		return nil
-	}
-	if strings.TrimSpace(resource.FamilyID) != "" {
-		return validateLegacyResource(resource)
-	}
-	return &ValidationError{Field: "space_id", Reason: "is required"}
-}
-
-func validateLegacyResource(resource Resource) error {
-	switch resource.Scope {
-	case ScopePersonal:
-		if strings.TrimSpace(resource.OwnerMemberID) == "" {
-			return &ValidationError{Field: "owner_member_id", Reason: "is required for PERSONAL scope"}
-		}
-	case ScopeFamily:
-		return nil
-	default:
-		return &ValidationError{Field: "scope", Reason: "must be PERSONAL or FAMILY"}
+	if strings.TrimSpace(resource.SpaceID) == "" {
+		return &ValidationError{Field: "space_id", Reason: "is required"}
 	}
 	return nil
 }

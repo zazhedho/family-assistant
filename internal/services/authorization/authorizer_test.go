@@ -18,6 +18,22 @@ func TestAuthorizerChecksValidationBeforePermission(t *testing.T) {
 	}
 }
 
+func TestAuthorizerDoesNotAuthorizeLegacyFamilyResource(t *testing.T) {
+	actor := identity.ActorContext{
+		FamilyID:    "family-1",
+		Permissions: map[string]struct{}{"reminders:view": {}},
+	}
+	err := NewAuthorizer().Authorize(context.Background(), actor, "reminders:view", Resource{
+		FamilyID: "family-1",
+		Scope:    ScopeFamily,
+	})
+
+	var validationErr *ValidationError
+	if !errors.As(err, &validationErr) || validationErr.Field != "space_id" {
+		t.Fatalf("Authorize() error = %T %v, want space_id ValidationError", err, err)
+	}
+}
+
 func TestAuthorizerChecksPermissionBeforeCrossSpace(t *testing.T) {
 	actor := spaceActor("space-1", "reminders:list")
 	err := NewAuthorizer().Authorize(context.Background(), actor, "reminders:view", Resource{SpaceID: "space-2"})

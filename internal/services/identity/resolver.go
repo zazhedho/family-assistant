@@ -80,7 +80,11 @@ func (r *ResolverService) ResolveExternal(ctx context.Context, provider, externa
 		}
 		return ActorContext{}, err
 	}
-	if identity == nil || strings.TrimSpace(identity.UserID) == "" {
+	if identity == nil ||
+		strings.TrimSpace(identity.UserID) == "" ||
+		strings.TrimSpace(identity.Status) != domainidentity.StatusActive ||
+		domainidentity.NormalizeProvider(identity.Provider) != provider ||
+		strings.TrimSpace(identity.ExternalID) != externalID {
 		return ActorContext{}, ErrUnauthenticated
 	}
 
@@ -128,12 +132,7 @@ func (r *ResolverService) actorForUser(ctx context.Context, userID, channel stri
 		}
 		return ActorContext{}, err
 	}
-	active := make([]domainspace.ResolvedMembership, 0, len(memberships))
-	for _, membership := range memberships {
-		if strings.EqualFold(strings.TrimSpace(membership.Status), domainspace.StatusActive) {
-			active = append(active, membership)
-		}
-	}
+	active := activeMembershipsForUser(userID, memberships)
 	if len(active) == 0 {
 		return ActorContext{}, ErrUnauthenticated
 	}

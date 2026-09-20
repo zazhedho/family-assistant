@@ -102,6 +102,9 @@ type legacyResolver interface {
 
 func resolveActor(ctx context.Context, resolver any, externalID, channel string) (serviceidentity.ActorContext, error) {
 	switch resolver := resolver.(type) {
+	case *serviceidentity.ResolverService:
+		// ResolverService.Resolve selects its configured new or legacy mode.
+		return resolver.Resolve(ctx, externalID, channel)
 	case externalResolver:
 		return resolver.ResolveExternal(ctx, "hermes", externalID, channel)
 	case legacyResolver:
