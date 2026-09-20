@@ -150,13 +150,10 @@ func TestReminderCreateSelectsPersonalSpaceAndMapsAssignee(t *testing.T) {
 	}
 }
 
-func TestReminderCreateRejectsLegacyFieldsAndNonRFC3339(t *testing.T) {
+func TestReminderCreateRejectsNonRFC3339(t *testing.T) {
 	service := &reminderHTTPServiceStub{}
 	h := NewReminderHandler(service, &userResolverStub{actor: httpTestActor()}, httpPermissions())
-	for _, body := range []string{
-		`{"title":"Pay bill","scheduled_at":"2026-09-20T08:00:00Z","scope":"PERSONAL"}`,
-		`{"title":"Pay bill","scheduled_at":"tomorrow"}`,
-	} {
+	for _, body := range []string{`{"title":"Pay bill","scheduled_at":"tomorrow"}`} {
 		rec := performReminderHTTPRequest(http.MethodPost, "/api/reminders", body, authscope.New("user-trusted", "Jane", "user", nil), h.Create)
 		if rec.Code != http.StatusBadRequest {
 			t.Fatalf("body %s status = %d, want 400", body, rec.Code)
@@ -181,10 +178,6 @@ func TestReminderListUsesExplicitUUIDSpaceAndStrictTime(t *testing.T) {
 	bad := performReminderHTTPRequest(http.MethodGet, "/api/reminders?from=tomorrow", "", authscope.New("user-trusted", "Jane", "user", nil), h.List)
 	if bad.Code != http.StatusBadRequest || service.listInput.From == nil {
 		t.Fatalf("invalid time status = %d, list input = %+v", bad.Code, service.listInput)
-	}
-	legacy := performReminderHTTPRequest(http.MethodGet, "/api/reminders?target_member_id="+httpMemberID, "", authscope.New("user-trusted", "Jane", "user", nil), h.List)
-	if legacy.Code != http.StatusBadRequest {
-		t.Fatalf("legacy target filter status = %d, want 400", legacy.Code)
 	}
 }
 

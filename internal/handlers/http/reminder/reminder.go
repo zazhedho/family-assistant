@@ -91,12 +91,6 @@ func (h *ReminderHandler) Create(ctx *gin.Context) {
 }
 
 func (h *ReminderHandler) List(ctx *gin.Context) {
-	for _, field := range []string{"scope", "target_member_id"} {
-		if _, present := ctx.GetQuery(field); present {
-			h.writeError(ctx, &serviceauthorization.ValidationError{Field: field, Reason: "is not supported"})
-			return
-		}
-	}
 	spaceID, err := parseUUID(ctx.Query("space_id"), "space_id")
 	if err != nil {
 		h.writeError(ctx, err)
