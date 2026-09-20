@@ -2,908 +2,446 @@ package servicereminder
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
-	"strings"
 	"testing"
 	"time"
 
 	domainaudit "family-assistant/internal/domain/audit"
-	domainfamilymember "family-assistant/internal/domain/familymember"
 	domainreminder "family-assistant/internal/domain/reminder"
-	serviceaudit "family-assistant/internal/services/audit"
+	domainspace "family-assistant/internal/domain/space"
 	"family-assistant/internal/services/authorization"
-	identity "family-assistant/internal/services/identity"
-	"family-assistant/pkg/filter"
-
-	"gorm.io/gorm"
+	serviceidentity "family-assistant/internal/services/identity"
 )
 
 const (
-	childMemberUUID  = "00000000-0000-0000-0000-000000000001"
-	parentMemberUUID = "00000000-0000-0000-0000-000000000002"
-	otherParentUUID  = "00000000-0000-0000-0000-000000000003"
-	targetMemberUUID = "00000000-0000-0000-0000-000000000004"
-	reminderUUID     = "00000000-0000-0000-0000-000000000101"
+	personalSpaceID = "space-personal"
+	sharedSpaceID   = "space-shared"
+	creatorID       = "member-creator"
+	assigneeID      = "member-assignee"
+	reminderID      = "00000000-0000-0000-0000-000000000101"
 )
 
 type reminderRepositoryStub struct {
-	created    *domainreminder.Reminder
-	listed     []domainreminder.Reminder
-	listFilter domainreminder.ListFilter
-	found      *domainreminder.Reminder
-	findErr    error
-	findCalls  int
-	findFamily string
-	findID     string
-	updated    *domainreminder.Reminder
-	createErr  error
-	listErr    error
-	listCalls  int
-	updateErr  error
+	created     *domainreminder.Reminder
+	listed      []domainreminder.Reminder
+	listFilter  domainreminder.ListFilter
+	found       *domainreminder.Reminder
+	findSpace   string
+	findID      string
+	completed   bool
+	completeErr error
 }
 
 func (s *reminderRepositoryStub) Create(_ context.Context, reminder *domainreminder.Reminder) error {
-	if s.createErr != nil {
-		return s.createErr
-	}
 	copy := *reminder
 	s.created = &copy
 	return nil
 }
 
-func (s *reminderRepositoryStub) FindByIDInFamily(_ context.Context, familyID, reminderID string) (*domainreminder.Reminder, error) {
-	s.findCalls++
-	s.findFamily, s.findID = familyID, reminderID
-	if s.findErr != nil {
-		return nil, s.findErr
-	}
+func (s *reminderRepositoryStub) FindByIDInSpace(_ context.Context, spaceID, reminderID string) (*domainreminder.Reminder, error) {
+	s.findSpace, s.findID = spaceID, reminderID
 	if s.found == nil {
-		return nil, gorm.ErrRecordNotFound
+		return nil, domainreminder.ErrReminderRequired
 	}
 	copy := *s.found
 	return &copy, nil
 }
 
 func (s *reminderRepositoryStub) List(_ context.Context, filter domainreminder.ListFilter) ([]domainreminder.Reminder, error) {
-	s.listCalls++
-	if s.listErr != nil {
-		return nil, s.listErr
-	}
 	s.listFilter = filter
 	return append([]domainreminder.Reminder(nil), s.listed...), nil
 }
 
-func (s *reminderRepositoryStub) Update(_ context.Context, reminder *domainreminder.Reminder) error {
-	if s.updateErr != nil {
-		return s.updateErr
+func (s *reminderRepositoryStub) CompletePending(_ context.Context, _, _ string, _ time.Time) error {
+	if s.completeErr != nil {
+		return s.completeErr
 	}
-	copy := *reminder
-	s.updated = &copy
+	s.completed = true
 	return nil
 }
 
-type familyMemberRepositoryStub struct {
-	byID       map[string]*domainfamilymember.FamilyMember
-	findErr    error
-	findCalls  int
-	lastFamily string
-	lastID     string
+type spaceRepositoryStub struct {
+	members []domainspace.ResolvedMembership
 }
 
-func (s *familyMemberRepositoryStub) FindActiveByHermesProfile(context.Context, string) (*domainfamilymember.ResolvedMember, error) {
-	return nil, gorm.ErrRecordNotFound
+func (s *spaceRepositoryStub) CreateWithOwner(context.Context, *domainspace.Space, *domainspace.Member) error {
+	return nil
 }
 
-func (s *familyMemberRepositoryStub) FindActiveByUserID(context.Context, string) (*domainfamilymember.ResolvedMember, error) {
-	return nil, gorm.ErrRecordNotFound
+func (s *spaceRepositoryStub) ListActiveByUserID(context.Context, string) ([]domainspace.ResolvedMembership, error) {
+	return nil, nil
 }
 
-func (s *familyMemberRepositoryStub) FindActiveByID(_ context.Context, familyID, memberID string) (*domainfamilymember.FamilyMember, error) {
-	s.findCalls++
-	s.lastFamily, s.lastID = familyID, memberID
-	if s.findErr != nil {
-		return nil, s.findErr
+func (s *spaceRepositoryStub) FindActiveMembership(context.Context, string, string) (*domainspace.ResolvedMembership, error) {
+	return nil, nil
+}
+
+func (s *spaceRepositoryStub) ListActiveMembers(_ context.Context, spaceID string) ([]domainspace.ResolvedMembership, error) {
+	result := make([]domainspace.ResolvedMembership, 0, len(s.members))
+	for _, member := range s.members {
+		if member.SpaceID == spaceID && member.Status == domainspace.StatusActive {
+			result = append(result, member)
+		}
 	}
-	member, ok := s.byID[memberID]
-	if !ok || member.FamilyID != familyID {
-		return nil, gorm.ErrRecordNotFound
-	}
-	copy := *member
-	return &copy, nil
+	return result, nil
 }
 
-type auditServiceStub struct {
+type auditStoreStub struct {
 	events []domainaudit.AuditEvent
 }
 
-func (s *auditServiceStub) Store(_ context.Context, event domainaudit.AuditEvent) error {
+func (s *auditStoreStub) Store(_ context.Context, event domainaudit.AuditEvent) error {
 	s.events = append(s.events, event)
 	return nil
 }
 
-type capturingAuditRepo struct {
-	stored domainaudit.AuditTrail
-}
-
-func (r *capturingAuditRepo) Store(_ context.Context, data domainaudit.AuditTrail) error {
-	r.stored = data
-	return nil
-}
-
-func (r *capturingAuditRepo) GetByID(context.Context, string) (domainaudit.AuditTrail, error) {
-	return r.stored, nil
-}
-
-func (r *capturingAuditRepo) GetAll(context.Context, filter.BaseParams) ([]domainaudit.AuditTrail, int64, error) {
-	return []domainaudit.AuditTrail{r.stored}, 1, nil
-}
-
-func (r *capturingAuditRepo) Update(context.Context, domainaudit.AuditTrail) error { return nil }
-func (r *capturingAuditRepo) Delete(context.Context, string) error                 { return nil }
-func (r *capturingAuditRepo) SoftDelete(context.Context, string, string) error     { return nil }
-
-type assigningReminderRepository struct {
-	*reminderRepositoryStub
-}
-
-func (r *assigningReminderRepository) Create(ctx context.Context, reminder *domainreminder.Reminder) error {
-	reminder.ID = reminderUUID
-	return r.reminderRepositoryStub.Create(ctx, reminder)
-}
-
-func reminderActor(role, member, family string, permissions ...string) identity.ActorContext {
+func actor(spaceID, spaceType, memberID, role string, permissions ...string) serviceidentity.ActorContext {
 	permissionSet := make(map[string]struct{}, len(permissions))
 	for _, permission := range permissions {
 		permissionSet[permission] = struct{}{}
 	}
-	return identity.ActorContext{
-		UserID:          "user-" + member,
-		MemberID:        member,
-		FamilyID:        family,
-		RoleName:        role,
-		Permissions:     permissionSet,
-		Source:          "mcp",
-		Channel:         "whatsapp",
-		HermesProfileID: "profile-" + member,
+	return serviceidentity.ActorContext{
+		UserID:           "user-1",
+		SpaceID:          spaceID,
+		SpaceType:        spaceType,
+		MemberID:         memberID,
+		RoleName:         role,
+		Permissions:      permissionSet,
+		Source:           " MCP ",
+		Channel:          " whatsapp ",
+		ExternalProvider: "hermes",
+		ExternalID:       " profile-1 ",
 	}
 }
 
-func member(id, family, role string) *domainfamilymember.FamilyMember {
-	return &domainfamilymember.FamilyMember{ID: id, FamilyID: family, RoleName: role}
-}
-
-func validCreateInput() CreateInput {
-	return CreateInput{
-		Title:       "Pay electricity bill",
-		Description: "Before Friday",
-		ScheduledAt: time.Date(2026, 9, 20, 8, 0, 0, 0, time.UTC),
-		Scope:       domainreminder.ScopePersonal,
+func membership(spaceID, memberID, role, userID string) domainspace.ResolvedMembership {
+	return domainspace.ResolvedMembership{
+		ID:       memberID,
+		SpaceID:  spaceID,
+		UserID:   userID,
+		RoleName: role,
+		Status:   domainspace.StatusActive,
 	}
 }
 
-func newReminderService(repo *reminderRepositoryStub, members *familyMemberRepositoryStub, authz authorization.Authorizer, auditService auditStore) Service {
-	return NewReminderService(repo, members, authz, auditService)
+func newReminderService(repo *reminderRepositoryStub, spaces *spaceRepositoryStub, audit *auditStoreStub) Service {
+	if audit == nil {
+		return NewReminderService(repo, spaces, authorization.NewAuthorizer(), nil)
+	}
+	return NewReminderService(repo, spaces, authorization.NewAuthorizer(), audit)
 }
 
-func TestAuthorizeFamilyChecksPermissionBeforeFamilyMismatch(t *testing.T) {
-	tests := []struct {
-		name        string
-		permissions []string
-		want        error
-	}{
-		{name: "missing permission is forbidden", want: authorization.ErrForbidden},
-		{name: "permitted cross-family access is not found", permissions: []string{"reminders:list"}, want: authorization.ErrNotFound},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			actor := reminderActor("parent", "parent-1", "family-1", tt.permissions...)
-			service := &service{authorize: authorization.NewAuthorizer()}
-
-			err := service.authorizeFamily(
-				context.Background(),
-				actor,
-				"reminders:list",
-				"family-2",
-				actor.MemberID,
-				actor.RoleName,
-				domainreminder.ScopeFamily,
-			)
-			if !errors.Is(err, tt.want) {
-				t.Fatalf("authorizeFamily() error = %v, want %v", err, tt.want)
-			}
-		})
-	}
-}
-
-func TestCreateOwnPersonalReminderDerivesTrustedOwnershipAndAudits(t *testing.T) {
+func TestCreateDefaultsToActorPersonalSpace(t *testing.T) {
 	repo := &reminderRepositoryStub{}
-	auditService := &auditServiceStub{}
-	actor := reminderActor("parent", "parent-1", "family-1", "reminders:create")
-	service := newReminderService(repo, &familyMemberRepositoryStub{}, authorization.NewAuthorizer(), auditService)
+	spaces := &spaceRepositoryStub{members: []domainspace.ResolvedMembership{
+		membership(personalSpaceID, creatorID, "space_owner", "user-1"),
+	}}
+	service := newReminderService(repo, spaces, nil)
+	actor := actor(personalSpaceID, domainspace.TypePersonal, creatorID, "space_owner", "reminders:create")
 
-	got, err := service.Create(context.Background(), actor, validCreateInput())
+	created, err := service.Create(context.Background(), actor, CreateInput{
+		Title:       "Pay electricity bill",
+		ScheduledAt: time.Date(2026, 9, 20, 8, 0, 0, 0, time.UTC),
+	})
 	if err != nil {
 		t.Fatalf("create reminder: %v", err)
 	}
-	if got == nil || repo.created == nil {
+	if created == nil || repo.created == nil {
 		t.Fatal("expected created reminder")
 	}
-	if repo.created.FamilyID != actor.FamilyID || repo.created.OwnerMemberID != actor.MemberID || repo.created.CreatedByMemberID != actor.MemberID {
-		t.Fatalf("expected trusted ownership fields, got %#v", repo.created)
+	if repo.created.SpaceID != personalSpaceID || repo.created.CreatedByMemberID != creatorID {
+		t.Fatalf("created reminder = %#v, want personal Space and creator", repo.created)
 	}
-	if repo.created.Scope != domainreminder.ScopePersonal || repo.created.Status != domainreminder.StatusPending {
-		t.Fatalf("unexpected defaults: %#v", repo.created)
-	}
-	if len(auditService.events) != 1 {
-		t.Fatalf("expected one audit event, got %d", len(auditService.events))
-	}
-	event := auditService.events[0]
-	if event.ActorUserID != actor.UserID || event.Resource != "reminder" || event.ResourceID != got.ID || event.Action != domainaudit.ActionCreate || event.Status != domainaudit.StatusSuccess {
-		t.Fatalf("unexpected create audit event: %#v", event)
-	}
-	if event.ActorMemberID != actor.MemberID || event.ResourceOwnerMemberID != actor.MemberID || event.Source != "mcp" || event.Channel != actor.Channel || event.AgentProfile != actor.HermesProfileID {
-		t.Fatalf("typed create audit metadata = %#v, want actor=%q owner=%q source=mcp channel=%q profile=%q", event, actor.MemberID, actor.MemberID, actor.Channel, actor.HermesProfileID)
-	}
-	if event.Metadata["status"] != string(domainreminder.StatusPending) {
-		t.Fatalf("status metadata = %#v, want pending", event.Metadata)
-	}
-	for _, key := range []string{"actor_member_id", "resource_owner_member_id", "source", "channel", "agent_profile", "resource_type"} {
-		if _, ok := event.Metadata[key]; ok {
-			t.Fatalf("typed audit key %q duplicated in metadata: %#v", key, event.Metadata)
-		}
+	if repo.created.Status != domainreminder.StatusPending {
+		t.Fatalf("status = %q, want %q", repo.created.Status, domainreminder.StatusPending)
 	}
 }
 
-func TestCreateAuditUsesImpersonatorAsInitiatorAndPreservesSubject(t *testing.T) {
+func TestCreateRejectsAssigneeOutsideActorSpaceAsNotFound(t *testing.T) {
 	repo := &reminderRepositoryStub{}
-	auditService := &auditServiceStub{}
-	actor := reminderActor("parent", "member-effective", "family-1", "reminders:create")
-	actor.InitiatorUserID = " user-operator "
-	actor.InitiatorRoleName = " admin "
-	service := newReminderService(repo, &familyMemberRepositoryStub{}, authorization.NewAuthorizer(), auditService)
-
-	if _, err := service.Create(context.Background(), actor, validCreateInput()); err != nil {
-		t.Fatalf("create reminder: %v", err)
-	}
-	if len(auditService.events) != 1 {
-		t.Fatalf("expected one audit event, got %d", len(auditService.events))
-	}
-	event := auditService.events[0]
-	if event.ActorUserID != "user-operator" || event.ActorRole != "admin" {
-		t.Fatalf("audit initiator = %q/%q, want operator/admin", event.ActorUserID, event.ActorRole)
-	}
-	if got := event.Metadata["subject_user_id"]; got != actor.UserID {
-		t.Fatalf("subject_user_id = %v, want %q", got, actor.UserID)
-	}
-}
-
-func TestCreateDefaultsBlankScopeToPersonal(t *testing.T) {
-	repo := &reminderRepositoryStub{}
-	actor := reminderActor("parent", "parent-1", "family-1", "reminders:create")
-	service := newReminderService(repo, &familyMemberRepositoryStub{}, authorization.NewAuthorizer(), nil)
-
-	input := validCreateInput()
-	input.Scope = ""
-	if _, err := service.Create(context.Background(), actor, input); err != nil {
-		t.Fatalf("create reminder: %v", err)
-	}
-	if repo.created.Scope != domainreminder.ScopePersonal {
-		t.Fatalf("scope = %q, want PERSONAL", repo.created.Scope)
-	}
-}
-
-func TestCreateParentCanDelegateToChildInSameFamily(t *testing.T) {
-	repo := &reminderRepositoryStub{}
-	members := &familyMemberRepositoryStub{byID: map[string]*domainfamilymember.FamilyMember{
-		childMemberUUID: member(childMemberUUID, "family-1", "child"),
+	spaces := &spaceRepositoryStub{members: []domainspace.ResolvedMembership{
+		membership(sharedSpaceID, creatorID, "space_member", "user-1"),
+		membership("space-other", assigneeID, "space_member", "user-2"),
 	}}
-	actor := reminderActor("parent", "parent-1", "family-1", "reminders:create")
-	service := newReminderService(repo, members, authorization.NewAuthorizer(), nil)
-	input := validCreateInput()
-	input.TargetMemberID = stringPtr(childMemberUUID)
+	service := newReminderService(repo, spaces, nil)
+	actor := actor(sharedSpaceID, domainspace.TypeShared, creatorID, "space_member", "reminders:create")
 
-	if _, err := service.Create(context.Background(), actor, input); err != nil {
-		t.Fatalf("create delegated reminder: %v", err)
+	_, err := service.Create(context.Background(), actor, CreateInput{
+		Title:            "Review budget",
+		ScheduledAt:      time.Date(2026, 9, 20, 8, 0, 0, 0, time.UTC),
+		AssigneeMemberID: stringPtr(assigneeID),
+	})
+	if !errors.Is(err, authorization.ErrNotFound) {
+		t.Fatalf("create error = %v, want not found", err)
 	}
-	if repo.created.OwnerMemberID != childMemberUUID || members.lastFamily != actor.FamilyID || members.lastID != childMemberUUID {
-		t.Fatalf("unexpected delegated ownership/lookup: %#v, %q/%q", repo.created, members.lastFamily, members.lastID)
+	if repo.created != nil {
+		t.Fatal("created reminder with cross-space assignee")
 	}
 }
 
-func TestCreateFamilyScopeKeepsActorOwnershipWithTargetSelector(t *testing.T) {
-	repo := &reminderRepositoryStub{}
-	members := &familyMemberRepositoryStub{byID: map[string]*domainfamilymember.FamilyMember{
-		childMemberUUID: member(childMemberUUID, "family-1", "child"),
+func TestListSharedReturnsRemindersForActiveMemberWithoutAssignmentFilter(t *testing.T) {
+	assigned := assigneeID
+	repo := &reminderRepositoryStub{listed: []domainreminder.Reminder{
+		{ID: "reminder-owned", SpaceID: sharedSpaceID, CreatedByMemberID: creatorID, Status: domainreminder.StatusPending},
+		{ID: "reminder-assigned", SpaceID: sharedSpaceID, CreatedByMemberID: creatorID, AssigneeMemberID: &assigned, Status: domainreminder.StatusPending},
 	}}
-	actor := reminderActor("parent", "parent-1", "family-1", "reminders:create")
-	service := newReminderService(repo, members, authorization.NewAuthorizer(), nil)
-	input := validCreateInput()
-	input.Scope = domainreminder.ScopeFamily
-	input.TargetMemberID = stringPtr(" " + childMemberUUID + " ")
-
-	if _, err := service.Create(context.Background(), actor, input); err != nil {
-		t.Fatalf("create family reminder: %v", err)
-	}
-	if repo.created.OwnerMemberID != actor.MemberID || repo.created.CreatedByMemberID != actor.MemberID || repo.created.FamilyID != actor.FamilyID {
-		t.Fatalf("family reminder attribution = %#v, want actor ownership", repo.created)
-	}
-}
-
-func TestCreateRejectsUnauthorizedDelegationAndCrossFamilyTarget(t *testing.T) {
-	tests := []struct {
-		name      string
-		actor     identity.ActorContext
-		target    *domainfamilymember.FamilyMember
-		findErr   error
-		wantError error
-	}{
-		{
-			name:      "parent to other parent",
-			actor:     reminderActor("parent", "parent-1", "family-1", "reminders:create"),
-			target:    member(otherParentUUID, "family-1", "parent"),
-			wantError: authorization.ErrForbidden,
-		},
-		{
-			name:      "child to parent",
-			actor:     reminderActor("child", "child-1", "family-1", "reminders:create"),
-			target:    member(parentMemberUUID, "family-1", "parent"),
-			wantError: authorization.ErrForbidden,
-		},
-		{
-			name:      "cross family target",
-			actor:     reminderActor("parent", "parent-1", "family-1", "reminders:create"),
-			findErr:   gorm.ErrRecordNotFound,
-			wantError: authorization.ErrNotFound,
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			repo := &reminderRepositoryStub{}
-			members := &familyMemberRepositoryStub{byID: map[string]*domainfamilymember.FamilyMember{}}
-			if tt.target != nil {
-				members.byID[tt.target.ID] = tt.target
-			}
-			members.findErr = tt.findErr
-			service := newReminderService(repo, members, authorization.NewAuthorizer(), nil)
-			input := validCreateInput()
-			input.TargetMemberID = stringPtr(targetMemberUUID)
-			if tt.target != nil {
-				input.TargetMemberID = &tt.target.ID
-			}
-
-			_, err := service.Create(context.Background(), tt.actor, input)
-			if !errors.Is(err, tt.wantError) {
-				t.Fatalf("create error = %v, want %v", err, tt.wantError)
-			}
-			if repo.created != nil {
-				t.Fatal("unexpected persistence after rejected create")
-			}
-		})
-	}
-}
-
-func TestCreateValidatesTitleAndScheduleBeforePersistence(t *testing.T) {
-	for _, tt := range []struct {
-		name  string
-		input CreateInput
-		field string
-	}{
-		{name: "blank title", input: CreateInput{ScheduledAt: time.Now()}, field: "title"},
-		{name: "zero scheduled time", input: CreateInput{Title: "Reminder"}, field: "scheduled_at"},
-	} {
-		t.Run(tt.name, func(t *testing.T) {
-			repo := &reminderRepositoryStub{}
-			actor := reminderActor("parent", "parent-1", "family-1", "reminders:create")
-			service := newReminderService(repo, &familyMemberRepositoryStub{}, authorization.NewAuthorizer(), nil)
-			_, err := service.Create(context.Background(), actor, tt.input)
-			var validationErr *authorization.ValidationError
-			if !errors.As(err, &validationErr) || validationErr.Field != tt.field {
-				t.Fatalf("error = %T %v, want validation field %q", err, err, tt.field)
-			}
-			if repo.created != nil {
-				t.Fatal("unexpected persistence after validation failure")
-			}
-		})
-	}
-}
-
-func TestListUsesRestrictiveOwnerOrFamilyFilters(t *testing.T) {
-	actor := reminderActor("parent", "parent-1", "family-1", "reminders:list")
-	tests := []struct {
-		name       string
-		input      ListInput
-		target     *domainfamilymember.FamilyMember
-		wantOwner  string
-		wantScope  domainreminder.Scope
-		wantFamily string
-	}{
-		{name: "nil scope own personal", wantOwner: "parent-1", wantScope: domainreminder.ScopePersonal, wantFamily: "family-1"},
-		{name: "child personal", input: ListInput{Scope: scopePtr(domainreminder.ScopePersonal), TargetMemberID: stringPtr(childMemberUUID)}, target: member(childMemberUUID, "family-1", "child"), wantOwner: childMemberUUID, wantScope: domainreminder.ScopePersonal, wantFamily: "family-1"},
-		{name: "family", input: ListInput{Scope: scopePtr(domainreminder.ScopeFamily)}, wantScope: domainreminder.ScopeFamily, wantFamily: "family-1"},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			repo := &reminderRepositoryStub{listed: []domainreminder.Reminder{{ID: "r-1"}}}
-			members := &familyMemberRepositoryStub{byID: map[string]*domainfamilymember.FamilyMember{}}
-			if tt.target != nil {
-				members.byID[tt.target.ID] = tt.target
-			}
-			service := newReminderService(repo, members, authorization.NewAuthorizer(), nil)
-			got, err := service.List(context.Background(), actor, tt.input)
-			if err != nil {
-				t.Fatalf("list reminders: %v", err)
-			}
-			if len(got) != 1 || repo.listFilter.FamilyID != tt.wantFamily || repo.listFilter.Scope == nil || *repo.listFilter.Scope != tt.wantScope {
-				t.Fatalf("unexpected list result/filter: %#v / %#v", got, repo.listFilter)
-			}
-			if tt.wantOwner == "" {
-				if repo.listFilter.OwnerMemberID != nil {
-					t.Fatalf("family list unexpectedly owner-scoped: %#v", repo.listFilter)
-				}
-			} else if repo.listFilter.OwnerMemberID == nil || *repo.listFilter.OwnerMemberID != tt.wantOwner {
-				t.Fatalf("owner filter = %#v, want %q", repo.listFilter.OwnerMemberID, tt.wantOwner)
-			}
-		})
-	}
-}
-
-func TestListRejectsUnauthorizedOrCrossFamilyTarget(t *testing.T) {
-	actor := reminderActor("child", "child-1", "family-1", "reminders:list")
-	for _, tt := range []struct {
-		name    string
-		target  *domainfamilymember.FamilyMember
-		findErr error
-		wantErr error
-	}{
-		{name: "parent target", target: member(parentMemberUUID, "family-1", "parent"), wantErr: authorization.ErrForbidden},
-		{name: "cross family target", findErr: gorm.ErrRecordNotFound, wantErr: authorization.ErrNotFound},
-	} {
-		t.Run(tt.name, func(t *testing.T) {
-			members := &familyMemberRepositoryStub{byID: map[string]*domainfamilymember.FamilyMember{}, findErr: tt.findErr}
-			targetID := targetMemberUUID
-			if tt.target != nil {
-				members.byID[tt.target.ID] = tt.target
-				targetID = tt.target.ID
-			}
-			service := newReminderService(&reminderRepositoryStub{}, members, authorization.NewAuthorizer(), nil)
-			_, err := service.List(context.Background(), actor, ListInput{Scope: scopePtr(domainreminder.ScopePersonal), TargetMemberID: &targetID})
-			if !errors.Is(err, tt.wantErr) {
-				t.Fatalf("list error = %v, want %v", err, tt.wantErr)
-			}
-		})
-	}
-}
-
-func TestServiceRejectsInvalidIDsBeforeRepositoryCalls(t *testing.T) {
-	t.Run("create target", func(t *testing.T) {
-		repo := &reminderRepositoryStub{}
-		members := &familyMemberRepositoryStub{}
-		actor := reminderActor("parent", "parent-1", "family-1", "reminders:create")
-		service := newReminderService(repo, members, authorization.NewAuthorizer(), nil)
-		input := validCreateInput()
-		input.TargetMemberID = stringPtr("not-a-uuid")
-
-		_, err := service.Create(context.Background(), actor, input)
-		assertValidationField(t, err, "target_member_id")
-		if members.findCalls != 0 || repo.created != nil {
-			t.Fatalf("invalid create target reached repository: member calls=%d reminder=%#v", members.findCalls, repo.created)
-		}
-	})
-
-	t.Run("list target", func(t *testing.T) {
-		repo := &reminderRepositoryStub{}
-		members := &familyMemberRepositoryStub{}
-		actor := reminderActor("parent", "parent-1", "family-1", "reminders:list")
-		service := newReminderService(repo, members, authorization.NewAuthorizer(), nil)
-		input := ListInput{TargetMemberID: stringPtr("not-a-uuid")}
-
-		_, err := service.List(context.Background(), actor, input)
-		assertValidationField(t, err, "target_member_id")
-		if members.findCalls != 0 || repo.listCalls != 0 {
-			t.Fatalf("invalid list target reached repository: member calls=%d list calls=%d", members.findCalls, repo.listCalls)
-		}
-	})
-
-	t.Run("complete reminder", func(t *testing.T) {
-		repo := &reminderRepositoryStub{}
-		members := &familyMemberRepositoryStub{}
-		actor := reminderActor("parent", "parent-1", "family-1", "reminders:update")
-		service := newReminderService(repo, members, authorization.NewAuthorizer(), nil)
-
-		_, err := service.Complete(context.Background(), actor, "not-a-uuid")
-		assertValidationField(t, err, "reminder_id")
-		if repo.findCalls != 0 || members.findCalls != 0 {
-			t.Fatalf("invalid reminder ID reached repository: reminder calls=%d member calls=%d", repo.findCalls, members.findCalls)
-		}
-	})
-}
-
-func TestCompleteTrimsReminderIDBeforeRepositoryLookup(t *testing.T) {
-	reminder := &domainreminder.Reminder{ID: reminderUUID, FamilyID: "family-1", OwnerMemberID: "parent-1", Scope: domainreminder.ScopePersonal, Status: domainreminder.StatusPending}
-	repo := &reminderRepositoryStub{found: reminder}
-	members := &familyMemberRepositoryStub{byID: map[string]*domainfamilymember.FamilyMember{
-		"parent-1": member("parent-1", "family-1", "parent"),
+	spaces := &spaceRepositoryStub{members: []domainspace.ResolvedMembership{
+		membership(sharedSpaceID, creatorID, "space_owner", "user-1"),
+		membership(sharedSpaceID, assigneeID, "space_member", "user-2"),
 	}}
-	actor := reminderActor("parent", "parent-1", "family-1", "reminders:update")
-	service := newReminderService(repo, members, authorization.NewAuthorizer(), nil)
+	service := newReminderService(repo, spaces, nil)
+	actor := actor(sharedSpaceID, domainspace.TypeShared, creatorID, "space_owner", "reminders:list")
 
-	if _, err := service.Complete(context.Background(), actor, " "+reminderUUID+" "); err != nil {
-		t.Fatalf("complete trimmed reminder ID: %v", err)
-	}
-	if repo.findID != reminderUUID {
-		t.Fatalf("repository reminder ID = %q, want %q", repo.findID, reminderUUID)
-	}
-}
-
-func TestListRejectsInvalidStatusAndInvertedDateRangeBeforeQuery(t *testing.T) {
-	tests := []struct {
-		name  string
-		input ListInput
-		field string
-	}{
-		{
-			name:  "invalid status",
-			input: ListInput{Status: statusPtr(domainreminder.Status("UNKNOWN"))},
-			field: "status",
-		},
-		{
-			name:  "from after to",
-			input: ListInput{From: timePtr(time.Date(2026, 9, 20, 0, 0, 0, 0, time.UTC)), To: timePtr(time.Date(2026, 9, 19, 0, 0, 0, 0, time.UTC))},
-			field: "from",
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			repo := &reminderRepositoryStub{}
-			actor := reminderActor("parent", "parent-1", "family-1", "reminders:list")
-			service := newReminderService(repo, &familyMemberRepositoryStub{}, authorization.NewAuthorizer(), nil)
-
-			_, err := service.List(context.Background(), actor, tt.input)
-			assertValidationField(t, err, tt.field)
-			if repo.listCalls != 0 {
-				t.Fatalf("invalid list input reached repository: %d calls", repo.listCalls)
-			}
-		})
-	}
-}
-
-func TestCompleteFamilyScopeDoesNotResolveOwnerMembership(t *testing.T) {
-	reminder := &domainreminder.Reminder{ID: reminderUUID, FamilyID: "family-1", OwnerMemberID: "inactive-owner", Scope: domainreminder.ScopeFamily, Status: domainreminder.StatusPending}
-	repo := &reminderRepositoryStub{found: reminder}
-	members := &familyMemberRepositoryStub{findErr: errors.New("family scope must not resolve owner")}
-	actor := reminderActor("parent", "parent-1", "family-1", "reminders:update")
-	service := newReminderService(repo, members, authorization.NewAuthorizer(), nil)
-
-	got, err := service.Complete(context.Background(), actor, reminderUUID)
+	got, err := service.List(context.Background(), actor, ListInput{Space: sharedSpaceID})
 	if err != nil {
-		t.Fatalf("complete family reminder: %v", err)
+		t.Fatalf("list reminders: %v", err)
 	}
-	if got.Status != domainreminder.StatusCompleted || repo.updated == nil || members.findCalls != 0 {
-		t.Fatalf("family completion resolved owner or failed: got=%#v updated=%#v member calls=%d", got, repo.updated, members.findCalls)
+	if len(got) != 2 || repo.listFilter.SpaceID != sharedSpaceID {
+		t.Fatalf("listed reminders=%#v filter=%#v, want all shared reminders in %q", got, repo.listFilter, sharedSpaceID)
 	}
 }
 
-func TestCompleteUpdateConflictDoesNotAuditSuccess(t *testing.T) {
-	reminder := &domainreminder.Reminder{ID: reminderUUID, FamilyID: "family-1", OwnerMemberID: "parent-1", Scope: domainreminder.ScopePersonal, Status: domainreminder.StatusPending}
-	repo := &reminderRepositoryStub{found: reminder, updateErr: domainreminder.ErrStatusConflict}
-	members := &familyMemberRepositoryStub{byID: map[string]*domainfamilymember.FamilyMember{
-		"parent-1": member("parent-1", "family-1", "parent"),
+func TestListAuditsSanitizedSuccessMetadata(t *testing.T) {
+	repo := &reminderRepositoryStub{}
+	spaces := &spaceRepositoryStub{members: []domainspace.ResolvedMembership{
+		membership(sharedSpaceID, creatorID, "space_member", "user-1"),
 	}}
-	auditService := &auditServiceStub{}
-	actor := reminderActor("parent", "parent-1", "family-1", "reminders:update")
-	service := newReminderService(repo, members, authorization.NewAuthorizer(), auditService)
+	audit := &auditStoreStub{}
+	service := newReminderService(repo, spaces, audit)
+	actor := actor(sharedSpaceID, domainspace.TypeShared, creatorID, "space_member", "reminders:list")
 
-	_, err := service.Complete(context.Background(), actor, reminderUUID)
-	if !errors.Is(err, ErrConflict) {
-		t.Fatalf("complete error = %v, want ErrConflict", err)
+	if _, err := service.List(context.Background(), actor, ListInput{}); err != nil {
+		t.Fatalf("list reminders: %v", err)
 	}
-	if len(auditService.events) != 1 {
-		t.Fatalf("expected one failed audit, got %#v", auditService.events)
+	if len(audit.events) != 1 {
+		t.Fatalf("audit events = %#v, want one success", audit.events)
 	}
-	event := auditService.events[0]
-	if event.Status != domainaudit.StatusFailed || event.Action != domainaudit.ActionUpdate || event.ResourceID != reminderUUID || event.ErrorMessage != "conflict" {
-		t.Fatalf("unexpected conflict audit: %#v", event)
+	event := audit.events[0]
+	if event.Status != domainaudit.StatusSuccess || event.Action != "list" || event.Metadata["space_id"] != sharedSpaceID || event.Source != "mcp" || event.Channel != "whatsapp" || event.AgentProfile != "profile-1" {
+		t.Fatalf("unexpected list audit: %#v", event)
 	}
 }
 
-func TestCompleteAuthorizesOwnerAndPersistsCompletionWithAudit(t *testing.T) {
-	reminder := &domainreminder.Reminder{ID: reminderUUID, FamilyID: "family-1", OwnerMemberID: "child-1", Scope: domainreminder.ScopePersonal, Status: domainreminder.StatusPending}
+func TestCompleteOwnerCanCompleteAnyReminderInSpace(t *testing.T) {
+	reminder := &domainreminder.Reminder{
+		ID:                reminderID,
+		SpaceID:           sharedSpaceID,
+		CreatedByMemberID: creatorID,
+		AssigneeMemberID:  stringPtr(assigneeID),
+		Status:            domainreminder.StatusPending,
+	}
 	repo := &reminderRepositoryStub{found: reminder}
-	members := &familyMemberRepositoryStub{byID: map[string]*domainfamilymember.FamilyMember{
-		"child-1": member("child-1", "family-1", "child"),
+	spaces := &spaceRepositoryStub{members: []domainspace.ResolvedMembership{
+		membership(sharedSpaceID, creatorID, "space_owner", "user-1"),
+		membership(sharedSpaceID, assigneeID, "space_member", "user-2"),
 	}}
-	auditService := &auditServiceStub{}
-	actor := reminderActor("parent", "parent-1", "family-1", "reminders:update")
-	service := newReminderService(repo, members, authorization.NewAuthorizer(), auditService)
+	service := newReminderService(repo, spaces, nil)
+	actor := actor(sharedSpaceID, domainspace.TypeShared, creatorID, "space_owner", "reminders:update")
 
-	got, err := service.Complete(context.Background(), actor, reminder.ID)
+	got, err := service.Complete(context.Background(), actor, sharedSpaceID, reminderID)
 	if err != nil {
 		t.Fatalf("complete reminder: %v", err)
 	}
-	if got.Status != domainreminder.StatusCompleted || got.CompletedAt == nil || repo.updated == nil || repo.updated.CompletedAt == nil {
-		t.Fatalf("unexpected completion: %#v / %#v", got, repo.updated)
+	if got.Status != domainreminder.StatusCompleted || !repo.completed {
+		t.Fatalf("completion = %#v, repository completed=%v", got, repo.completed)
 	}
-	if len(auditService.events) != 1 {
-		t.Fatalf("expected completion audit, got %d", len(auditService.events))
+}
+
+func TestCreateAuditsSanitizedSpaceAndExternalMetadata(t *testing.T) {
+	repo := &reminderRepositoryStub{}
+	spaces := &spaceRepositoryStub{members: []domainspace.ResolvedMembership{
+		membership(personalSpaceID, creatorID, "space_owner", "user-1"),
+	}}
+	audit := &auditStoreStub{}
+	service := newReminderService(repo, spaces, audit)
+	actor := actor(personalSpaceID, domainspace.TypePersonal, creatorID, "space_owner", "reminders:create")
+
+	if _, err := service.Create(context.Background(), actor, CreateInput{
+		Title:       "Pay electricity bill",
+		ScheduledAt: time.Date(2026, 9, 20, 8, 0, 0, 0, time.UTC),
+	}); err != nil {
+		t.Fatalf("create reminder: %v", err)
 	}
-	event := auditService.events[0]
-	if event.ActorUserID != actor.UserID || event.Action != domainaudit.ActionUpdate || event.Status != domainaudit.StatusSuccess || event.ResourceID != reminder.ID {
+	if len(audit.events) != 1 {
+		t.Fatalf("audit events = %#v, want one success", audit.events)
+	}
+	event := audit.events[0]
+	if event.Status != domainaudit.StatusSuccess || event.Action != domainaudit.ActionCreate || event.Resource != "reminder" {
+		t.Fatalf("unexpected success audit: %#v", event)
+	}
+	if event.Metadata["space_id"] != personalSpaceID || event.Source != "mcp" || event.Channel != "whatsapp" || event.AgentProfile != "profile-1" {
+		t.Fatalf("unsanitized audit metadata: %#v", event)
+	}
+}
+
+func TestCreateValidationFailureAuditsSanitizedFailureMetadata(t *testing.T) {
+	repo := &reminderRepositoryStub{}
+	spaces := &spaceRepositoryStub{members: []domainspace.ResolvedMembership{
+		membership(personalSpaceID, creatorID, "space_owner", "user-1"),
+	}}
+	audit := &auditStoreStub{}
+	service := newReminderService(repo, spaces, audit)
+	actor := actor(personalSpaceID, domainspace.TypePersonal, creatorID, "space_owner", "reminders:create")
+
+	if _, err := service.Create(context.Background(), actor, CreateInput{ScheduledAt: time.Now().UTC()}); err == nil {
+		t.Fatal("create with empty title unexpectedly succeeded")
+	}
+	if len(audit.events) != 1 {
+		t.Fatalf("audit events = %#v, want one failure", audit.events)
+	}
+	event := audit.events[0]
+	if event.Status != domainaudit.StatusFailed || event.ErrorMessage != "validation" || event.Metadata["space_id"] != personalSpaceID {
+		t.Fatalf("unexpected failure audit: %#v", event)
+	}
+}
+
+func TestCompleteAuditsSanitizedSuccessMetadata(t *testing.T) {
+	reminder := &domainreminder.Reminder{ID: reminderID, SpaceID: sharedSpaceID, CreatedByMemberID: assigneeID, Status: domainreminder.StatusPending}
+	repo := &reminderRepositoryStub{found: reminder}
+	spaces := &spaceRepositoryStub{members: []domainspace.ResolvedMembership{
+		membership(sharedSpaceID, creatorID, "space_admin", "user-1"),
+	}}
+	audit := &auditStoreStub{}
+	service := newReminderService(repo, spaces, audit)
+	actor := actor(sharedSpaceID, domainspace.TypeShared, creatorID, "space_admin", "reminders:update")
+
+	if _, err := service.Complete(context.Background(), actor, sharedSpaceID, reminderID); err != nil {
+		t.Fatalf("complete reminder: %v", err)
+	}
+	if len(audit.events) != 1 {
+		t.Fatalf("audit events = %#v, want one success", audit.events)
+	}
+	event := audit.events[0]
+	if event.Status != domainaudit.StatusSuccess || event.Action != domainaudit.ActionUpdate || event.Metadata["space_id"] != sharedSpaceID || event.Source != "mcp" || event.Channel != "whatsapp" || event.AgentProfile != "profile-1" {
 		t.Fatalf("unexpected completion audit: %#v", event)
 	}
-	if event.ActorMemberID != actor.MemberID || event.ResourceOwnerMemberID != "child-1" || event.Source != "mcp" || event.Channel != actor.Channel || event.AgentProfile != actor.HermesProfileID {
-		t.Fatalf("typed completion audit metadata = %#v, want actor=%q owner=child-1 source=mcp channel=%q profile=%q", event, actor.MemberID, actor.Channel, actor.HermesProfileID)
-	}
-	if event.Metadata["status"] != string(domainreminder.StatusCompleted) {
-		t.Fatalf("status metadata = %#v, want completed", event.Metadata)
-	}
-	for _, key := range []string{"actor_member_id", "resource_owner_member_id", "source", "channel", "agent_profile", "resource_type"} {
-		if _, ok := event.Metadata[key]; ok {
-			t.Fatalf("typed audit key %q duplicated in metadata: %#v", key, event.Metadata)
-		}
-	}
 }
 
-func TestCreateMCPAuditPersistsTrustedTypedMetadata(t *testing.T) {
-	const (
-		actorUserID   = "00000000-0000-0000-0000-000000000010"
-		actorMemberID = "00000000-0000-0000-0000-000000000011"
-		childMemberID = "00000000-0000-0000-0000-000000000022"
-	)
-
-	repo := &assigningReminderRepository{reminderRepositoryStub: &reminderRepositoryStub{}}
-	members := &familyMemberRepositoryStub{byID: map[string]*domainfamilymember.FamilyMember{
-		childMemberID: member(childMemberID, "family-1", "child"),
-	}}
-	auditRepo := &capturingAuditRepo{}
-	service := NewReminderService(repo, members, authorization.NewAuthorizer(), serviceaudit.NewAuditService(auditRepo))
-	actor := reminderActor("parent", actorMemberID, "family-1", "reminders:create")
-	actor.UserID = actorUserID
-	actor.HermesProfileID = "hermes-family"
-	actor.Source = "mcp"
-	actor.Channel = "whatsapp"
-	input := validCreateInput()
-	input.TargetMemberID = stringPtr(childMemberID)
-
-	created, err := service.Create(context.Background(), actor, input)
-	if err != nil {
-		t.Fatalf("create reminder: %v", err)
-	}
-	if created.ID != reminderUUID {
-		t.Fatalf("created reminder ID = %q, want %q", created.ID, reminderUUID)
-	}
-	if auditRepo.stored.ActorUserID == nil || *auditRepo.stored.ActorUserID != actorUserID {
-		t.Fatalf("stored actor user ID = %#v, want %q", auditRepo.stored.ActorUserID, actorUserID)
-	}
-	if auditRepo.stored.Action != domainaudit.ActionCreate || auditRepo.stored.Resource != "reminder" || auditRepo.stored.ResourceID != reminderUUID || auditRepo.stored.Status != domainaudit.StatusSuccess {
-		t.Fatalf("stored audit trail = %#v", auditRepo.stored)
-	}
-
-	var metadata map[string]any
-	if err := json.Unmarshal([]byte(auditRepo.stored.Metadata), &metadata); err != nil {
-		t.Fatalf("decode stored metadata: %v", err)
-	}
-	for key, want := range map[string]string{
-		"actor_member_id":          actorMemberID,
-		"resource_owner_member_id": childMemberID,
-		"source":                   "mcp",
-		"channel":                  "whatsapp",
-		"agent_profile":            "hermes-family",
-	} {
-		if got := metadata[key]; got != want {
-			t.Errorf("metadata[%q] = %v, want %q", key, got, want)
-		}
-	}
-	if metadata["resource_type"] != nil {
-		t.Errorf("resource_type metadata = %v, want omitted", metadata["resource_type"])
-	}
-}
-
-func TestCreateAuditUsesValidatedSourceAndTrimmedChannel(t *testing.T) {
-	repo := &reminderRepositoryStub{}
-	auditService := &auditServiceStub{}
-	actor := reminderActor("parent", "parent-1", "family-1", "reminders:create")
-	actor.Source = " MCP "
-	actor.Channel = " whatsapp "
-	service := newReminderService(repo, &familyMemberRepositoryStub{}, authorization.NewAuthorizer(), auditService)
-
-	if _, err := service.Create(context.Background(), actor, validCreateInput()); err != nil {
-		t.Fatalf("create reminder: %v", err)
-	}
-	if len(auditService.events) != 1 || auditService.events[0].Source != "mcp" || auditService.events[0].Channel != "whatsapp" {
-		t.Fatalf("unexpected trusted source/channel: %#v", auditService.events)
-	}
-
-	auditService.events = nil
-	actor.Source = ""
-	actor.HermesProfileID = "caller-controlled-profile"
-	if _, err := service.Create(context.Background(), actor, validCreateInput()); err != nil {
-		t.Fatalf("create reminder with blank source: %v", err)
-	}
-	if len(auditService.events) != 1 || auditService.events[0].Source != "unknown" {
-		t.Fatalf("blank source inferred from profile: %#v", auditService.events)
-	}
-}
-
-func TestCreateValidationFailureWritesSafeFailedAudit(t *testing.T) {
-	repo := &reminderRepositoryStub{}
-	auditService := &auditServiceStub{}
-	actor := reminderActor("parent", "parent-1", "family-1", "reminders:create")
-	service := newReminderService(repo, &familyMemberRepositoryStub{}, authorization.NewAuthorizer(), auditService)
-
-	_, err := service.Create(context.Background(), actor, CreateInput{ScheduledAt: time.Now()})
-	assertValidationField(t, err, "title")
-	assertFailedAudit(t, auditService, domainaudit.ActionCreate, "", "parent-1", "validation")
-}
-
-func TestCreateForbiddenTargetWritesSafeFailedAudit(t *testing.T) {
-	repo := &reminderRepositoryStub{}
-	auditService := &auditServiceStub{}
-	members := &familyMemberRepositoryStub{byID: map[string]*domainfamilymember.FamilyMember{
-		parentMemberUUID: member(parentMemberUUID, "family-1", "parent"),
-	}}
-	actor := reminderActor("child", childMemberUUID, "family-1", "reminders:create")
-	service := newReminderService(repo, members, authorization.NewAuthorizer(), auditService)
-	input := validCreateInput()
-	input.TargetMemberID = stringPtr(parentMemberUUID)
-
-	_, err := service.Create(context.Background(), actor, input)
-	if !errors.Is(err, authorization.ErrForbidden) {
-		t.Fatalf("create error = %v, want forbidden", err)
-	}
-	assertFailedAudit(t, auditService, domainaudit.ActionCreate, "", parentMemberUUID, "forbidden")
-}
-
-func TestCreateRepositoryFailureWritesSafeInternalAudit(t *testing.T) {
-	repo := &reminderRepositoryStub{createErr: errors.New("sql: title leaked")}
-	auditService := &auditServiceStub{}
-	actor := reminderActor("parent", parentMemberUUID, "family-1", "reminders:create")
-	service := newReminderService(repo, &familyMemberRepositoryStub{}, authorization.NewAuthorizer(), auditService)
-	input := validCreateInput()
-	input.Title = "secret title"
-	input.Description = "private description"
-
-	_, err := service.Create(context.Background(), actor, input)
-	if err == nil || !strings.Contains(err.Error(), "sql") {
-		t.Fatalf("create error = %v, want repository error", err)
-	}
-	assertFailedAudit(t, auditService, domainaudit.ActionCreate, "", actor.MemberID, "internal")
-	if got := auditService.events[0].ErrorMessage; strings.Contains(got, "sql") || strings.Contains(got, input.Title) || strings.Contains(got, input.Description) {
-		t.Fatalf("failed audit leaked raw mutation data: %q", got)
-	}
-}
-
-func assertFailedAudit(t *testing.T, auditService *auditServiceStub, action, resourceID, ownerID, category string) {
-	t.Helper()
-	if len(auditService.events) != 1 {
-		t.Fatalf("expected one failed audit, got %#v", auditService.events)
-	}
-	event := auditService.events[0]
-	if event.Status != domainaudit.StatusFailed || event.Action != action || event.Resource != "reminder" || event.ResourceID != resourceID || event.ResourceOwnerMemberID != ownerID || event.ErrorMessage != category {
-		t.Fatalf("unexpected failed audit: %#v", event)
-	}
-	if event.ActorMemberID == "" || event.Source == "" || event.Channel == "" {
-		t.Fatalf("missing typed actor metadata: %#v", event)
-	}
-}
-
-func TestCompleteOwnerPendingReminderSucceeds(t *testing.T) {
-	reminder := &domainreminder.Reminder{ID: reminderUUID, FamilyID: "family-1", OwnerMemberID: "parent-1", Scope: domainreminder.ScopePersonal, Status: domainreminder.StatusPending}
+func TestCompleteMemberCanCompleteAssignedReminder(t *testing.T) {
+	reminder := &domainreminder.Reminder{ID: reminderID, SpaceID: sharedSpaceID, CreatedByMemberID: creatorID, AssigneeMemberID: stringPtr(assigneeID), Status: domainreminder.StatusPending}
 	repo := &reminderRepositoryStub{found: reminder}
-	members := &familyMemberRepositoryStub{byID: map[string]*domainfamilymember.FamilyMember{
-		"parent-1": member("parent-1", "family-1", "parent"),
+	spaces := &spaceRepositoryStub{members: []domainspace.ResolvedMembership{
+		membership(sharedSpaceID, assigneeID, "space_member", "user-2"),
 	}}
-	actor := reminderActor("parent", "parent-1", "family-1", "reminders:update")
-	service := newReminderService(repo, members, authorization.NewAuthorizer(), nil)
+	service := newReminderService(repo, spaces, nil)
+	actor := actor(sharedSpaceID, domainspace.TypeShared, assigneeID, "space_member", "reminders:update")
 
-	got, err := service.Complete(context.Background(), actor, reminder.ID)
-	if err != nil {
-		t.Fatalf("complete own reminder: %v", err)
-	}
-	if got.Status != domainreminder.StatusCompleted || got.CompletedAt == nil || repo.updated == nil {
-		t.Fatalf("unexpected own completion: %#v / %#v", got, repo.updated)
+	if _, err := service.Complete(context.Background(), actor, sharedSpaceID, reminderID); err != nil {
+		t.Fatalf("assigned member complete: %v", err)
 	}
 }
 
-func TestCompleteRejectsUnauthorizedTerminalAndCrossFamilyReminders(t *testing.T) {
+func TestCompleteMemberCanCompleteOwnReminder(t *testing.T) {
+	reminder := &domainreminder.Reminder{ID: reminderID, SpaceID: sharedSpaceID, CreatedByMemberID: assigneeID, Status: domainreminder.StatusPending}
+	repo := &reminderRepositoryStub{found: reminder}
+	spaces := &spaceRepositoryStub{members: []domainspace.ResolvedMembership{
+		membership(sharedSpaceID, assigneeID, "space_member", "user-2"),
+	}}
+	service := newReminderService(repo, spaces, nil)
+	actor := actor(sharedSpaceID, domainspace.TypeShared, assigneeID, "space_member", "reminders:update")
+
+	if _, err := service.Complete(context.Background(), actor, sharedSpaceID, reminderID); err != nil {
+		t.Fatalf("own member complete: %v", err)
+	}
+}
+
+func TestCompleteRejectsUnrelatedMemberAndViewer(t *testing.T) {
 	tests := []struct {
-		name     string
-		actor    identity.ActorContext
-		reminder *domainreminder.Reminder
-		findErr  error
-		wantErr  error
+		name  string
+		actor serviceidentity.ActorContext
 	}{
 		{
-			name:     "other parent",
-			actor:    reminderActor("parent", "parent-2", "family-1", "reminders:update"),
-			reminder: &domainreminder.Reminder{ID: reminderUUID, FamilyID: "family-1", OwnerMemberID: "parent-1", Scope: domainreminder.ScopePersonal, Status: domainreminder.StatusPending},
-			wantErr:  authorization.ErrForbidden,
+			name:  "unrelated member",
+			actor: actor(sharedSpaceID, domainspace.TypeShared, "member-other", "space_member", "reminders:update"),
 		},
 		{
-			name:     "child to parent",
-			actor:    reminderActor("child", "child-1", "family-1", "reminders:update"),
-			reminder: &domainreminder.Reminder{ID: reminderUUID, FamilyID: "family-1", OwnerMemberID: "parent-1", Scope: domainreminder.ScopePersonal, Status: domainreminder.StatusPending},
-			wantErr:  authorization.ErrForbidden,
-		},
-		{
-			name:     "already completed",
-			actor:    reminderActor("parent", "parent-1", "family-1", "reminders:update"),
-			reminder: &domainreminder.Reminder{ID: reminderUUID, FamilyID: "family-1", OwnerMemberID: "parent-1", Scope: domainreminder.ScopePersonal, Status: domainreminder.StatusCompleted},
-			wantErr:  ErrConflict,
-		},
-		{
-			name:     "canceled",
-			actor:    reminderActor("parent", "parent-1", "family-1", "reminders:update"),
-			reminder: &domainreminder.Reminder{ID: reminderUUID, FamilyID: "family-1", OwnerMemberID: "parent-1", Scope: domainreminder.ScopePersonal, Status: domainreminder.StatusCancelled},
-			wantErr:  ErrConflict,
-		},
-		{
-			name:    "cross family id",
-			actor:   reminderActor("parent", "parent-1", "family-1", "reminders:update"),
-			findErr: gorm.ErrRecordNotFound,
-			wantErr: authorization.ErrNotFound,
+			name:  "viewer",
+			actor: actor(sharedSpaceID, domainspace.TypeShared, "member-viewer", "space_viewer", "reminders:update"),
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			repo := &reminderRepositoryStub{found: tt.reminder, findErr: tt.findErr}
-			members := &familyMemberRepositoryStub{byID: map[string]*domainfamilymember.FamilyMember{
-				"parent-1": member("parent-1", "family-1", "parent"),
+			reminder := &domainreminder.Reminder{ID: reminderID, SpaceID: sharedSpaceID, CreatedByMemberID: creatorID, AssigneeMemberID: stringPtr(assigneeID), Status: domainreminder.StatusPending}
+			repo := &reminderRepositoryStub{found: reminder}
+			spaces := &spaceRepositoryStub{members: []domainspace.ResolvedMembership{
+				membership(sharedSpaceID, creatorID, "space_owner", "user-1"),
+				membership(sharedSpaceID, assigneeID, "space_member", "user-2"),
+				membership(sharedSpaceID, "member-other", "space_member", "user-3"),
+				membership(sharedSpaceID, "member-viewer", "space_viewer", "user-4"),
 			}}
-			if tt.reminder != nil {
-				members.byID[tt.reminder.OwnerMemberID] = member(tt.reminder.OwnerMemberID, "family-1", "parent")
+			service := newReminderService(repo, spaces, nil)
+
+			_, err := service.Complete(context.Background(), tt.actor, sharedSpaceID, reminderID)
+			if !errors.Is(err, authorization.ErrForbidden) {
+				t.Fatalf("complete error = %v, want forbidden", err)
 			}
-			service := newReminderService(repo, members, authorization.NewAuthorizer(), nil)
-			_, err := service.Complete(context.Background(), tt.actor, reminderUUID)
-			if !errors.Is(err, tt.wantErr) {
-				t.Fatalf("complete error = %v, want %v", err, tt.wantErr)
-			}
-			if repo.updated != nil {
-				t.Fatal("unexpected update after rejected completion")
+			if repo.completed {
+				t.Fatal("forbidden member completed reminder")
 			}
 		})
 	}
 }
 
-func TestCompleteMapsMissingOwnerToNotFound(t *testing.T) {
-	repo := &reminderRepositoryStub{found: &domainreminder.Reminder{ID: reminderUUID, FamilyID: "family-1", OwnerMemberID: "member-missing", Scope: domainreminder.ScopePersonal, Status: domainreminder.StatusPending}}
-	actor := reminderActor("parent", "parent-1", "family-1", "reminders:update")
-	service := newReminderService(repo, &familyMemberRepositoryStub{}, authorization.NewAuthorizer(), nil)
-
-	_, err := service.Complete(context.Background(), actor, reminderUUID)
-	if !errors.Is(err, authorization.ErrNotFound) {
-		t.Fatalf("complete error = %v, want not found", err)
+func TestCompleteRejectsInactiveActorAndCrossSpaceResourceAsNotFound(t *testing.T) {
+	reminder := &domainreminder.Reminder{ID: reminderID, SpaceID: sharedSpaceID, CreatedByMemberID: creatorID, Status: domainreminder.StatusPending}
+	spaces := &spaceRepositoryStub{members: []domainspace.ResolvedMembership{
+		membership(sharedSpaceID, creatorID, "space_owner", "user-1"),
+		{ID: "member-inactive", SpaceID: sharedSpaceID, UserID: "user-9", RoleName: "space_member", Status: domainspace.StatusInactive},
+	}}
+	tests := []struct {
+		name  string
+		actor serviceidentity.ActorContext
+		space string
+	}{
+		{name: "inactive actor", actor: actor(sharedSpaceID, domainspace.TypeShared, "member-inactive", "space_member", "reminders:update"), space: sharedSpaceID},
+		{name: "cross space", actor: actor(sharedSpaceID, domainspace.TypeShared, creatorID, "space_owner", "reminders:update"), space: "space-other"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := &reminderRepositoryStub{found: reminder}
+			service := newReminderService(repo, spaces, nil)
+			_, err := service.Complete(context.Background(), tt.actor, tt.space, reminderID)
+			if !errors.Is(err, authorization.ErrNotFound) {
+				t.Fatalf("complete error = %v, want not found", err)
+			}
+			if repo.completed {
+				t.Fatal("not-found completion mutated reminder")
+			}
+		})
 	}
 }
 
-func TestCompleteMapsUpdateNotFoundToAuthorizationNotFound(t *testing.T) {
-	reminder := &domainreminder.Reminder{ID: reminderUUID, FamilyID: "family-1", OwnerMemberID: "parent-1", Scope: domainreminder.ScopePersonal, Status: domainreminder.StatusPending}
-	repo := &reminderRepositoryStub{found: reminder, updateErr: gorm.ErrRecordNotFound}
-	members := &familyMemberRepositoryStub{byID: map[string]*domainfamilymember.FamilyMember{
-		"parent-1": member("parent-1", "family-1", "parent"),
+func TestCompleteStatusRaceReturnsConflict(t *testing.T) {
+	reminder := &domainreminder.Reminder{ID: reminderID, SpaceID: sharedSpaceID, CreatedByMemberID: creatorID, Status: domainreminder.StatusPending}
+	repo := &reminderRepositoryStub{found: reminder, completeErr: domainreminder.ErrStatusConflict}
+	spaces := &spaceRepositoryStub{members: []domainspace.ResolvedMembership{
+		membership(sharedSpaceID, creatorID, "space_owner", "user-1"),
 	}}
-	actor := reminderActor("parent", "parent-1", "family-1", "reminders:update")
-	service := newReminderService(repo, members, authorization.NewAuthorizer(), nil)
+	service := newReminderService(repo, spaces, nil)
+	actor := actor(sharedSpaceID, domainspace.TypeShared, creatorID, "space_owner", "reminders:update")
 
-	_, err := service.Complete(context.Background(), actor, reminder.ID)
-	if !errors.Is(err, authorization.ErrNotFound) {
-		t.Fatalf("complete error = %v, want authorization not found", err)
+	_, err := service.Complete(context.Background(), actor, sharedSpaceID, reminderID)
+	if !errors.Is(err, ErrConflict) {
+		t.Fatalf("complete error = %v, want conflict", err)
+	}
+}
+
+func TestCompleteTerminalReminderReturnsConflict(t *testing.T) {
+	reminder := &domainreminder.Reminder{ID: reminderID, SpaceID: sharedSpaceID, CreatedByMemberID: creatorID, Status: domainreminder.StatusCompleted}
+	repo := &reminderRepositoryStub{found: reminder}
+	spaces := &spaceRepositoryStub{members: []domainspace.ResolvedMembership{
+		membership(sharedSpaceID, creatorID, "space_owner", "user-1"),
+	}}
+	service := newReminderService(repo, spaces, nil)
+	actor := actor(sharedSpaceID, domainspace.TypeShared, creatorID, "space_owner", "reminders:update")
+
+	_, err := service.Complete(context.Background(), actor, sharedSpaceID, reminderID)
+	if !errors.Is(err, ErrConflict) {
+		t.Fatalf("complete error = %v, want conflict", err)
+	}
+	if repo.completed {
+		t.Fatal("terminal reminder was updated")
 	}
 }
 
 func stringPtr(value string) *string { return &value }
-
-func scopePtr(value domainreminder.Scope) *domainreminder.Scope { return &value }
-
-func statusPtr(value domainreminder.Status) *domainreminder.Status { return &value }
-
-func timePtr(value time.Time) *time.Time { return &value }
-
-func assertValidationField(t *testing.T, err error, field string) {
-	t.Helper()
-	var validationErr *authorization.ValidationError
-	if !errors.As(err, &validationErr) || validationErr.Field != field {
-		t.Fatalf("error = %T %v, want validation field %q", err, err, field)
-	}
-}

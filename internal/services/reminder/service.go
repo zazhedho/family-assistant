@@ -3,19 +3,14 @@ package servicereminder
 import (
 	"context"
 	"errors"
-	"fmt"
 	"strings"
 	"time"
 
 	domainaudit "family-assistant/internal/domain/audit"
-	domainfamilymember "family-assistant/internal/domain/familymember"
 	domainreminder "family-assistant/internal/domain/reminder"
+	domainspace "family-assistant/internal/domain/space"
 	"family-assistant/internal/services/authorization"
-	identity "family-assistant/internal/services/identity"
-	"family-assistant/pkg/logger"
-
-	"github.com/google/uuid"
-	"gorm.io/gorm"
+	serviceidentity "family-assistant/internal/services/identity"
 )
 
 const (
@@ -27,25 +22,24 @@ const (
 var ErrConflict = errors.New("conflict")
 
 type CreateInput struct {
-	Title          string
-	Description    string
-	ScheduledAt    time.Time
-	Scope          domainreminder.Scope
-	TargetMemberID *string
+	Space            string
+	Title            string
+	Description      string
+	ScheduledAt      time.Time
+	AssigneeMemberID *string
 }
 
 type ListInput struct {
-	Scope          *domainreminder.Scope
-	Status         *domainreminder.Status
-	From           *time.Time
-	To             *time.Time
-	TargetMemberID *string
+	Space  string
+	Status *domainreminder.Status
+	From   *time.Time
+	To     *time.Time
 }
 
 type Service interface {
-	Create(ctx context.Context, actor identity.ActorContext, input CreateInput) (*domainreminder.Reminder, error)
-	List(ctx context.Context, actor identity.ActorContext, input ListInput) ([]domainreminder.Reminder, error)
-	Complete(ctx context.Context, actor identity.ActorContext, reminderID string) (*domainreminder.Reminder, error)
+	Create(context.Context, serviceidentity.ActorContext, CreateInput) (*domainreminder.Reminder, error)
+	List(context.Context, serviceidentity.ActorContext, ListInput) ([]domainreminder.Reminder, error)
+	Complete(context.Context, serviceidentity.ActorContext, string, string) (*domainreminder.Reminder, error)
 }
 
 type auditStore interface {
@@ -54,45 +48,33 @@ type auditStore interface {
 
 type service struct {
 	reminders domainreminder.Repository
-	members   domainfamilymember.Repository
+	spaces    domainspace.Repository
 	authorize authorization.Authorizer
 	audit     auditStore
 }
 
-func NewReminderService(
-	reminders domainreminder.Repository,
-	members domainfamilymember.Repository,
-	authorize authorization.Authorizer,
-	auditService auditStore,
-) Service {
-	return &service{
-		reminders: reminders,
-		members:   members,
-		authorize: authorize,
-		audit:     auditService,
+func NewReminderService(reminders domainreminder.Repository, spaces domainspace.Repository, authorize authorization.Authorizer, audit auditStore) Service {
+	return &service{reminders: reminders, spaces: spaces, authorize: authorize, audit: audit}
+}
+
+func (s *service) Create(ctx context.Context, actor serviceidentity.ActorContext, input CreateInput) (created *domainreminder.Reminder, err error) {
+	spaceID := strings.TrimSpace(input.Space)
+	if spaceID == "" {
+		spaceID = strings.TrimSpace(actor.SpaceID)
 	}
-}
-
-func NewService(
-	reminders domainreminder.Repository,
-	members domainfamilymember.Repository,
-	authorize authorization.Authorizer,
-	auditService auditStore,
-) Service {
-	return NewReminderService(reminders, members, authorize, auditService)
-}
-
-func (s *service) Create(ctx context.Context, actor identity.ActorContext, input CreateInput) (created *domainreminder.Reminder, err error) {
-	ownerID := strings.TrimSpace(actor.MemberID)
 	defer func() {
 		if err == nil {
 			return
 		}
+		ownerID := strings.TrimSpace(actor.MemberID)
 		resourceID := ""
 		if created != nil {
-			resourceID = auditResourceID(created.ID)
+			ownerID = strings.TrimSpace(created.CreatedByMemberID)
+			resourceID = strings.TrimSpace(created.ID)
 		}
-		s.writeFailedAudit(ctx, actor, domainaudit.ActionCreate, resourceID, ownerID, err)
+		event := auditEvent(actor, domainaudit.ActionCreate, spaceID, resourceID, ownerID, domainaudit.StatusFailed, nil)
+		event.ErrorMessage = failureCategory(err)
+		s.writeAudit(ctx, event)
 	}()
 
 	if strings.TrimSpace(input.Title) == "" {
@@ -102,36 +84,30 @@ func (s *service) Create(ctx context.Context, actor identity.ActorContext, input
 		return nil, &authorization.ValidationError{Field: "scheduled_at", Reason: "is required"}
 	}
 
-	scope := input.Scope
-	if scope == "" {
-		scope = domainreminder.ScopePersonal
-	}
-	if err := validateReminderScope(scope); err != nil {
+	if err := s.authorize.Authorize(ctx, actor, createPermission, authorization.Resource{SpaceID: spaceID}); err != nil {
 		return nil, err
 	}
 
-	ownerRole := actor.RoleName
-	if input.TargetMemberID != nil {
-		target, err := s.targetMember(ctx, actor, input.TargetMemberID)
-		if err != nil {
-			return nil, err
-		}
-		ownerRole = target.RoleName
-		if scope == domainreminder.ScopePersonal {
-			ownerID = target.ID
-		}
-	}
-
-	if err := s.authorizeFamily(ctx, actor, createPermission, actor.FamilyID, ownerID, ownerRole, scope); err != nil {
+	members, err := s.spaces.ListActiveMembers(ctx, spaceID)
+	if err != nil {
 		return nil, err
+	}
+	if !hasMember(members, actor.MemberID, actor.UserID) {
+		return nil, authorization.ErrNotFound
+	}
+	if input.AssigneeMemberID != nil {
+		assigneeID := strings.TrimSpace(*input.AssigneeMemberID)
+		if !hasMemberID(members, assigneeID) {
+			return nil, authorization.ErrNotFound
+		}
+		input.AssigneeMemberID = &assigneeID
 	}
 
 	created = &domainreminder.Reminder{
-		FamilyID:          actor.FamilyID,
-		OwnerMemberID:     ownerID,
-		CreatedByMemberID: actor.MemberID,
-		Scope:             scope,
-		Title:             input.Title,
+		SpaceID:           spaceID,
+		CreatedByMemberID: strings.TrimSpace(actor.MemberID),
+		AssigneeMemberID:  input.AssigneeMemberID,
+		Title:             strings.TrimSpace(input.Title),
 		Description:       input.Description,
 		ScheduledAt:       input.ScheduledAt,
 		Status:            domainreminder.StatusPending,
@@ -139,299 +115,192 @@ func (s *service) Create(ctx context.Context, actor identity.ActorContext, input
 	if err := s.reminders.Create(ctx, created); err != nil {
 		return nil, err
 	}
-
-	s.writeAudit(ctx, actor, domainaudit.AuditEvent{
-		ActorUserID:           auditActorUserID(actor),
-		ActorMemberID:         actor.MemberID,
-		ResourceOwnerMemberID: created.OwnerMemberID,
-		Source:                auditSource(actor),
-		Channel:               auditChannel(actor),
-		AgentProfile:          actor.HermesProfileID,
-		ActorRole:             auditActorRole(actor),
-		Action:                domainaudit.ActionCreate,
-		Resource:              "reminder",
-		ResourceID:            created.ID,
-		Status:                domainaudit.StatusSuccess,
-		Metadata:              reminderAuditMetadata(actor, created),
-	})
+	s.writeAudit(ctx, auditEvent(actor, domainaudit.ActionCreate, created.SpaceID, created.ID, created.CreatedByMemberID, domainaudit.StatusSuccess, nil))
 	return created, nil
 }
 
-func (s *service) List(ctx context.Context, actor identity.ActorContext, input ListInput) ([]domainreminder.Reminder, error) {
-	if err := validateListInput(input); err != nil {
-		return nil, err
+func (s *service) List(ctx context.Context, actor serviceidentity.ActorContext, input ListInput) (result []domainreminder.Reminder, err error) {
+	spaceID := strings.TrimSpace(input.Space)
+	if spaceID == "" {
+		spaceID = strings.TrimSpace(actor.SpaceID)
 	}
-
-	scope := domainreminder.ScopePersonal
-	if input.Scope != nil {
-		scope = *input.Scope
-	}
-	if err := validateReminderScope(scope); err != nil {
-		return nil, err
-	}
-
-	ownerID := actor.MemberID
-	ownerRole := actor.RoleName
-	if input.TargetMemberID != nil {
-		target, err := s.targetMember(ctx, actor, input.TargetMemberID)
-		if err != nil {
-			return nil, err
-		}
-		ownerID = target.ID
-		ownerRole = target.RoleName
-	}
-
-	if err := s.authorizeFamily(ctx, actor, listPermission, actor.FamilyID, ownerID, ownerRole, scope); err != nil {
-		return nil, err
-	}
-
-	filter := domainreminder.ListFilter{
-		FamilyID: actor.FamilyID,
-		Scope:    scopePointer(scope),
-		Status:   input.Status,
-		From:     input.From,
-		To:       input.To,
-	}
-	if scope == domainreminder.ScopePersonal {
-		filter.OwnerMemberID = &ownerID
-	}
-	return s.reminders.List(ctx, filter)
-}
-
-func (s *service) Complete(ctx context.Context, actor identity.ActorContext, reminderID string) (result *domainreminder.Reminder, err error) {
-	reminderID = strings.TrimSpace(reminderID)
-	var reminder *domainreminder.Reminder
 	defer func() {
 		if err == nil {
 			return
 		}
-		ownerID := ""
-		if reminder != nil {
-			ownerID = strings.TrimSpace(reminder.OwnerMemberID)
-		}
-		s.writeFailedAudit(ctx, actor, domainaudit.ActionUpdate, auditResourceID(reminderID), ownerID, err)
+		event := auditEvent(actor, "list", spaceID, "", actor.MemberID, domainaudit.StatusFailed, nil)
+		event.ErrorMessage = failureCategory(err)
+		s.writeAudit(ctx, event)
 	}()
-
-	if err := validateUUID(reminderID, "reminder_id"); err != nil {
+	if err := s.authorize.Authorize(ctx, actor, listPermission, authorization.Resource{SpaceID: spaceID}); err != nil {
 		return nil, err
 	}
-
-	reminder, err = s.reminders.FindByIDInFamily(ctx, actor.FamilyID, reminderID)
+	members, err := s.spaces.ListActiveMembers(ctx, spaceID)
 	if err != nil {
-		return nil, mapNotFound(err)
+		return nil, err
 	}
-	if reminder == nil {
+	if !hasMember(members, actor.MemberID, actor.UserID) {
 		return nil, authorization.ErrNotFound
 	}
-
-	ownerRole := ""
-	if reminder.Scope == domainreminder.ScopePersonal {
-		if strings.TrimSpace(reminder.OwnerMemberID) == "" {
-			return nil, authorization.ErrNotFound
-		}
-		owner, lookupErr := s.members.FindActiveByID(ctx, actor.FamilyID, reminder.OwnerMemberID)
-		if lookupErr != nil {
-			return nil, mapNotFound(lookupErr)
-		}
-		if owner == nil {
-			return nil, authorization.ErrNotFound
-		}
-		ownerRole = owner.RoleName
-	}
-	if err := s.authorizeFamily(ctx, actor, updatePermission, actor.FamilyID, reminder.OwnerMemberID, ownerRole, reminder.Scope); err != nil {
+	result, err = s.reminders.List(ctx, domainreminder.ListFilter{SpaceID: spaceID, Status: input.Status, From: input.From, To: input.To})
+	if err != nil {
 		return nil, err
+	}
+	s.writeAudit(ctx, auditEvent(actor, "list", spaceID, "", actor.MemberID, domainaudit.StatusSuccess, nil))
+	return result, nil
+}
+
+func (s *service) Complete(ctx context.Context, actor serviceidentity.ActorContext, spaceID, reminderID string) (result *domainreminder.Reminder, err error) {
+	spaceID = strings.TrimSpace(spaceID)
+	if spaceID == "" {
+		spaceID = strings.TrimSpace(actor.SpaceID)
+	}
+	reminderID = strings.TrimSpace(reminderID)
+	defer func() {
+		if err == nil {
+			return
+		}
+		ownerID := strings.TrimSpace(actor.MemberID)
+		if result != nil {
+			ownerID = strings.TrimSpace(result.CreatedByMemberID)
+		}
+		event := auditEvent(actor, domainaudit.ActionUpdate, spaceID, reminderID, ownerID, domainaudit.StatusFailed, nil)
+		event.ErrorMessage = failureCategory(err)
+		s.writeAudit(ctx, event)
+	}()
+	if err := s.authorize.Authorize(ctx, actor, updatePermission, authorization.Resource{SpaceID: spaceID}); err != nil {
+		return nil, err
+	}
+	members, err := s.spaces.ListActiveMembers(ctx, spaceID)
+	if err != nil {
+		return nil, err
+	}
+	actorMember := activeMember(members, actor.MemberID, actor.UserID)
+	if actorMember == nil {
+		return nil, authorization.ErrNotFound
+	}
+	reminder, err := s.reminders.FindByIDInSpace(ctx, spaceID, reminderID)
+	if err != nil || reminder == nil {
+		return nil, authorization.ErrNotFound
 	}
 	if reminder.Status != domainreminder.StatusPending {
-		return nil, fmt.Errorf("%w: reminder is already terminal", ErrConflict)
+		return nil, ErrConflict
 	}
-
+	if !canComplete(actorMember.RoleName, actorMember.ID, reminder) {
+		return nil, authorization.ErrForbidden
+	}
 	now := time.Now().UTC()
-	reminder.Status = domainreminder.StatusCompleted
-	reminder.CompletedAt = &now
-	if err := s.reminders.Update(ctx, reminder); err != nil {
-		return nil, mapUpdateError(err)
-	}
-
-	s.writeAudit(ctx, actor, domainaudit.AuditEvent{
-		ActorUserID:           auditActorUserID(actor),
-		ActorMemberID:         actor.MemberID,
-		ResourceOwnerMemberID: reminder.OwnerMemberID,
-		Source:                auditSource(actor),
-		Channel:               auditChannel(actor),
-		AgentProfile:          actor.HermesProfileID,
-		ActorRole:             auditActorRole(actor),
-		Action:                domainaudit.ActionUpdate,
-		Resource:              "reminder",
-		ResourceID:            reminder.ID,
-		Status:                domainaudit.StatusSuccess,
-		Metadata:              reminderAuditMetadata(actor, reminder),
-	})
-	return reminder, nil
-}
-
-func (s *service) targetMember(ctx context.Context, actor identity.ActorContext, targetID *string) (*domainfamilymember.FamilyMember, error) {
-	id := strings.TrimSpace(*targetID)
-	if err := validateUUID(id, "target_member_id"); err != nil {
+	if err := s.reminders.CompletePending(ctx, spaceID, reminderID, now); err != nil {
+		if errors.Is(err, domainreminder.ErrStatusConflict) {
+			return nil, ErrConflict
+		}
 		return nil, err
 	}
-	member, err := s.members.FindActiveByID(ctx, actor.FamilyID, id)
-	if err != nil {
-		return nil, mapNotFound(err)
-	}
-	if member == nil {
-		return nil, authorization.ErrNotFound
-	}
-	return member, nil
+	reminder.Status = domainreminder.StatusCompleted
+	reminder.CompletedAt = &now
+	result = reminder
+	s.writeAudit(ctx, auditEvent(actor, domainaudit.ActionUpdate, spaceID, reminder.ID, reminder.CreatedByMemberID, domainaudit.StatusSuccess, nil))
+	return result, nil
 }
 
-func validateReminderScope(scope domainreminder.Scope) error {
-	switch scope {
-	case domainreminder.ScopePersonal, domainreminder.ScopeFamily:
-		return nil
-	default:
-		return &authorization.ValidationError{Field: "scope", Reason: "must be PERSONAL or FAMILY"}
+func hasMember(members []domainspace.ResolvedMembership, memberID, userID string) bool {
+	memberID = strings.TrimSpace(memberID)
+	if memberID != "" {
+		return hasMemberID(members, memberID)
 	}
-}
-
-func validateReminderStatus(status domainreminder.Status) error {
-	switch status {
-	case domainreminder.StatusPending, domainreminder.StatusCompleted, domainreminder.StatusCancelled:
-		return nil
-	default:
-		return &authorization.ValidationError{Field: "status", Reason: "must be PENDING, COMPLETED, or CANCELLED"} //nolint:misspell // persisted API enum; preserve spelling.
-	}
-}
-
-func validateListInput(input ListInput) error {
-	if input.Status != nil {
-		if err := validateReminderStatus(*input.Status); err != nil {
-			return err
+	for _, member := range members {
+		if strings.TrimSpace(member.Status) == domainspace.StatusActive && strings.TrimSpace(member.UserID) == strings.TrimSpace(userID) {
+			return true
 		}
 	}
-	if input.From != nil && input.To != nil && input.From.After(*input.To) {
-		return &authorization.ValidationError{Field: "from", Reason: "must be before or equal to to"}
+	return false
+}
+
+func hasMemberID(members []domainspace.ResolvedMembership, memberID string) bool {
+	for _, member := range members {
+		if strings.TrimSpace(member.Status) == domainspace.StatusActive && strings.TrimSpace(member.ID) == memberID {
+			return true
+		}
+	}
+	return false
+}
+
+func activeMember(members []domainspace.ResolvedMembership, memberID, userID string) *domainspace.ResolvedMembership {
+	memberID = strings.TrimSpace(memberID)
+	for i := range members {
+		member := &members[i]
+		if strings.TrimSpace(member.Status) != domainspace.StatusActive {
+			continue
+		}
+		if (memberID != "" && strings.TrimSpace(member.ID) == memberID) || (memberID == "" && strings.TrimSpace(member.UserID) == strings.TrimSpace(userID)) {
+			return member
+		}
 	}
 	return nil
 }
 
-func validateUUID(value, field string) error {
-	if value == "" {
-		return &authorization.ValidationError{Field: field, Reason: "is required"}
+func canComplete(role, memberID string, reminder *domainreminder.Reminder) bool {
+	switch strings.ToLower(strings.TrimSpace(role)) {
+	case "space_owner", "space_admin":
+		return true
+	case "space_member":
+		if strings.TrimSpace(reminder.CreatedByMemberID) == strings.TrimSpace(memberID) {
+			return true
+		}
+		return reminder.AssigneeMemberID != nil && strings.TrimSpace(*reminder.AssigneeMemberID) == strings.TrimSpace(memberID)
+	default:
+		return false
 	}
-	if _, err := uuid.Parse(value); err != nil {
-		return &authorization.ValidationError{Field: field, Reason: "must be a valid UUID"}
-	}
-	return nil
 }
 
-func scopePointer(scope domainreminder.Scope) *domainreminder.Scope {
-	return &scope
+func auditEvent(actor serviceidentity.ActorContext, action, spaceID, resourceID, ownerID, status string, metadata map[string]any) domainaudit.AuditEvent {
+	if metadata == nil {
+		metadata = make(map[string]any, 1)
+	}
+	metadata["space_id"] = strings.TrimSpace(spaceID)
+	profile := strings.TrimSpace(actor.ExternalID)
+	if profile == "" {
+		profile = strings.TrimSpace(actor.HermesProfileID)
+	}
+	return domainaudit.AuditEvent{
+		ActorUserID:           strings.TrimSpace(actor.UserID),
+		ActorMemberID:         strings.TrimSpace(actor.MemberID),
+		ResourceOwnerMemberID: strings.TrimSpace(ownerID),
+		Source:                auditSource(actor.Source),
+		Channel:               strings.TrimSpace(actor.Channel),
+		AgentProfile:          profile,
+		ActorRole:             strings.TrimSpace(actor.RoleName),
+		Action:                action,
+		Resource:              "reminder",
+		ResourceID:            strings.TrimSpace(resourceID),
+		Status:                status,
+		Metadata:              metadata,
+	}
 }
 
-// authorizeFamily is a transitional adapter for the unreleased family
-// reminder consumer. Generic authorization remains Space-only; this boundary
-// maps the old family ID to a synthetic Space check, then applies its legacy
-// owner relationship until the reminder service moves to Spaces.
-func (s *service) authorizeFamily(ctx context.Context, actor identity.ActorContext, permission, familyID, ownerID, ownerRole string, scope domainreminder.Scope) error {
-	familyID = strings.TrimSpace(familyID)
-	if s.authorize == nil {
-		return errors.New("authorizer is not configured")
+func (s *service) writeAudit(ctx context.Context, event domainaudit.AuditEvent) {
+	if s.audit != nil {
+		_ = s.audit.Store(ctx, event)
 	}
-	scopedActor := actor
-	scopedActor.SpaceID = familyID
-	if err := s.authorize.Authorize(ctx, scopedActor, permission, authorization.Resource{SpaceID: familyID}); err != nil {
-		return err
-	}
-	if strings.TrimSpace(actor.FamilyID) != familyID {
-		return authorization.ErrNotFound
-	}
-	if scope == domainreminder.ScopeFamily {
-		return nil
-	}
-	if strings.TrimSpace(actor.MemberID) != "" && strings.TrimSpace(actor.MemberID) == strings.TrimSpace(ownerID) {
-		return nil
-	}
-	if strings.TrimSpace(actor.RoleName) == "parent" && strings.TrimSpace(ownerRole) == "child" {
-		return nil
-	}
-	return authorization.ErrForbidden
 }
 
-func mapNotFound(err error) error {
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return authorization.ErrNotFound
+func auditSource(source string) string {
+	switch strings.ToLower(strings.TrimSpace(source)) {
+	case "mcp", "http":
+		return strings.ToLower(strings.TrimSpace(source))
+	default:
+		return "unknown"
 	}
-	return err
 }
 
-func mapUpdateError(err error) error {
-	if errors.Is(err, domainreminder.ErrStatusConflict) {
-		return fmt.Errorf("%w: reminder status changed", ErrConflict)
-	}
-	return mapNotFound(err)
-}
-
-func reminderAuditMetadata(actor identity.ActorContext, reminder *domainreminder.Reminder) map[string]any {
-	metadata := map[string]any{
-		"status": string(reminder.Status),
-	}
-	if subjectUserID := auditSubjectUserID(actor); subjectUserID != "" {
-		metadata["subject_user_id"] = subjectUserID
-	}
-	return metadata
-}
-
-func auditActorUserID(actor identity.ActorContext) string {
-	if strings.TrimSpace(actor.InitiatorUserID) != "" {
-		return strings.TrimSpace(actor.InitiatorUserID)
-	}
-	return actor.UserID
-}
-
-func auditActorRole(actor identity.ActorContext) string {
-	if strings.TrimSpace(actor.InitiatorRoleName) != "" {
-		return strings.TrimSpace(actor.InitiatorRoleName)
-	}
-	return actor.RoleName
-}
-
-func auditSource(actor identity.ActorContext) string {
-	source := strings.ToLower(strings.TrimSpace(actor.Source))
-	if source == "mcp" || source == "http" {
-		return source
-	}
-	return "unknown"
-}
-
-func auditChannel(actor identity.ActorContext) string {
-	return strings.TrimSpace(actor.Channel)
-}
-
-func auditSubjectUserID(actor identity.ActorContext) string {
-	initiatorUserID := strings.TrimSpace(actor.InitiatorUserID)
-	subjectUserID := strings.TrimSpace(actor.UserID)
-	if initiatorUserID != "" && initiatorUserID != subjectUserID {
-		return subjectUserID
-	}
-	return ""
-}
-
-func auditResourceID(value string) string {
-	value = strings.TrimSpace(value)
-	if _, err := uuid.Parse(value); err != nil {
-		return ""
-	}
-	return value
-}
-
-func auditFailureCategory(err error) string {
+func failureCategory(err error) string {
 	var validationErr *authorization.ValidationError
 	switch {
 	case errors.As(err, &validationErr), errors.Is(err, authorization.ErrInvalidResource):
 		return "validation"
 	case errors.Is(err, authorization.ErrForbidden):
 		return "forbidden"
-	case errors.Is(err, authorization.ErrNotFound), errors.Is(err, gorm.ErrRecordNotFound):
+	case errors.Is(err, authorization.ErrNotFound):
 		return "not_found"
 	case errors.Is(err, ErrConflict), errors.Is(err, domainreminder.ErrStatusConflict):
 		return "conflict"
@@ -439,40 +308,3 @@ func auditFailureCategory(err error) string {
 		return "internal"
 	}
 }
-
-func (s *service) writeAudit(ctx context.Context, actor identity.ActorContext, event domainaudit.AuditEvent) {
-	if s.audit == nil {
-		return
-	}
-	if err := s.audit.Store(ctx, event); err != nil {
-		logger.WriteLog(logger.LogLevelWarn, fmt.Sprintf("[Reminder][Audit]; failed to store audit trail: %v", err))
-	}
-}
-
-func (s *service) writeFailedAudit(ctx context.Context, actor identity.ActorContext, action, resourceID, ownerID string, cause error) {
-	category := auditFailureCategory(cause)
-	s.writeAudit(ctx, actor, domainaudit.AuditEvent{
-		ActorUserID:           auditActorUserID(actor),
-		ActorMemberID:         strings.TrimSpace(actor.MemberID),
-		ResourceOwnerMemberID: strings.TrimSpace(ownerID),
-		Source:                auditSource(actor),
-		Channel:               auditChannel(actor),
-		AgentProfile:          strings.TrimSpace(actor.HermesProfileID),
-		ActorRole:             auditActorRole(actor),
-		Action:                action,
-		Resource:              "reminder",
-		ResourceID:            auditResourceID(resourceID),
-		Status:                domainaudit.StatusFailed,
-		ErrorMessage:          category,
-		Metadata:              failureAuditMetadata(actor),
-	})
-}
-
-func failureAuditMetadata(actor identity.ActorContext) map[string]any {
-	if subjectUserID := auditSubjectUserID(actor); subjectUserID != "" {
-		return map[string]any{"subject_user_id": subjectUserID}
-	}
-	return nil
-}
-
-var _ Service = (*service)(nil)
