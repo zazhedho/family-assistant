@@ -8,6 +8,7 @@ import (
 	domainspace "family-assistant/internal/domain/space"
 
 	"github.com/DATA-DOG/go-sqlmock"
+	"github.com/google/uuid"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 )
@@ -69,6 +70,115 @@ func TestCreateWithOwnerRollsBackMembershipFailure(t *testing.T) {
 	err := repo.CreateWithOwner(context.Background(), spaceFixture(), memberFixture())
 	if err == nil {
 		t.Fatal("expected error")
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestCreateWithOwnerCommitsAfterBothInserts(t *testing.T) {
+	db, mock := newSpaceMockDB(t)
+	repo := NewRepository(db)
+
+	mock.ExpectBegin()
+	mock.ExpectExec(`INSERT INTO "spaces"`).WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectExec(`INSERT INTO "space_members"`).WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectCommit()
+
+	if err := repo.CreateWithOwner(context.Background(), spaceFixture(), memberFixture()); err != nil {
+		t.Fatalf("create with owner: %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestCreateWithOwnerPropagatesSpaceInsertFailure(t *testing.T) {
+	db, mock := newSpaceMockDB(t)
+	repo := NewRepository(db)
+	wantErr := errors.New("insert space")
+
+	mock.ExpectBegin()
+	mock.ExpectExec(`INSERT INTO "spaces"`).WillReturnError(wantErr)
+	mock.ExpectRollback()
+
+	err := repo.CreateWithOwner(context.Background(), spaceFixture(), memberFixture())
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("expected space insert error, got %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestCreateWithOwnerRejectsNilInputs(t *testing.T) {
+	tests := []struct {
+		name   string
+		space  *domainspace.Space
+		member *domainspace.Member
+		want   error
+	}{
+		{name: "nil space", member: memberFixture(), want: errSpaceRequired},
+		{name: "nil member", space: spaceFixture(), want: errMemberRequired},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			db, mock := newSpaceMockDB(t)
+			repo := NewRepository(db)
+
+			err := repo.CreateWithOwner(context.Background(), tt.space, tt.member)
+			if !errors.Is(err, tt.want) {
+				t.Fatalf("expected %v, got %v", tt.want, err)
+			}
+			if err := mock.ExpectationsWereMet(); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
+func TestCreateWithOwnerRejectsCrossSpaceMember(t *testing.T) {
+	db, mock := newSpaceMockDB(t)
+	repo := NewRepository(db)
+	space := spaceFixture()
+	member := memberFixture()
+	member.SpaceID = "another-space"
+
+	err := repo.CreateWithOwner(context.Background(), space, member)
+	if !errors.Is(err, errMemberSpaceMismatch) {
+		t.Fatalf("expected Space mismatch error, got %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestCreateWithOwnerGeneratesAndBindsBlankIDs(t *testing.T) {
+	db, mock := newSpaceMockDB(t)
+	repo := NewRepository(db)
+	space := spaceFixture()
+	space.ID = ""
+	member := memberFixture()
+	member.ID = ""
+	member.SpaceID = ""
+
+	mock.ExpectBegin()
+	mock.ExpectExec(`INSERT INTO "spaces"`).WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectExec(`INSERT INTO "space_members"`).WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectCommit()
+
+	if err := repo.CreateWithOwner(context.Background(), space, member); err != nil {
+		t.Fatalf("create with generated IDs: %v", err)
+	}
+	if _, err := uuid.Parse(space.ID); err != nil {
+		t.Fatalf("space ID = %q: %v", space.ID, err)
+	}
+	if _, err := uuid.Parse(member.ID); err != nil {
+		t.Fatalf("member ID = %q: %v", member.ID, err)
+	}
+	if member.SpaceID != space.ID {
+		t.Fatalf("member Space ID = %q, want %q", member.SpaceID, space.ID)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)

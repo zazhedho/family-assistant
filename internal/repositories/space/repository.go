@@ -2,6 +2,7 @@ package repositoryspace
 
 import (
 	"context"
+	"errors"
 	"strings"
 
 	domainspace "family-assistant/internal/domain/space"
@@ -20,14 +21,31 @@ func NewRepository(db *gorm.DB) *Repository {
 
 var _ domainspace.Repository = (*Repository)(nil)
 
+var (
+	errSpaceRequired       = errors.New("space is required")
+	errMemberRequired      = errors.New("member is required")
+	errMemberSpaceMismatch = errors.New("member Space ID does not match Space ID")
+)
+
 func (r *Repository) CreateWithOwner(ctx context.Context, space *domainspace.Space, member *domainspace.Member) error {
+	if space == nil {
+		return errSpaceRequired
+	}
+	if member == nil {
+		return errMemberRequired
+	}
+	spaceID := strings.TrimSpace(space.ID)
+	memberSpaceID := strings.TrimSpace(member.SpaceID)
+	if memberSpaceID != "" && memberSpaceID != spaceID {
+		return errMemberSpaceMismatch
+	}
 	if strings.TrimSpace(space.ID) == "" {
 		space.ID = utils.CreateUUID()
 	}
 	if strings.TrimSpace(member.ID) == "" {
 		member.ID = utils.CreateUUID()
 	}
-	if strings.TrimSpace(member.SpaceID) == "" {
+	if memberSpaceID == "" {
 		member.SpaceID = space.ID
 	}
 
