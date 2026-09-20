@@ -4,6 +4,7 @@ import (
 	"errors"
 	"log/slog"
 
+	domainidentity "family-assistant/internal/domain/identity"
 	serviceauthorization "family-assistant/internal/services/authorization"
 	serviceidentity "family-assistant/internal/services/identity"
 	servicereminder "family-assistant/internal/services/reminder"
@@ -57,10 +58,15 @@ func MapToolError(err error, logger ...*slog.Logger) error {
 		return &MCPError{Code: "forbidden", Message: ErrMCPForbidden.Error(), cause: err}
 	case errors.Is(err, serviceauthorization.ErrNotFound), errors.Is(err, gorm.ErrRecordNotFound):
 		return &MCPError{Code: "not_found", Message: ErrMCPNotFound.Error(), cause: err}
-	case errors.Is(err, serviceauthorization.ErrInvalidResource):
+	case errors.Is(err, serviceauthorization.ErrInvalidResource),
+		errors.Is(err, serviceidentity.ErrInvalidIdentityProvider),
+		errors.Is(err, serviceidentity.ErrInvalidExternalIdentity),
+		errors.Is(err, domainidentity.ErrInvalidLinkToken):
 		return &MCPError{Code: "invalid_input", Message: ErrMCPInvalidInput.Error(), cause: err}
-	case errors.Is(err, servicereminder.ErrConflict):
+	case errors.Is(err, servicereminder.ErrConflict), errors.Is(err, domainidentity.ErrIdentityConflict):
 		return &MCPError{Code: "conflict", Message: ErrMCPConflict.Error(), cause: err}
+	case errors.Is(err, domainidentity.ErrIdentityNotFound):
+		return &MCPError{Code: "not_found", Message: ErrMCPNotFound.Error(), cause: err}
 	default:
 		log := slog.Default()
 		if len(logger) > 0 && logger[0] != nil {

@@ -5,11 +5,10 @@ import (
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/json"
-	"errors"
-	"log/slog"
 	"net/http"
 	"strings"
 
+	domainidentity "family-assistant/internal/domain/identity"
 	serviceidentity "family-assistant/internal/services/identity"
 	"family-assistant/pkg/config"
 )
@@ -17,6 +16,14 @@ import (
 type ActorContext = serviceidentity.ActorContext
 
 type actorContextKey struct{}
+
+type ExternalRequest struct {
+	Provider   string
+	ExternalID string
+	Channel    string
+}
+
+type externalRequestContextKey struct{}
 
 func WithActorContext(ctx context.Context, actor serviceidentity.ActorContext) context.Context {
 	return context.WithValue(ctx, actorContextKey{}, actor)
@@ -30,14 +37,34 @@ func ActorFromContext(ctx context.Context) (serviceidentity.ActorContext, bool) 
 	return actor, ok
 }
 
+func WithExternalRequest(ctx context.Context, request ExternalRequest) context.Context {
+	return context.WithValue(ctx, externalRequestContextKey{}, request)
+}
+
+func ExternalRequestFromContext(ctx context.Context) (ExternalRequest, bool) {
+	if ctx == nil {
+		return ExternalRequest{}, false
+	}
+	request, ok := ctx.Value(externalRequestContextKey{}).(ExternalRequest)
+	return request, ok
+}
+
+type TrustedExternalRequest = ExternalRequest
+
+func WithTrustedExternalRequest(ctx context.Context, request ExternalRequest) context.Context {
+	return WithExternalRequest(ctx, request)
+}
+
+func TrustedExternalRequestFromContext(ctx context.Context) (ExternalRequest, bool) {
+	return ExternalRequestFromContext(ctx)
+}
+
 type AuthMiddleware struct {
 	serverKey     string
 	profileHeader string
-	resolver      any
-	logger        *slog.Logger
 }
 
-func NewAuthMiddleware(cfg config.MCPConfig, resolver any) *AuthMiddleware {
+func NewAuthMiddleware(cfg config.MCPConfig, _ ...any) *AuthMiddleware {
 	profileHeader := strings.TrimSpace(cfg.ProfileHeader)
 	if profileHeader == "" {
 		profileHeader = "X-Hermes-Profile"
@@ -45,13 +72,11 @@ func NewAuthMiddleware(cfg config.MCPConfig, resolver any) *AuthMiddleware {
 	return &AuthMiddleware{
 		serverKey:     strings.TrimSpace(cfg.ServerKey),
 		profileHeader: profileHeader,
-		resolver:      resolver,
-		logger:        slog.Default(),
 	}
 }
 
-func NewMiddleware(cfg config.MCPConfig, resolver any) *AuthMiddleware {
-	return NewAuthMiddleware(cfg, resolver)
+func NewMiddleware(cfg config.MCPConfig, resolver ...any) *AuthMiddleware {
+	return NewAuthMiddleware(cfg, resolver...)
 }
 
 func (m *AuthMiddleware) Handler(next http.Handler) http.Handler {
@@ -72,23 +97,9 @@ func (m *AuthMiddleware) Handler(next http.Handler) http.Handler {
 		if channel == "" {
 			channel = "whatsapp"
 		}
-		actor, err := resolveActor(r.Context(), m.resolver, profileID, channel)
-		if err != nil {
-			if errors.Is(err, serviceidentity.ErrResolverMisconfigured) {
-				m.logger.Error("mcp identity resolver is not configured")
-				writeHTTPError(w, http.StatusInternalServerError, "internal server error")
-				return
-			}
-			if errors.Is(err, serviceidentity.ErrUnauthenticated) {
-				writeHTTPError(w, http.StatusUnauthorized, "authentication required")
-				return
-			}
-			m.logger.Error("mcp identity resolution failed", "error", err)
-			writeHTTPError(w, http.StatusInternalServerError, "internal server error")
-			return
-		}
-
-		next.ServeHTTP(w, r.WithContext(WithActorContext(r.Context(), actor)))
+		next.ServeHTTP(w, r.WithContext(WithExternalRequest(r.Context(), ExternalRequest{
+			Provider: domainidentity.ProviderHermes, ExternalID: profileID, Channel: channel,
+		})))
 	})
 }
 
@@ -101,17 +112,46 @@ type legacyResolver interface {
 }
 
 func resolveActor(ctx context.Context, resolver any, externalID, channel string) (serviceidentity.ActorContext, error) {
+	return resolveExternalActor(ctx, resolver, ExternalRequest{
+		Provider: domainidentity.ProviderHermes, ExternalID: externalID, Channel: channel,
+	})
+}
+
+func resolveExternalActor(ctx context.Context, resolver any, request ExternalRequest) (serviceidentity.ActorContext, error) {
+	provider := strings.TrimSpace(request.Provider)
+	if provider == "" {
+		provider = domainidentity.ProviderHermes
+	}
+	externalID := strings.TrimSpace(request.ExternalID)
+	channel := strings.TrimSpace(request.Channel)
 	switch resolver := resolver.(type) {
 	case *serviceidentity.ResolverService:
-		// ResolverService.Resolve selects its configured new or legacy mode.
-		return resolver.Resolve(ctx, externalID, channel)
+		if resolver == nil || resolver.IdentityRepo == nil {
+			return resolver.Resolve(ctx, externalID, channel)
+		}
+		return resolver.ResolveExternal(ctx, provider, externalID, channel)
 	case externalResolver:
-		return resolver.ResolveExternal(ctx, "hermes", externalID, channel)
+		return resolver.ResolveExternal(ctx, provider, externalID, channel)
 	case legacyResolver:
 		return resolver.Resolve(ctx, externalID, channel)
 	default:
 		return serviceidentity.ActorContext{}, serviceidentity.ErrResolverMisconfigured
 	}
+}
+
+func RequireActor(ctx context.Context, resolver any) (serviceidentity.ActorContext, error) {
+	request, ok := ExternalRequestFromContext(ctx)
+	if !ok || strings.TrimSpace(request.Provider) == "" || strings.TrimSpace(request.ExternalID) == "" || strings.TrimSpace(request.Channel) == "" {
+		return serviceidentity.ActorContext{}, serviceidentity.ErrUnauthenticated
+	}
+	actor, err := resolveExternalActor(ctx, resolver, request)
+	if err != nil {
+		return serviceidentity.ActorContext{}, err
+	}
+	if strings.TrimSpace(actor.UserID) == "" {
+		return serviceidentity.ActorContext{}, serviceidentity.ErrUnauthenticated
+	}
+	return actor, nil
 }
 
 func bearerSecret(value string) (string, bool) {

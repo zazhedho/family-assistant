@@ -92,13 +92,6 @@ func TestMCPAuthMiddlewareRejectsUnauthenticatedRequests(t *testing.T) {
 		{name: "wrong scheme", header: "Basic secret", setup: func(*http.Request) {}},
 		{name: "extra bearer token", header: "Bearer secret extra", setup: func(*http.Request) {}},
 		{name: "missing profile", header: "Bearer secret", setup: func(*http.Request) {}},
-		{
-			name:   "unknown profile",
-			header: "Bearer secret",
-			setup: func(req *http.Request) {
-				req.Header.Set("X-Hermes-Profile", "unknown")
-			},
-		},
 	}
 
 	for _, tt := range tests {
@@ -125,14 +118,14 @@ func TestMCPAuthMiddlewareRejectsUnauthenticatedRequests(t *testing.T) {
 			if reached {
 				t.Fatal("expected unauthenticated request to stop before next handler")
 			}
-			if resolver.resolveCall > 0 && tt.name != "unknown profile" {
+			if resolver.resolveCall > 0 {
 				t.Fatalf("expected invalid credentials/profile to skip resolver, calls=%d", resolver.resolveCall)
 			}
 		})
 	}
 }
 
-func TestMCPAuthMiddlewareUsesConfiguredProfileHeaderAndAttachesActor(t *testing.T) {
+func TestMCPAuthMiddlewareUsesConfiguredProfileHeaderAndAttachesTrustedExternalRequest(t *testing.T) {
 	resolver := &resolverStub{actor: serviceidentity.ActorContext{
 		UserID:   "user-1",
 		MemberID: "member-1",
@@ -145,12 +138,12 @@ func TestMCPAuthMiddlewareUsesConfiguredProfileHeaderAndAttachesActor(t *testing
 		ProfileHeader: "X-Trusted-Profile",
 	}, resolver)
 
-	var got serviceidentity.ActorContext
+	var got ExternalRequest
 	handler := middleware.Handler(http.HandlerFunc(func(_ http.ResponseWriter, req *http.Request) {
 		var ok bool
-		got, ok = ActorFromContext(req.Context())
+		got, ok = ExternalRequestFromContext(req.Context())
 		if !ok {
-			t.Error("expected actor context")
+			t.Error("expected trusted external request context")
 		}
 	}))
 
@@ -165,15 +158,15 @@ func TestMCPAuthMiddlewareUsesConfiguredProfileHeaderAndAttachesActor(t *testing
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected valid request to pass, got %d: %s", rec.Code, rec.Body.String())
 	}
-	if resolver.profileID != "profile-parent" || resolver.channel != "whatsapp" {
-		t.Fatalf("resolver received untrusted identity metadata: profile=%q channel=%q", resolver.profileID, resolver.channel)
+	if resolver.resolveCall != 0 {
+		t.Fatalf("outer middleware resolved actor %d times", resolver.resolveCall)
 	}
-	if got.UserID != "user-1" || got.MemberID != "member-1" || got.FamilyID != "family-1" || got.RoleName != "parent" {
-		t.Fatalf("unexpected actor: %+v", got)
+	if got.Provider != "hermes" || got.ExternalID != "profile-parent" || got.Channel != "whatsapp" {
+		t.Fatalf("unexpected trusted request: %+v", got)
 	}
 }
 
-func TestMCPAuthMiddlewarePropagatesResolverFailureSafely(t *testing.T) {
+func TestMCPAuthMiddlewareDoesNotResolveActor(t *testing.T) {
 	resolver := &resolverStub{err: errors.New("database details must not reach client")}
 	middleware := NewAuthMiddleware(config.MCPConfig{
 		ServerKey:     "secret",
@@ -186,10 +179,29 @@ func TestMCPAuthMiddlewarePropagatesResolverFailureSafely(t *testing.T) {
 	rec := httptest.NewRecorder()
 	middleware.Handler(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {})).ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusInternalServerError {
-		t.Fatalf("expected 500 for resolver failure, got %d", rec.Code)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected server-authenticated request to pass, got %d", rec.Code)
 	}
-	if strings.Contains(rec.Body.String(), "database details") {
-		t.Fatalf("resolver details leaked to client: %s", rec.Body.String())
+	if resolver.resolveCall != 0 {
+		t.Fatalf("outer middleware resolved actor %d times", resolver.resolveCall)
+	}
+}
+
+func TestRequireActorUsesOnlyTrustedExternalRequest(t *testing.T) {
+	resolver := &resolverStub{actor: serviceidentity.ActorContext{UserID: "user-1"}}
+	ctx := WithExternalRequest(context.Background(), ExternalRequest{
+		Provider: "hermes", ExternalID: "profile-parent", Channel: "whatsapp",
+	})
+
+	actor, err := RequireActor(ctx, resolver)
+	if err != nil {
+		t.Fatalf("require actor: %v", err)
+	}
+	if actor.UserID != "user-1" || resolver.profileID != "profile-parent" || resolver.channel != "whatsapp" {
+		t.Fatalf("unexpected actor resolution: actor=%+v profile=%q channel=%q", actor, resolver.profileID, resolver.channel)
+	}
+
+	if _, err := RequireActor(context.Background(), resolver); !errors.Is(err, serviceidentity.ErrUnauthenticated) {
+		t.Fatalf("missing trusted request error = %v, want unauthenticated", err)
 	}
 }

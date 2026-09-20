@@ -171,23 +171,35 @@ func reminderOutput(reminder *domainreminder.Reminder) ReminderOutput {
 	}
 }
 
-func registerReminderTools(server *mcpsdk.Server, service servicereminder.Service) {
+func registerReminderTools(server *mcpsdk.Server, service servicereminder.Service, resolver any) {
 	mcpsdk.AddTool(server, &mcpsdk.Tool{
 		Name: "reminder_create", Description: "Create a family reminder.",
 	}, func(ctx context.Context, _ *mcpsdk.CallToolRequest, input ReminderCreateInput) (*mcpsdk.CallToolResult, ReminderOutput, error) {
-		output, err := ReminderCreate(ctx, service, input)
+		actor, err := RequireActor(ctx, resolver)
+		if err != nil {
+			return nil, ReminderOutput{}, MapToolError(err)
+		}
+		output, err := ReminderCreate(WithActorContext(ctx, actor), service, input)
 		return nil, output, err
 	})
 	mcpsdk.AddTool(server, &mcpsdk.Tool{
 		Name: "reminder_list", Description: "List authorized family reminders.",
 	}, func(ctx context.Context, _ *mcpsdk.CallToolRequest, input ReminderListInput) (*mcpsdk.CallToolResult, []ReminderOutput, error) {
-		output, err := ReminderList(ctx, service, input)
+		actor, err := RequireActor(ctx, resolver)
+		if err != nil {
+			return nil, nil, MapToolError(err)
+		}
+		output, err := ReminderList(WithActorContext(ctx, actor), service, input)
 		return nil, output, err
 	})
 	mcpsdk.AddTool(server, &mcpsdk.Tool{
 		Name: "reminder_complete", Description: "Complete an authorized family reminder.",
 	}, func(ctx context.Context, _ *mcpsdk.CallToolRequest, input ReminderCompleteInput) (*mcpsdk.CallToolResult, ReminderOutput, error) {
-		output, err := ReminderComplete(ctx, service, input)
+		actor, err := RequireActor(ctx, resolver)
+		if err != nil {
+			return nil, ReminderOutput{}, MapToolError(err)
+		}
+		output, err := ReminderComplete(WithActorContext(ctx, actor), service, input)
 		return nil, output, err
 	})
 }

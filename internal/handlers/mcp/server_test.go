@@ -1,12 +1,19 @@
 package mcp
 
 import (
+	"bytes"
+	"context"
+	"encoding/json"
 	"errors"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"sort"
+	"strings"
 	"testing"
 
+	domainidentity "family-assistant/internal/domain/identity"
 	serviceidentity "family-assistant/internal/services/identity"
 	"family-assistant/pkg/config"
 )
@@ -65,5 +72,130 @@ func TestHTTPHandlerMountsMCPOnlyAtExactPath(t *testing.T) {
 	handler.ServeHTTP(rec, req)
 	if rec.Code != http.StatusUnauthorized {
 		t.Fatalf("MCP path should reach authentication middleware, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+type mcpServerResponse struct {
+	Result *struct {
+		Content []struct {
+			Text string `json:"text"`
+		} `json:"content"`
+		StructuredOutput json.RawMessage `json:"structuredContent"`
+		IsError          bool            `json:"isError"`
+		Tools            []struct {
+			Name string `json:"name"`
+		} `json:"tools"`
+	} `json:"result,omitempty"`
+	Error *struct {
+		Message string `json:"message"`
+	} `json:"error,omitempty"`
+}
+
+func callMCPServer(t *testing.T, serverURL, profile, key, method string, params map[string]any) mcpServerResponse {
+	t.Helper()
+	payload, err := json.Marshal(map[string]any{
+		"jsonrpc": "2.0", "id": 1, "method": method, "params": params,
+	})
+	if err != nil {
+		t.Fatalf("marshal MCP request: %v", err)
+	}
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, serverURL+"/mcp", bytes.NewReader(payload)) // #nosec G704 -- local httptest server.
+	if err != nil {
+		t.Fatalf("build MCP request: %v", err)
+	}
+	req.Header.Set("Accept", "application/json, text/event-stream")
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+key)
+	req.Header.Set("X-Hermes-Profile", profile)
+	response, err := http.DefaultClient.Do(req) // #nosec G704 -- local httptest server.
+	if err != nil {
+		t.Fatalf("MCP request: %v", err)
+	}
+	defer func() { _ = response.Body.Close() }()
+	body, err := io.ReadAll(response.Body)
+	if err != nil {
+		t.Fatalf("read MCP response: %v", err)
+	}
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("MCP %s status/body = %d/%s", method, response.StatusCode, body)
+	}
+	var decoded mcpServerResponse
+	if err := json.Unmarshal(body, &decoded); err != nil {
+		t.Fatalf("decode MCP %s response %s: %v", method, body, err)
+	}
+	return decoded
+}
+
+func initializeMCPServer(t *testing.T, serverURL string) {
+	t.Helper()
+	response := callMCPServer(t, serverURL, "new-profile", "secret", "initialize", map[string]any{
+		"protocolVersion": "2025-11-25", "capabilities": map[string]any{},
+		"clientInfo": map[string]string{"name": "mcp-test", "version": "1"},
+	})
+	if response.Error != nil {
+		t.Fatalf("initialize error: %s", response.Error.Message)
+	}
+}
+
+func TestHTTPHandlerIdentityLinkNeedsOnlyServerAuthentication(t *testing.T) {
+	linkService := &identityLinkServiceStub{identity: &domainidentity.ExternalIdentity{
+		ID: "identity-1", UserID: "user-1", Provider: domainidentity.ProviderHermes,
+		ExternalID: "new-profile", Status: domainidentity.StatusActive,
+	}}
+	handler := NewHTTPHandler(config.MCPConfig{ServerKey: "secret"}, &resolverStub{err: serviceidentity.ErrUnauthenticated}, linkService, nil, nil)
+	server := httptest.NewServer(handler)
+	t.Cleanup(server.Close)
+
+	initializeMCPServer(t, server.URL)
+	response := callMCPServer(t, server.URL, "new-profile", "secret", "tools/call", map[string]any{
+		"name": "identity_link", "arguments": map[string]any{"code": "ABC123"},
+	})
+	if response.Error != nil || response.Result == nil || response.Result.IsError {
+		t.Fatalf("identity_link failed: %+v", response)
+	}
+	if linkService.calls != 1 || linkService.externalID != "new-profile" {
+		t.Fatalf("unexpected link call: %+v", linkService)
+	}
+}
+
+func TestHTTPHandlerProtectedToolRejectsUnlinkedProfile(t *testing.T) {
+	resolver := &resolverStub{err: serviceidentity.ErrUnauthenticated}
+	handler := NewHTTPHandler(config.MCPConfig{ServerKey: "secret"}, resolver, nil, nil, nil)
+	server := httptest.NewServer(handler)
+	t.Cleanup(server.Close)
+
+	initializeMCPServer(t, server.URL)
+	response := callMCPServer(t, server.URL, "new-profile", "secret", "tools/call", map[string]any{
+		"name": "space_list", "arguments": map[string]any{},
+	})
+	if response.Error != nil || response.Result == nil || !response.Result.IsError {
+		t.Fatalf("space_list should reject unlinked profile: %+v", response)
+	}
+	if len(response.Result.Content) == 0 || !strings.Contains(response.Result.Content[0].Text, "authentication required") {
+		t.Fatalf("space_list leaked or omitted safe auth error: %+v", response.Result.Content)
+	}
+	if resolver.resolveCall != 1 {
+		t.Fatalf("expected one protected resolver call, got %d", resolver.resolveCall)
+	}
+}
+
+func TestHTTPHandlerExposesOnlyCurrentMCPToolsWhenRemindersAreAbsent(t *testing.T) {
+	handler := NewHTTPHandler(config.MCPConfig{ServerKey: "secret"}, &resolverStub{}, nil, nil, nil)
+	server := httptest.NewServer(handler)
+	t.Cleanup(server.Close)
+
+	initializeMCPServer(t, server.URL)
+	response := callMCPServer(t, server.URL, "new-profile", "secret", "tools/list", map[string]any{})
+	if response.Error != nil || response.Result == nil {
+		t.Fatalf("tools/list failed: %+v", response)
+	}
+	got := make([]string, 0, len(response.Result.Tools))
+	for _, tool := range response.Result.Tools {
+		got = append(got, tool.Name)
+	}
+	sort.Strings(got)
+	want := []string{"identity_link", "space_get_members", "space_list"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("tools = %v, want %v", got, want)
 	}
 }
