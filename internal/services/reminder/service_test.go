@@ -186,6 +186,37 @@ func newReminderService(repo *reminderRepositoryStub, members *familyMemberRepos
 	return NewReminderService(repo, members, authz, auditService)
 }
 
+func TestAuthorizeFamilyChecksPermissionBeforeFamilyMismatch(t *testing.T) {
+	tests := []struct {
+		name        string
+		permissions []string
+		want        error
+	}{
+		{name: "missing permission is forbidden", want: authorization.ErrForbidden},
+		{name: "permitted cross-family access is not found", permissions: []string{"reminders:list"}, want: authorization.ErrNotFound},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			actor := reminderActor("parent", "parent-1", "family-1", tt.permissions...)
+			service := &service{authorize: authorization.NewAuthorizer()}
+
+			err := service.authorizeFamily(
+				context.Background(),
+				actor,
+				"reminders:list",
+				"family-2",
+				actor.MemberID,
+				actor.RoleName,
+				domainreminder.ScopeFamily,
+			)
+			if !errors.Is(err, tt.want) {
+				t.Fatalf("authorizeFamily() error = %v, want %v", err, tt.want)
+			}
+		})
+	}
+}
+
 func TestCreateOwnPersonalReminderDerivesTrustedOwnershipAndAudits(t *testing.T) {
 	repo := &reminderRepositoryStub{}
 	auditService := &auditServiceStub{}

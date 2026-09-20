@@ -334,9 +334,6 @@ func scopePointer(scope domainreminder.Scope) *domainreminder.Scope {
 // owner relationship until the reminder service moves to Spaces.
 func (s *service) authorizeFamily(ctx context.Context, actor identity.ActorContext, permission, familyID, ownerID, ownerRole string, scope domainreminder.Scope) error {
 	familyID = strings.TrimSpace(familyID)
-	if strings.TrimSpace(actor.FamilyID) != familyID {
-		return authorization.ErrNotFound
-	}
 	if s.authorize == nil {
 		return errors.New("authorizer is not configured")
 	}
@@ -344,6 +341,9 @@ func (s *service) authorizeFamily(ctx context.Context, actor identity.ActorConte
 	scopedActor.SpaceID = familyID
 	if err := s.authorize.Authorize(ctx, scopedActor, permission, authorization.Resource{SpaceID: familyID}); err != nil {
 		return err
+	}
+	if strings.TrimSpace(actor.FamilyID) != familyID {
+		return authorization.ErrNotFound
 	}
 	if scope == domainreminder.ScopeFamily {
 		return nil
