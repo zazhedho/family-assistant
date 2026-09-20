@@ -29,6 +29,7 @@ type Invitation struct {
 	SpaceID           string         `json:"space_id" gorm:"column:space_id"`
 	InvitedEmail      string         `json:"invited_email,omitempty" gorm:"column:invited_email"`
 	RoleID            string         `json:"role_id" gorm:"column:role_id"`
+	RoleName          string         `json:"-" gorm:"column:role_name;->"`
 	InvitedByMemberID string         `json:"invited_by_member_id" gorm:"column:invited_by_member_id"`
 	TokenHash         string         `json:"-" gorm:"column:token_hash"`
 	Status            string         `json:"status" gorm:"column:status"`

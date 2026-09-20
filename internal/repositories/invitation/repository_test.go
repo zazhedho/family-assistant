@@ -47,10 +47,10 @@ func invitationFixture() *domaininvitation.Invitation {
 func invitationRows(inv *domaininvitation.Invitation) *sqlmock.Rows {
 	return sqlmock.NewRows([]string{
 		"id", "space_id", "invited_email", "role_id", "invited_by_member_id", "token_hash", "status",
-		"expires_at", "accepted_at", "accepted_by_user_id", "created_at", "updated_at", "deleted_at",
+		"expires_at", "accepted_at", "accepted_by_user_id", "created_at", "updated_at", "deleted_at", "role_name",
 	}).AddRow(
 		inv.ID, inv.SpaceID, inv.InvitedEmail, inv.RoleID, inv.InvitedByMemberID, inv.TokenHash, inv.Status,
-		inv.ExpiresAt, nil, nil, inv.CreatedAt, inv.UpdatedAt, nil,
+		inv.ExpiresAt, nil, nil, inv.CreatedAt, inv.UpdatedAt, nil, "space_member",
 	)
 }
 
@@ -87,7 +87,7 @@ func TestAcceptLocksInvitationAndAtomicallyAddsMembership(t *testing.T) {
 	if acceptance == nil || acceptance.Member == nil || acceptance.Member.SpaceID != inv.SpaceID || acceptance.Member.UserID != "user-2" || acceptance.Member.RoleID != inv.RoleID || acceptance.Member.Status != "ACTIVE" {
 		t.Fatalf("unexpected acceptance: %#v", acceptance)
 	}
-	if acceptance.InvitationID != inv.ID || acceptance.SpaceID != inv.SpaceID || acceptance.RoleID != inv.RoleID || !acceptance.EmailBound {
+	if acceptance.InvitationID != inv.ID || acceptance.SpaceID != inv.SpaceID || acceptance.RoleID != inv.RoleID || acceptance.RoleName != "space_member" || !acceptance.EmailBound {
 		t.Fatalf("unexpected invitation metadata: %#v", acceptance)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
@@ -122,6 +122,9 @@ func TestAcceptUnboundEmailSucceedsAndReportsUnbound(t *testing.T) {
 	}
 	if acceptance == nil || acceptance.EmailBound {
 		t.Fatalf("acceptance = %#v, want unbound", acceptance)
+	}
+	if acceptance.RoleName != "space_member" {
+		t.Fatalf("role name = %q, want space_member", acceptance.RoleName)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("sql expectations: %v", err)

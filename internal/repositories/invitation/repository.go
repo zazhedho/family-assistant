@@ -46,7 +46,9 @@ func (r *Repository) Accept(ctx context.Context, tokenHash, userID, normalizedEm
 	err := r.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var invitation domaininvitation.Invitation
 		err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
-			Where("token_hash = ? AND deleted_at IS NULL", tokenHash).
+			Select("space_invitations.*, roles.name AS role_name").
+			Joins("JOIN roles ON roles.id = space_invitations.role_id AND roles.deleted_at IS NULL").
+			Where("space_invitations.token_hash = ? AND space_invitations.deleted_at IS NULL", tokenHash).
 			Take(&invitation).Error
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return domaininvitation.ErrInvalidInvitation
@@ -106,7 +108,7 @@ func (r *Repository) Accept(ctx context.Context, tokenHash, userID, normalizedEm
 			InvitationID: invitation.ID,
 			SpaceID:      invitation.SpaceID,
 			RoleID:       invitation.RoleID,
-			RoleName:     invitation.RoleID,
+			RoleName:     invitation.RoleName,
 			EmailBound:   strings.TrimSpace(invitation.InvitedEmail) != "",
 			Invitation:   &safeInvitation,
 			Member:       member,
