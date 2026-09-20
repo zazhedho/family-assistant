@@ -20,6 +20,7 @@ import (
 	reminderHandler "family-assistant/internal/handlers/http/reminder"
 	roleHandler "family-assistant/internal/handlers/http/role"
 	sessionHandler "family-assistant/internal/handlers/http/session"
+	spaceHandler "family-assistant/internal/handlers/http/space"
 	userHandler "family-assistant/internal/handlers/http/user"
 	interfaceaudit "family-assistant/internal/interfaces/audit"
 	interfacepermission "family-assistant/internal/interfaces/permission"
@@ -35,6 +36,7 @@ import (
 	resetRepo "family-assistant/internal/repositories/reset"
 	roleRepo "family-assistant/internal/repositories/role"
 	sessionRepo "family-assistant/internal/repositories/session"
+	spaceRepo "family-assistant/internal/repositories/space"
 	userRepo "family-assistant/internal/repositories/user"
 	appConfigSvc "family-assistant/internal/services/appconfig"
 	auditSvc "family-assistant/internal/services/audit"
@@ -48,6 +50,7 @@ import (
 	resetSvc "family-assistant/internal/services/reset"
 	roleSvc "family-assistant/internal/services/role"
 	sessionSvc "family-assistant/internal/services/session"
+	spaceSvc "family-assistant/internal/services/space"
 	userSvc "family-assistant/internal/services/user"
 	"family-assistant/middlewares"
 	"family-assistant/pkg/config"
@@ -338,6 +341,22 @@ func (r *Routes) LocationRoutes() {
 	{
 		locationPriv.POST("/sync", mdw.PermissionMiddleware("locations", "sync"), h.Sync)
 		locationPriv.GET("/sync/:id", mdw.PermissionMiddleware("locations", "sync"), h.GetSyncJob)
+	}
+}
+
+func (r *Routes) SpaceRoutes() {
+	repo := spaceRepo.NewRepository(r.DB)
+	roleRepository := roleRepo.NewRoleRepo(r.DB)
+	permissionRepository := r.permissionRepo()
+	svc := spaceSvc.NewService(repo, roleRepository, permissionRepository, r.auditService())
+	h := spaceHandler.NewSpaceHandler(svc)
+	mdw := r.middleware(permissionRepository)
+
+	spaces := r.App.Group("/api/spaces").Use(mdw.AuthMiddleware())
+	{
+		spaces.GET("", h.List)
+		spaces.POST("", h.Create)
+		spaces.GET("/:space_id/members", h.Members)
 	}
 }
 

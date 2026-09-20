@@ -65,6 +65,7 @@ func TestRouteGroupsRegisterWithDryRunDB(t *testing.T) {
 	routes.AppConfigRoutes()
 	routes.AuditRoutes()
 	routes.LocationRoutes()
+	routes.SpaceRoutes()
 	if err := routes.MediaRoutes(); err != nil {
 		t.Fatalf("register media routes: %v", err)
 	}
@@ -84,6 +85,9 @@ func TestRouteGroupsRegisterWithDryRunDB(t *testing.T) {
 		"GET /api/audits",
 		"GET /api/location/province",
 		"POST /api/location/sync",
+		"GET /api/spaces",
+		"POST /api/spaces",
+		"GET /api/spaces/:space_id/members",
 	} {
 		if !registered[want] {
 			t.Fatalf("expected route %s to be registered", want)
