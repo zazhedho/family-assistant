@@ -369,7 +369,7 @@ func TestUserHandlerPublicAndAdminFlows(t *testing.T) {
 	handler.GetRegisterStatus(ctx)
 	assertUserHandlerStatus(t, rec, http.StatusOK)
 
-	ctx, rec = newUserHandlerTestContext(t, http.MethodPost, "/register", `{"name":"Jane Doe","email":"new@example.com","phone":"628123456789","password":"secret123"}`, nil)
+	ctx, rec = newUserHandlerTestContext(t, http.MethodPost, "/register", `{"name":"Jane Doe","email":"new@example.com","phone":"628123456789","password":"secret123","birth_date":"2008-01-01"}`, nil)
 	handler.Register(ctx)
 	assertUserHandlerStatus(t, rec, http.StatusCreated)
 
@@ -454,7 +454,7 @@ func TestUserHandlerRegisterOTPAndStopImpersonationFlows(t *testing.T) {
 		t.Fatalf("expected normalized OTP email, got %q", otpService.sentEmail)
 	}
 
-	ctx, rec = newUserHandlerTestContext(t, http.MethodPost, "/register", `{"name":"Jane Doe","email":"new@example.com","phone":"628123456789","password":"secret123","otp_code":"123456"}`, nil)
+	ctx, rec = newUserHandlerTestContext(t, http.MethodPost, "/register", `{"name":"Jane Doe","email":"new@example.com","phone":"628123456789","password":"secret123","birth_date":"2008-01-01","otp_code":"123456"}`, nil)
 	handler.Register(ctx)
 	assertUserHandlerStatus(t, rec, http.StatusCreated)
 	if otpService.verifiedEmail != "new@example.com" {
@@ -618,7 +618,7 @@ func TestUserHandlerRegistrationConfigBranches(t *testing.T) {
 	handler := newUserHandlerForTest()
 
 	handler.AppConfigService = &appConfigServiceUserTestDouble{enabled: false}
-	ctx, rec := newUserHandlerTestContext(t, http.MethodPost, "/register", `{"name":"Jane Doe","email":"new@example.com","phone":"628123456789","password":"secret123"}`, nil)
+	ctx, rec := newUserHandlerTestContext(t, http.MethodPost, "/register", `{"name":"Jane Doe","email":"new@example.com","phone":"628123456789","password":"secret123","birth_date":"2008-01-01"}`, nil)
 	handler.Register(ctx)
 	assertUserHandlerStatus(t, rec, http.StatusForbidden)
 
@@ -631,7 +631,7 @@ func TestUserHandlerRegistrationConfigBranches(t *testing.T) {
 	handler.GetRegisterStatus(ctx)
 	assertUserHandlerStatus(t, rec, http.StatusInternalServerError)
 
-	ctx, rec = newUserHandlerTestContext(t, http.MethodPost, "/register", `{"name":"Jane Doe","email":"new@example.com","phone":"628123456789","password":"secret123"}`, nil)
+	ctx, rec = newUserHandlerTestContext(t, http.MethodPost, "/register", `{"name":"Jane Doe","email":"new@example.com","phone":"628123456789","password":"secret123","birth_date":"2008-01-01"}`, nil)
 	handler.Register(ctx)
 	assertUserHandlerStatus(t, rec, http.StatusInternalServerError)
 
@@ -666,7 +666,7 @@ func TestUserHandlerServiceErrorBranches(t *testing.T) {
 		call   func(*gin.Context)
 		want   int
 	}{
-		{name: "register", method: http.MethodPost, path: "/register", body: `{"name":"Jane Doe","email":"new@example.com","phone":"628123456789","password":"secret123"}`, call: handler.Register, want: http.StatusInternalServerError},
+		{name: "register", method: http.MethodPost, path: "/register", body: `{"name":"Jane Doe","email":"new@example.com","phone":"628123456789","password":"secret123","birth_date":"2008-01-01"}`, call: handler.Register, want: http.StatusInternalServerError},
 		{name: "admin create", method: http.MethodPost, path: "/admin/users", body: `{"name":"Jane Doe","email":"new@example.com","phone":"628123456789","password":"secret123","role":"user"}`, call: handler.AdminCreateUser, want: http.StatusInternalServerError},
 		{name: "get all users", method: http.MethodGet, path: "/users", call: handler.GetAllUsers, want: http.StatusInternalServerError},
 		{name: "get user by id", method: http.MethodGet, path: "/users/" + userID, params: gin.Params{{Key: "id", Value: userID}}, call: handler.GetUserById, want: http.StatusInternalServerError},
@@ -789,21 +789,21 @@ func TestUserHandlerOTPErrorBranches(t *testing.T) {
 
 	handler.AppConfigService = &appConfigServiceUserTestDouble{enabled: true}
 
-	ctx, rec = newUserHandlerTestContext(t, http.MethodPost, "/register", `{"name":"Jane Doe","email":"new@example.com","phone":"628123456789","password":"secret123"}`, nil)
+	ctx, rec = newUserHandlerTestContext(t, http.MethodPost, "/register", `{"name":"Jane Doe","email":"new@example.com","phone":"628123456789","password":"secret123","birth_date":"2008-01-01"}`, nil)
 	handler.Register(ctx)
 	assertUserHandlerStatus(t, rec, http.StatusBadRequest)
 
-	ctx, rec = newUserHandlerTestContext(t, http.MethodPost, "/register", `{"name":"Jane Doe","email":"new@example.com","phone":"628123456789","password":"secret123","otp_code":"123456"}`, nil)
+	ctx, rec = newUserHandlerTestContext(t, http.MethodPost, "/register", `{"name":"Jane Doe","email":"new@example.com","phone":"628123456789","password":"secret123","birth_date":"2008-01-01","otp_code":"123456"}`, nil)
 	handler.Register(ctx)
 	assertUserHandlerStatus(t, rec, http.StatusServiceUnavailable)
 
 	handler.OTPService = &otpServiceUserHandlerTestDouble{err: serviceotp.ErrOTPTooManyAttempt}
-	ctx, rec = newUserHandlerTestContext(t, http.MethodPost, "/register", `{"name":"Jane Doe","email":"new@example.com","phone":"628123456789","password":"secret123","otp_code":"123456"}`, nil)
+	ctx, rec = newUserHandlerTestContext(t, http.MethodPost, "/register", `{"name":"Jane Doe","email":"new@example.com","phone":"628123456789","password":"secret123","birth_date":"2008-01-01","otp_code":"123456"}`, nil)
 	handler.Register(ctx)
 	assertUserHandlerStatus(t, rec, http.StatusBadRequest)
 
 	handler.OTPService = &otpServiceUserHandlerTestDouble{err: serviceotp.ErrOTPNotConfigured}
-	ctx, rec = newUserHandlerTestContext(t, http.MethodPost, "/register", `{"name":"Jane Doe","email":"new@example.com","phone":"628123456789","password":"secret123","otp_code":"123456"}`, nil)
+	ctx, rec = newUserHandlerTestContext(t, http.MethodPost, "/register", `{"name":"Jane Doe","email":"new@example.com","phone":"628123456789","password":"secret123","birth_date":"2008-01-01","otp_code":"123456"}`, nil)
 	handler.Register(ctx)
 	assertUserHandlerStatus(t, rec, http.StatusServiceUnavailable)
 

@@ -79,6 +79,8 @@ func TestUserMutationErrorResponseMapping(t *testing.T) {
 		{errors.New("email already exists"), http.StatusBadRequest},
 		{errors.New("access denied: missing permission"), http.StatusForbidden},
 		{errors.New("invalid role: admin"), http.StatusBadRequest},
+		{errors.New("birth_date must use YYYY-MM-DD"), http.StatusBadRequest},
+		{errors.New("account holder must be at least 18 years old"), http.StatusBadRequest},
 		{errors.New("database down"), http.StatusInternalServerError},
 	}
 

@@ -7,6 +7,7 @@ import (
 	domainauth "family-assistant/internal/domain/auth"
 	domainpermission "family-assistant/internal/domain/permission"
 	domainrole "family-assistant/internal/domain/role"
+	domainspace "family-assistant/internal/domain/space"
 	domainuser "family-assistant/internal/domain/user"
 	"family-assistant/internal/dto"
 	"family-assistant/pkg/filter"
@@ -36,6 +37,8 @@ type userRepoMock struct {
 	usersByID map[string]domainuser.Users
 	users     []domainuser.Users
 	updated   domainuser.Users
+	space     domainspace.Space
+	member    domainspace.Member
 	deletedID string
 	emailUser domainuser.Users
 	emailErr  error
@@ -49,6 +52,12 @@ type userRepoMock struct {
 
 func (m *userRepoMock) Store(ctx context.Context, data domainuser.Users) error {
 	m.user = data
+	return m.storeErr
+}
+func (m *userRepoMock) StoreWithPersonalSpace(ctx context.Context, data domainuser.Users, space domainspace.Space, member domainspace.Member) error {
+	m.user = data
+	m.space = space
+	m.member = member
 	return m.storeErr
 }
 func (m *userRepoMock) GetByID(ctx context.Context, id string) (domainuser.Users, error) {
@@ -271,15 +280,17 @@ func TestRegisterUserNormalizesEmailToLowercase(t *testing.T) {
 		BlacklistRepo: &authRepoMock{},
 		RoleRepo: &roleRepoUserMock{roles: map[string]domainrole.Role{
 			utils.RoleViewer: {Id: "role-viewer", Name: utils.RoleViewer},
+			"space_owner":    {Id: "role-owner", Name: "space_owner"},
 		}},
 		PermissionRepo: &permissionRepoUserMock{},
 	}
 
 	user, err := service.RegisterUser(context.Background(), dto.UserRegister{
-		Name:     "Jane Doe",
-		Email:    "Jane.Doe@Example.COM",
-		Phone:    "08123456789",
-		Password: "Password1!",
+		Name:      "Jane Doe",
+		Email:     "Jane.Doe@Example.COM",
+		Phone:     "08123456789",
+		Password:  "Password1!",
+		BirthDate: "2008-01-01",
 	})
 	if err != nil {
 		t.Fatalf("expected success, got %v", err)
@@ -287,6 +298,57 @@ func TestRegisterUserNormalizesEmailToLowercase(t *testing.T) {
 
 	if user.Email != "jane.doe@example.com" {
 		t.Fatalf("expected normalized lowercase email, got %s", user.Email)
+	}
+}
+
+func TestRegisterUserRejectsInvalidAndUnderageBirthDates(t *testing.T) {
+	service := NewUserService(&userRepoMock{}, &authRepoMock{}, &roleRepoUserMock{roles: map[string]domainrole.Role{
+		utils.RoleViewer: {Id: "role-viewer", Name: utils.RoleViewer},
+		"space_owner":    {Id: "role-owner", Name: "space_owner"},
+	}}, &permissionRepoUserMock{})
+
+	for _, birthDate := range []string{"2008/01/01", "2099-01-01"} {
+		_, err := service.RegisterUser(context.Background(), dto.UserRegister{
+			Name: "Jane Doe", Email: "jane@example.com", Phone: "08123456789", Password: "Password1!", BirthDate: birthDate,
+		})
+		if err == nil {
+			t.Fatalf("expected birth date %q to be rejected", birthDate)
+		}
+	}
+
+	today := time.Now().UTC()
+	underage := time.Date(today.Year()-18, today.Month(), today.Day(), 0, 0, 0, 0, time.UTC).AddDate(0, 0, 1)
+	_, err := service.RegisterUser(context.Background(), dto.UserRegister{
+		Name: "Jane Doe", Email: "jane@example.com", Phone: "08123456789", Password: "Password1!", BirthDate: underage.Format("2006-01-02"),
+	})
+	if err == nil {
+		t.Fatal("expected one-day-underage registration to be rejected")
+	}
+}
+
+func TestRegisterUserStoresAgeAndPersonalSpace(t *testing.T) {
+	today := time.Now().UTC()
+	birthDate := time.Date(today.Year()-18, today.Month(), today.Day(), 0, 0, 0, 0, time.UTC)
+	repo := &userRepoMock{}
+	service := NewUserService(repo, &authRepoMock{}, &roleRepoUserMock{roles: map[string]domainrole.Role{
+		utils.RoleViewer: {Id: "role-viewer", Name: utils.RoleViewer},
+		"space_owner":    {Id: "role-owner", Name: "space_owner"},
+	}}, &permissionRepoUserMock{})
+
+	user, err := service.RegisterUser(context.Background(), dto.UserRegister{
+		Name: "Jane Doe", Email: "jane@example.com", Phone: "08123456789", Password: "Password1!", BirthDate: birthDate.Format("2006-01-02"),
+	})
+	if err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	if user.AgeVerificationMethod != "self_declared" || user.AgeVerifiedAt == nil || user.BirthDate == nil {
+		t.Fatalf("missing age verification fields: %+v", user)
+	}
+	if repo.space.Name != "Jane Doe's Space" || repo.space.Type != domainspace.TypePersonal || repo.member.RoleID != "role-owner" {
+		t.Fatalf("unexpected onboarding records: space=%+v member=%+v", repo.space, repo.member)
+	}
+	if user.PersonalSpaceID != repo.space.ID {
+		t.Fatalf("personal space audit ID=%q, want %q", user.PersonalSpaceID, repo.space.ID)
 	}
 }
 
@@ -641,11 +703,12 @@ func TestLoginWithGoogleCreatesNewViewerUser(t *testing.T) {
 		BlacklistRepo: &authRepoMock{},
 		RoleRepo: &roleRepoUserMock{roles: map[string]domainrole.Role{
 			utils.RoleViewer: {Id: "role-viewer", Name: utils.RoleViewer},
+			"space_owner":    {Id: "role-owner", Name: "space_owner"},
 		}},
 		PermissionRepo: &permissionRepoUserMock{},
 	}
 
-	user, isNewUser, err := service.LoginWithGoogle(context.Background(), dto.GoogleLogin{IDToken: "token"}, dto.LoginMetadata{IP: "127.0.0.1", UserAgent: "test-agent"}, true)
+	user, isNewUser, err := service.LoginWithGoogle(context.Background(), dto.GoogleLogin{IDToken: "token", BirthDate: "2008-01-01"}, dto.LoginMetadata{IP: "127.0.0.1", UserAgent: "test-agent"}, true)
 	if err != nil {
 		t.Fatalf("expected success, got %v", err)
 	}
@@ -660,6 +723,41 @@ func TestLoginWithGoogleCreatesNewViewerUser(t *testing.T) {
 	}
 	if userRepo.user.Password == "" {
 		t.Fatal("expected generated password hash for google user")
+	}
+	if userRepo.space.Name != "New User's Space" || userRepo.member.RoleID != "role-owner" {
+		t.Fatalf("expected Google onboarding space and owner, got space=%+v member=%+v", userRepo.space, userRepo.member)
+	}
+}
+
+func TestLoginWithGoogleRequiresBirthDateOnlyForNewAccounts(t *testing.T) {
+	originalVerifier := googleIDTokenVerifier
+	googleIDTokenVerifier = func(_ context.Context, idToken string) (googleTokenInfo, error) {
+		return googleTokenInfo{
+			Email:         "new.user@example.com",
+			EmailVerified: "true",
+			Subject:       "google-sub-new",
+			Name:          "new user",
+			Audience:      "client-id",
+		}, nil
+	}
+	defer func() { googleIDTokenVerifier = originalVerifier }()
+
+	service := &ServiceUser{
+		UserRepo:      &userRepoMock{emailErr: gorm.ErrRecordNotFound},
+		BlacklistRepo: &authRepoMock{},
+		RoleRepo: &roleRepoUserMock{roles: map[string]domainrole.Role{
+			utils.RoleViewer: {Id: "role-viewer", Name: utils.RoleViewer},
+			"space_owner":    {Id: "role-owner", Name: "space_owner"},
+		}},
+		PermissionRepo: &permissionRepoUserMock{},
+	}
+	if _, _, err := service.LoginWithGoogle(context.Background(), dto.GoogleLogin{IDToken: "token"}, dto.LoginMetadata{}, true); err == nil {
+		t.Fatal("expected birth date requirement for a new Google account")
+	}
+
+	service.UserRepo = &userRepoMock{emailUser: domainuser.Users{Id: "existing-user", Email: "new.user@example.com"}}
+	if _, _, err := service.LoginWithGoogle(context.Background(), dto.GoogleLogin{IDToken: "token"}, dto.LoginMetadata{}, true); err != nil {
+		t.Fatalf("existing Google account should not need birth date: %v", err)
 	}
 }
 
@@ -880,12 +978,16 @@ func TestRegisterUserValidationAndRepositoryErrors(t *testing.T) {
 		t.Fatalf("expected weak password error, got %v", err)
 	}
 
-	service = NewUserService(&userRepoMock{storeErr: errors.New("insert failed")}, &authRepoMock{}, &roleRepoUserMock{}, &permissionRepoUserMock{})
+	service = NewUserService(&userRepoMock{storeErr: errors.New("insert failed")}, &authRepoMock{}, &roleRepoUserMock{roles: map[string]domainrole.Role{
+		utils.RoleViewer: {Id: "role-viewer", Name: utils.RoleViewer},
+		"space_owner":    {Id: "role-owner", Name: "space_owner"},
+	}}, &permissionRepoUserMock{})
 	_, err = service.RegisterUser(context.Background(), dto.UserRegister{
 		Name:          "Jane Doe",
 		Email:         "jane@example.com",
 		Phone:         "08123456789",
 		Password:      "Password1!",
+		BirthDate:     "2008-01-01",
 		EmailVerified: true,
 	})
 	if err == nil || err.Error() != "insert failed" {

@@ -167,11 +167,12 @@ func (h *HandlerUser) Register(ctx *gin.Context) {
 		Status:      domainaudit.StatusSuccess,
 		Message:     "Registered user",
 		AfterData: map[string]any{
-			"id":    data.Id,
-			"name":  data.Name,
-			"email": data.Email,
-			"phone": data.Phone,
-			"role":  data.Role,
+			"id":       data.Id,
+			"name":     data.Name,
+			"email":    data.Email,
+			"phone":    data.Phone,
+			"role":     data.Role,
+			"space_id": data.PersonalSpaceID,
 		},
 	})
 
@@ -623,6 +624,14 @@ func (h *HandlerUser) GoogleLogin(ctx *gin.Context) {
 	if isNewUser {
 		successMessage = "Google registration success"
 	}
+	googleAuditData := map[string]any{
+		"provider":    "google",
+		"email":       user.Email,
+		"is_new_user": isNewUser,
+	}
+	if strings.TrimSpace(user.PersonalSpaceID) != "" {
+		googleAuditData["space_id"] = user.PersonalSpaceID
+	}
 
 	h.WriteAudit(ctx, domainaudit.AuditEvent{
 		ActorUserID: user.Id,
@@ -632,11 +641,7 @@ func (h *HandlerUser) GoogleLogin(ctx *gin.Context) {
 		ResourceID:  user.Id,
 		Status:      domainaudit.StatusSuccess,
 		Message:     successMessage,
-		AfterData: map[string]any{
-			"provider":    "google",
-			"email":       user.Email,
-			"is_new_user": isNewUser,
-		},
+		AfterData:   googleAuditData,
 	})
 
 	data := buildAuthTokenResponse(accessToken, refreshToken)

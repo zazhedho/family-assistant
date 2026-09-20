@@ -60,11 +60,19 @@ func (s *ServiceUser) LoginWithGoogle(ctx context.Context, req dto.GoogleLogin, 
 	if !allowRegistration {
 		return domainuser.Users{}, false, ErrPublicRegistrationDisabled
 	}
+	birthDate, err := parseBirthDate(req.BirthDate)
+	if err != nil {
+		return domainuser.Users{}, false, err
+	}
 
 	roleName := utils.RoleViewer
 	roleId, ok := findRoleIDByName(ctx, s.RoleRepo, roleName)
 	if !ok {
 		return domainuser.Users{}, false, errors.New("role viewer is not configured")
+	}
+	spaceOwnerRoleID, ok := findRoleIDByName(ctx, s.RoleRepo, spaceOwnerRoleName)
+	if !ok {
+		return domainuser.Users{}, false, errors.New("role space_owner is not configured")
 	}
 
 	passwordSeed := "Google-" + utils.CreateUUID() + "-" + fmt.Sprintf("%d", time.Now().UnixNano()) + "!"
@@ -77,29 +85,36 @@ func (s *ServiceUser) LoginWithGoogle(ctx context.Context, req dto.GoogleLogin, 
 	if name == "" {
 		name = strings.Split(email, "@")[0]
 	}
+	now := time.Now().UTC()
+	displayName := utils.TitleCase(name)
 
 	user := domainuser.Users{
 		Id:                 utils.CreateUUID(),
-		Name:               utils.TitleCase(name),
+		Name:               displayName,
 		Email:              email,
 		Phone:              "",
 		Password:           string(hashedPwd),
 		Role:               roleName,
 		RoleId:             roleId,
-		EmailVerifiedAt:    new(time.Now()),
-		LastLoginAt:        new(time.Now()),
+		EmailVerifiedAt:    &now,
+		LastLoginAt:        &now,
 		LastLoginIP:        metadata.IP,
 		LastLoginUserAgent: metadata.UserAgent,
-		PasswordChangedAt:  new(time.Now()),
+		PasswordChangedAt:  &now,
 		LoginProvider:      "google",
 		AvatarURL:          strings.TrimSpace(identity.Picture),
 		Metadata: map[string]any{
 			"google_subject": identity.Subject,
 		},
-		CreatedAt: time.Now(),
+		BirthDate:             birthDate,
+		AgeVerificationMethod: "self_declared",
+		AgeVerifiedAt:         &now,
+		CreatedAt:             now,
 	}
+	space, member := personalSpaceFor(user, *spaceOwnerRoleID, now)
+	user.PersonalSpaceID = space.ID
 
-	if err := s.UserRepo.Store(ctx, user); err != nil {
+	if err := s.UserRepo.StoreWithPersonalSpace(ctx, user, space, member); err != nil {
 		return domainuser.Users{}, false, err
 	}
 

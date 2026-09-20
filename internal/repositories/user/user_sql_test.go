@@ -3,9 +3,11 @@ package repositoryuser
 import (
 	"context"
 	"database/sql/driver"
+	"errors"
 	"regexp"
 	"testing"
 
+	domainspace "family-assistant/internal/domain/space"
 	domainuser "family-assistant/internal/domain/user"
 
 	"github.com/DATA-DOG/go-sqlmock"
@@ -89,10 +91,64 @@ func TestUserRepositoryStoreOmitsEmptyPhone(t *testing.T) {
 	}
 }
 
+func TestStoreWithPersonalSpaceRollsBackMembershipFailure(t *testing.T) {
+	db, mock := newSpaceStoreMockDB(t)
+	repo := NewUserRepo(db)
+
+	mock.ExpectBegin()
+	mock.ExpectExec(`INSERT INTO "users"`).WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectExec(`INSERT INTO "spaces"`).WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectExec(`INSERT INTO "space_members"`).WillReturnError(errors.New("insert member"))
+	mock.ExpectRollback()
+
+	err := repo.StoreWithPersonalSpace(context.Background(), domainuser.Users{
+		Id:       "user-1",
+		Name:     "Jane Doe",
+		Email:    "jane@example.com",
+		Password: "hashed",
+	}, domainspace.Space{
+		ID:              "space-1",
+		Name:            "Jane Doe's Space",
+		Type:            domainspace.TypePersonal,
+		Category:        domainspace.CategoryPersonal,
+		Status:          domainspace.StatusActive,
+		CreatedByUserID: "user-1",
+	}, domainspace.Member{
+		ID:      "member-1",
+		SpaceID: "space-1",
+		UserID:  "user-1",
+		RoleID:  "owner-role",
+		Status:  domainspace.StatusActive,
+	})
+	if err == nil {
+		t.Fatal("expected membership error")
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("expectations: %v", err)
+	}
+}
+
 func anyArgs(total int) []driver.Value {
 	args := make([]driver.Value, 0, total)
 	for i := 0; i < total; i++ {
 		args = append(args, sqlmock.AnyArg())
 	}
 	return args
+}
+
+func newSpaceStoreMockDB(t *testing.T) (*gorm.DB, sqlmock.Sqlmock) {
+	t.Helper()
+	sqlDB, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	t.Cleanup(func() { _ = sqlDB.Close() })
+
+	db, err := gorm.Open(postgres.New(postgres.Config{Conn: sqlDB, PreferSimpleProtocol: true}), &gorm.Config{
+		SkipDefaultTransaction: true,
+	})
+	if err != nil {
+		t.Fatalf("open gorm: %v", err)
+	}
+	return db, mock
 }

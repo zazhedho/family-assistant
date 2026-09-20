@@ -95,6 +95,8 @@ func userMutationErrorResponse(logId uuid.UUID, err error) (int, *response.ApiRe
 		return http.StatusBadRequest, response.ErrorResponse(http.StatusBadRequest, messages.MsgExists, logId, errMsg)
 	case strings.HasPrefix(errMsg, "invalid role:"),
 		strings.HasPrefix(errMsg, "password must "),
+		strings.HasPrefix(errMsg, "birth_date "),
+		strings.HasPrefix(errMsg, "account holder must be at least "),
 		strings.HasPrefix(errMsg, "new password must "):
 		return http.StatusBadRequest, response.ErrorResponse(http.StatusBadRequest, messages.MsgSomethingWrong, logId, errMsg)
 	default:

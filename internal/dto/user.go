@@ -6,6 +6,7 @@ type UserRegister struct {
 	Phone         string `json:"phone" binding:"required,min=9,max=15"`
 	Password      string `json:"password" binding:"required,min=8,max=64"`
 	OTPCode       string `json:"otp_code" binding:"omitempty,len=6,numeric"`
+	BirthDate     string `json:"birth_date" binding:"required"`
 	EmailVerified bool   `json:"-"`
 }
 
@@ -29,7 +30,8 @@ type LoginMetadata struct {
 }
 
 type GoogleLogin struct {
-	IDToken string `json:"id_token" binding:"required"`
+	IDToken   string `json:"id_token" binding:"required"`
+	BirthDate string `json:"birth_date" binding:"omitempty"`
 }
 
 type UserUpdate struct {

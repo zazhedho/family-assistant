@@ -6,6 +6,7 @@ import (
 	"family-assistant/internal/authscope"
 	permissioncache "family-assistant/internal/cache/permission"
 	domainauth "family-assistant/internal/domain/auth"
+	domainspace "family-assistant/internal/domain/space"
 	domainuser "family-assistant/internal/domain/user"
 	"family-assistant/internal/dto"
 	interfaceauth "family-assistant/internal/interfaces/auth"
@@ -13,8 +14,10 @@ import (
 	interfacerole "family-assistant/internal/interfaces/role"
 	interfaceuser "family-assistant/internal/interfaces/user"
 	serviceshared "family-assistant/internal/services/shared"
+	"family-assistant/pkg/config"
 	"family-assistant/pkg/filter"
 	"family-assistant/utils"
+	"fmt"
 	"strings"
 	"time"
 
@@ -28,6 +31,8 @@ type ServiceUser struct {
 	PermissionRepo  interfacepermission.RepoPermissionInterface
 	PermissionCache permissioncache.Invalidator
 }
+
+const spaceOwnerRoleName = "space_owner"
 
 func NewUserService(userRepo interfaceuser.RepoUserInterface, blacklistRepo interfaceauth.RepoAuthInterface, roleRepo interfacerole.RepoRoleInterface, permissionRepo interfacepermission.RepoPermissionInterface, invalidators ...permissioncache.Invalidator) *ServiceUser {
 	service := &ServiceUser{
@@ -59,6 +64,10 @@ func (s *ServiceUser) RegisterUser(ctx context.Context, req dto.UserRegister) (d
 	if err := ValidatePasswordStrength(req.Password); err != nil {
 		return domainuser.Users{}, err
 	}
+	birthDate, err := parseBirthDate(req.BirthDate)
+	if err != nil {
+		return domainuser.Users{}, err
+	}
 
 	hashedPwd, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
 	if err != nil {
@@ -70,31 +79,84 @@ func (s *ServiceUser) RegisterUser(ctx context.Context, req dto.UserRegister) (d
 	roleName := utils.RoleViewer
 
 	roleId, _ := findRoleIDByName(ctx, s.RoleRepo, roleName)
+	spaceOwnerRoleID, ok := findRoleIDByName(ctx, s.RoleRepo, spaceOwnerRoleName)
+	if !ok {
+		return domainuser.Users{}, errors.New("role space_owner is not configured")
+	}
+	now := time.Now().UTC()
 	var emailVerifiedAt *time.Time
 	if req.EmailVerified {
-		emailVerifiedAt = new(time.Now())
+		emailVerifiedAt = &now
 	}
+	displayName := utils.TitleCase(utils.StripHTML(req.Name))
 
 	data = domainuser.Users{
-		Id:                utils.CreateUUID(),
-		Name:              utils.TitleCase(utils.StripHTML(req.Name)),
-		Phone:             phone,
-		Email:             email,
-		Password:          string(hashedPwd),
-		Role:              roleName,
-		RoleId:            roleId,
-		EmailVerifiedAt:   emailVerifiedAt,
-		PasswordChangedAt: new(time.Now()),
-		LoginProvider:     "local",
-		Metadata:          map[string]any{},
-		CreatedAt:         time.Now(),
+		Id:                    utils.CreateUUID(),
+		Name:                  displayName,
+		Phone:                 phone,
+		Email:                 email,
+		Password:              string(hashedPwd),
+		Role:                  roleName,
+		RoleId:                roleId,
+		EmailVerifiedAt:       emailVerifiedAt,
+		PasswordChangedAt:     &now,
+		LoginProvider:         "local",
+		Metadata:              map[string]any{},
+		BirthDate:             birthDate,
+		AgeVerificationMethod: "self_declared",
+		AgeVerifiedAt:         &now,
+		CreatedAt:             now,
 	}
+	space, member := personalSpaceFor(data, *spaceOwnerRoleID, now)
+	data.PersonalSpaceID = space.ID
 
-	if err = s.UserRepo.Store(ctx, data); err != nil {
+	if err = s.UserRepo.StoreWithPersonalSpace(ctx, data, space, member); err != nil {
 		return domainuser.Users{}, err
 	}
 
 	return data, nil
+}
+
+func parseBirthDate(raw string) (*time.Time, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil, errors.New("birth_date is required")
+	}
+	birthDate, err := time.Parse("2006-01-02", raw)
+	if err != nil {
+		return nil, errors.New("birth_date must use YYYY-MM-DD")
+	}
+	today := time.Now().UTC()
+	todayDate := time.Date(today.Year(), today.Month(), today.Day(), 0, 0, 0, 0, time.UTC)
+	if birthDate.After(todayDate) {
+		return nil, errors.New("birth_date cannot be in the future")
+	}
+	minimumAge := config.LoadMinimumIndependentAccountAge()
+	if config.AgeOn(birthDate, todayDate) < minimumAge {
+		return nil, fmt.Errorf("account holder must be at least %d years old", minimumAge)
+	}
+	return &birthDate, nil
+}
+
+func personalSpaceFor(user domainuser.Users, roleID string, now time.Time) (domainspace.Space, domainspace.Member) {
+	space := domainspace.Space{
+		ID:              utils.CreateUUID(),
+		Name:            user.Name + "'s Space",
+		Type:            domainspace.TypePersonal,
+		Category:        domainspace.CategoryPersonal,
+		Status:          domainspace.StatusActive,
+		CreatedByUserID: user.Id,
+		CreatedAt:       now,
+	}
+	member := domainspace.Member{
+		ID:        utils.CreateUUID(),
+		SpaceID:   space.ID,
+		UserID:    user.Id,
+		RoleID:    roleID,
+		Status:    domainspace.StatusActive,
+		CreatedAt: now,
+	}
+	return space, member
 }
 
 func (s *ServiceUser) AdminCreateUser(ctx context.Context, req dto.AdminCreateUser) (domainuser.Users, error) {
