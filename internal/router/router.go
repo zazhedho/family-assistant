@@ -13,6 +13,7 @@ import (
 	permissioncache "family-assistant/internal/cache/permission"
 	appConfigHandler "family-assistant/internal/handlers/http/appconfig"
 	auditHandler "family-assistant/internal/handlers/http/audit"
+	identityHandler "family-assistant/internal/handlers/http/identity"
 	invitationHandler "family-assistant/internal/handlers/http/invitation"
 	locationHandler "family-assistant/internal/handlers/http/location"
 	mediaHandler "family-assistant/internal/handlers/http/media"
@@ -29,6 +30,7 @@ import (
 	appConfigRepo "family-assistant/internal/repositories/appconfig"
 	auditRepo "family-assistant/internal/repositories/audit"
 	authRepo "family-assistant/internal/repositories/auth"
+	identityRepo "family-assistant/internal/repositories/identity"
 	invitationRepo "family-assistant/internal/repositories/invitation"
 	locationRepo "family-assistant/internal/repositories/location"
 	mediaRepo "family-assistant/internal/repositories/media"
@@ -370,6 +372,23 @@ func (r *Routes) SpaceRoutes() {
 	invitationRoutes := r.App.Group("/api/invitations").Use(mdw.AuthMiddleware())
 	{
 		invitationRoutes.POST("/accept", invitationHandler.Accept)
+	}
+
+	r.IdentityRoutes()
+}
+
+func (r *Routes) IdentityRoutes() {
+	permissions := r.permissionRepo()
+	mdw := r.middleware(permissions)
+	repo := identityRepo.NewRepository(r.DB)
+	auditService := r.auditService()
+	service := serviceidentity.NewLinkService(repo, auditService, config.LoadIdentityConfig())
+	h := identityHandler.NewIdentityHandler(service, auditService)
+
+	hermes := r.App.Group("/api/hermes").Use(mdw.AuthMiddleware())
+	{
+		hermes.POST("/link-codes", h.Issue)
+		hermes.DELETE("/link", h.Revoke)
 	}
 }
 

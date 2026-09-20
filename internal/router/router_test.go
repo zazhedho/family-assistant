@@ -90,9 +90,32 @@ func TestRouteGroupsRegisterWithDryRunDB(t *testing.T) {
 		"GET /api/spaces/:space_id/members",
 		"POST /api/spaces/:space_id/invitations",
 		"POST /api/invitations/accept",
+		"POST /api/hermes/link-codes",
+		"DELETE /api/hermes/link",
 	} {
 		if !registered[want] {
 			t.Fatalf("expected route %s to be registered", want)
+		}
+	}
+}
+
+func TestIdentityRoutesRequireAuthentication(t *testing.T) {
+	routes := NewRoutes()
+	routes.DB = newRouterDryRunDB(t)
+	routes.IdentityRoutes()
+
+	for _, tt := range []struct {
+		method string
+		path   string
+	}{
+		{method: http.MethodPost, path: "/api/hermes/link-codes"},
+		{method: http.MethodDelete, path: "/api/hermes/link"},
+	} {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(tt.method, tt.path, nil)
+		routes.App.ServeHTTP(rec, req)
+		if rec.Code != http.StatusUnauthorized {
+			t.Fatalf("unauthenticated identity request %s %s = %d, want 401: %s", tt.method, tt.path, rec.Code, rec.Body.String())
 		}
 	}
 }
