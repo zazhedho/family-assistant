@@ -1,6 +1,7 @@
 package handlerspace
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -8,7 +9,9 @@ import (
 	"strings"
 
 	"family-assistant/internal/authscope"
+	domainaudit "family-assistant/internal/domain/audit"
 	domainspace "family-assistant/internal/domain/space"
+	handlercommon "family-assistant/internal/handlers/http/common"
 	interfaceaudit "family-assistant/internal/interfaces/audit"
 	serviceauthorization "family-assistant/internal/services/authorization"
 	servicespace "family-assistant/internal/services/space"
@@ -25,34 +28,35 @@ var errUnauthenticated = errors.New("authentication required")
 
 type SpaceHandler struct {
 	Service servicespace.Service
+	handlercommon.AuditWriter
 }
-
-type Handler = SpaceHandler
 
 type createRequest struct {
 	Name     string `json:"name"`
 	Category string `json:"category"`
 }
 
-func NewSpaceHandler(service servicespace.Service, _ ...interfaceaudit.ServiceAuditInterface) *SpaceHandler {
-	return &SpaceHandler{Service: service}
-}
-
-func NewHandler(service servicespace.Service, audit ...interfaceaudit.ServiceAuditInterface) *SpaceHandler {
-	return NewSpaceHandler(service, audit...)
+func NewSpaceHandler(service servicespace.Service, auditService interfaceaudit.ServiceAuditInterface) *SpaceHandler {
+	return &SpaceHandler{
+		Service:     service,
+		AuditWriter: handlercommon.NewAuditWriter(auditService, "SpaceHandler"),
+	}
 }
 
 func (h *SpaceHandler) List(ctx *gin.Context) {
 	userID, err := authenticatedUserID(ctx)
 	if err != nil {
+		h.writeEarlyFailure(ctx, "list", "", err)
 		writeSpaceError(ctx, err)
 		return
 	}
 	if h.Service == nil {
-		writeSpaceError(ctx, errors.New("space service is not configured"))
+		err := errors.New("space service is not configured")
+		h.writeEarlyFailure(ctx, "list", "", err)
+		writeSpaceError(ctx, err)
 		return
 	}
-	spaces, err := h.Service.List(ctx.Request.Context(), userID)
+	spaces, err := h.Service.List(withAuditProvenance(ctx), userID)
 	if err != nil {
 		writeSpaceError(ctx, err)
 		return
@@ -63,26 +67,27 @@ func (h *SpaceHandler) List(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, response.Response(http.StatusOK, "Spaces retrieved successfully", utils.GenerateLogId(ctx), spaces))
 }
 
-func (h *SpaceHandler) GetAll(ctx *gin.Context) {
-	h.List(ctx)
-}
-
 func (h *SpaceHandler) Create(ctx *gin.Context) {
 	userID, err := authenticatedUserID(ctx)
 	if err != nil {
+		h.writeEarlyFailure(ctx, "create", "", err)
 		writeSpaceError(ctx, err)
 		return
 	}
 	var request createRequest
 	if err := decodeSpaceJSON(ctx, &request); err != nil {
-		writeSpaceError(ctx, &serviceauthorization.ValidationError{Field: "body", Reason: "is invalid"})
+		validationErr := &serviceauthorization.ValidationError{Field: "body", Reason: "is invalid"}
+		h.writeEarlyFailure(ctx, "create", "", validationErr)
+		writeSpaceError(ctx, validationErr)
 		return
 	}
 	if h.Service == nil {
-		writeSpaceError(ctx, errors.New("space service is not configured"))
+		err := errors.New("space service is not configured")
+		h.writeEarlyFailure(ctx, "create", "", err)
+		writeSpaceError(ctx, err)
 		return
 	}
-	space, err := h.Service.Create(ctx.Request.Context(), userID, servicespace.CreateInput{Name: request.Name, Category: request.Category})
+	space, err := h.Service.Create(withAuditProvenance(ctx), userID, servicespace.CreateInput{Name: request.Name, Category: request.Category})
 	if err != nil {
 		writeSpaceError(ctx, err)
 		return
@@ -93,19 +98,24 @@ func (h *SpaceHandler) Create(ctx *gin.Context) {
 func (h *SpaceHandler) Members(ctx *gin.Context) {
 	userID, err := authenticatedUserID(ctx)
 	if err != nil {
+		h.writeEarlyFailure(ctx, "list", "", err)
 		writeSpaceError(ctx, err)
 		return
 	}
 	spaceID := strings.TrimSpace(ctx.Param("space_id"))
 	if _, err := uuid.Parse(spaceID); err != nil {
-		writeSpaceError(ctx, &serviceauthorization.ValidationError{Field: "space_id", Reason: "must be a valid UUID"})
+		validationErr := &serviceauthorization.ValidationError{Field: "space_id", Reason: "must be a valid UUID"}
+		h.writeEarlyFailure(ctx, "list", "", validationErr)
+		writeSpaceError(ctx, validationErr)
 		return
 	}
 	if h.Service == nil {
-		writeSpaceError(ctx, errors.New("space service is not configured"))
+		err := errors.New("space service is not configured")
+		h.writeEarlyFailure(ctx, "list", spaceID, err)
+		writeSpaceError(ctx, err)
 		return
 	}
-	members, err := h.Service.Members(ctx.Request.Context(), userID, spaceID)
+	members, err := h.Service.Members(withAuditProvenance(ctx), userID, spaceID)
 	if err != nil {
 		writeSpaceError(ctx, err)
 		return
@@ -116,8 +126,24 @@ func (h *SpaceHandler) Members(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, response.Response(http.StatusOK, "Space members retrieved successfully", utils.GenerateLogId(ctx), members))
 }
 
-func (h *SpaceHandler) GetMembers(ctx *gin.Context) {
-	h.Members(ctx)
+func withAuditProvenance(ctx *gin.Context) context.Context {
+	return servicespace.WithAuditProvenance(ctx.Request.Context(), servicespace.AuditProvenance{
+		RequestID: utils.GetRequestID(ctx),
+		IPAddress: ctx.ClientIP(),
+		UserAgent: ctx.GetHeader("User-Agent"),
+		Metadata:  utils.GetImpersonationMetadata(ctx),
+	})
+}
+
+func (h *SpaceHandler) writeEarlyFailure(ctx *gin.Context, action, resourceID string, err error) {
+	h.WriteAudit(ctx, domainaudit.AuditEvent{
+		Action:       action,
+		Resource:     "space",
+		ResourceID:   resourceID,
+		Status:       domainaudit.StatusFailed,
+		Source:       "http",
+		ErrorMessage: servicespace.FailureCategory(err),
+	})
 }
 
 func authenticatedUserID(ctx *gin.Context) (string, error) {

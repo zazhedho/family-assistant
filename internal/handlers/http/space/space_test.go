@@ -9,9 +9,12 @@ import (
 	"testing"
 
 	"family-assistant/internal/authscope"
+	domainaudit "family-assistant/internal/domain/audit"
 	domainspace "family-assistant/internal/domain/space"
+	"family-assistant/internal/dto"
 	serviceauthorization "family-assistant/internal/services/authorization"
 	servicespace "family-assistant/internal/services/space"
+	"family-assistant/pkg/filter"
 
 	"github.com/gin-gonic/gin"
 )
@@ -31,6 +34,23 @@ type spaceServiceStub struct {
 	listCalls    int
 	createCalls  int
 	membersCalls int
+}
+
+type spaceAuditServiceStub struct {
+	events []domainaudit.AuditEvent
+}
+
+func (s *spaceAuditServiceStub) Store(_ context.Context, event domainaudit.AuditEvent) error {
+	s.events = append(s.events, event)
+	return nil
+}
+
+func (s *spaceAuditServiceStub) GetAll(context.Context, filter.BaseParams) ([]dto.AuditTrailResponse, int64, error) {
+	return nil, 0, nil
+}
+
+func (s *spaceAuditServiceStub) GetByID(context.Context, string) (dto.AuditTrailResponse, error) {
+	return dto.AuditTrailResponse{}, nil
 }
 
 func (s *spaceServiceStub) List(_ context.Context, userID string) ([]domainspace.ResolvedMembership, error) {
@@ -53,6 +73,10 @@ func (s *spaceServiceStub) Members(_ context.Context, userID, spaceID string) ([
 }
 
 func performSpaceRequest(method, routePath, requestPath, body string, scope authscope.Scope, handler gin.HandlerFunc) *httptest.ResponseRecorder {
+	return performSpaceRequestWithMeta(method, routePath, requestPath, body, scope, "", "", handler)
+}
+
+func performSpaceRequestWithMeta(method, routePath, requestPath, body string, scope authscope.Scope, requestID, userAgent string, handler gin.HandlerFunc) *httptest.ResponseRecorder {
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
 	router.Handle(method, routePath, func(ctx *gin.Context) {
@@ -64,6 +88,12 @@ func performSpaceRequest(method, routePath, requestPath, body string, scope auth
 	req := httptest.NewRequest(method, requestPath, bytes.NewBufferString(body))
 	if body != "" {
 		req.Header.Set("Content-Type", "application/json")
+	}
+	if requestID != "" {
+		req.Header.Set("X-Request-ID", requestID)
+	}
+	if userAgent != "" {
+		req.Header.Set("User-Agent", userAgent)
 	}
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
@@ -84,7 +114,7 @@ func TestSpaceHandlersUseAuthScopeAndResponseEnvelope(t *testing.T) {
 		spaces: []domainspace.ResolvedMembership{{SpaceID: "00000000-0000-0000-0000-000000000001", UserID: "user-1"}},
 		space:  &domainspace.Space{ID: "00000000-0000-0000-0000-000000000002", Name: "Family", Type: domainspace.TypeShared, Category: domainspace.CategoryFamily, Status: domainspace.StatusActive},
 	}
-	h := NewSpaceHandler(service)
+	h := NewSpaceHandler(service, &spaceAuditServiceStub{})
 	scope := authscope.New("user-1", "Jane", "viewer", nil)
 
 	rec := performSpaceRequest(http.MethodGet, "/api/spaces", "/api/spaces", "", scope, h.List)
@@ -111,7 +141,7 @@ func TestSpaceHandlersUseAuthScopeAndResponseEnvelope(t *testing.T) {
 
 func TestSpaceMembersHandlerValidatesUUIDAndPassesAuthenticatedUser(t *testing.T) {
 	service := &spaceServiceStub{members: []domainspace.ResolvedMembership{{SpaceID: "00000000-0000-0000-0000-000000000001", UserID: "user-1"}}}
-	h := NewSpaceHandler(service)
+	h := NewSpaceHandler(service, &spaceAuditServiceStub{})
 	scope := authscope.New("user-1", "Jane", "viewer", nil)
 
 	rec := performSpaceRequest(http.MethodGet, "/api/spaces/:space_id/members", "/api/spaces/00000000-0000-0000-0000-000000000001/members", "", scope, h.Members)
@@ -127,7 +157,7 @@ func TestSpaceMembersHandlerValidatesUUIDAndPassesAuthenticatedUser(t *testing.T
 
 func TestSpaceCreateRejectsUnknownAndTrailingJSON(t *testing.T) {
 	service := &spaceServiceStub{space: &domainspace.Space{ID: "00000000-0000-0000-0000-000000000001"}}
-	h := NewSpaceHandler(service)
+	h := NewSpaceHandler(service, &spaceAuditServiceStub{})
 	scope := authscope.New("user-1", "Jane", "viewer", nil)
 
 	for _, body := range []string{`{"name":"Family","category":"family","extra":true}`, `{"name":"Family","category":"family"}{"name":"Other"}`} {
@@ -162,7 +192,7 @@ func TestSpaceHandlersMapServiceErrors(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			service := &spaceServiceStub{listErr: tt.err, createErr: tt.err, membersErr: tt.err}
-			h := NewSpaceHandler(service)
+			h := NewSpaceHandler(service, &spaceAuditServiceStub{})
 			var rec httptest.ResponseRecorder
 			tt.call(h, &rec)
 			if rec.Code != tt.want {
@@ -173,7 +203,7 @@ func TestSpaceHandlersMapServiceErrors(t *testing.T) {
 }
 
 func TestSpaceHandlersRequireAuthentication(t *testing.T) {
-	h := NewSpaceHandler(&spaceServiceStub{})
+	h := NewSpaceHandler(&spaceServiceStub{}, &spaceAuditServiceStub{})
 	for _, tt := range []struct {
 		name string
 		call gin.HandlerFunc
@@ -193,4 +223,40 @@ func TestSpaceHandlersRequireAuthentication(t *testing.T) {
 
 func TestSpaceServiceStubSatisfiesService(t *testing.T) {
 	var _ servicespace.Service = (*spaceServiceStub)(nil)
+}
+
+func TestSpaceHandlerAuditsEarlyFailuresWithHTTPProvenance(t *testing.T) {
+	scope := authscope.New("user-1", "Jane", "viewer", nil)
+	tests := []struct {
+		name string
+		want int
+		call func(*SpaceHandler) *httptest.ResponseRecorder
+	}{
+		{name: "unauthenticated", want: http.StatusUnauthorized, call: func(h *SpaceHandler) *httptest.ResponseRecorder {
+			return performSpaceRequestWithMeta(http.MethodGet, "/api/spaces", "/api/spaces", "", authscope.Scope{}, "00000000-0000-0000-0000-000000000091", "space-agent", h.List)
+		}},
+		{name: "invalid json", want: http.StatusBadRequest, call: func(h *SpaceHandler) *httptest.ResponseRecorder {
+			return performSpaceRequestWithMeta(http.MethodPost, "/api/spaces", "/api/spaces", `{"name":"Family","secret":"raw-body"}`, scope, "00000000-0000-0000-0000-000000000092", "space-agent", h.Create)
+		}},
+		{name: "invalid uuid", want: http.StatusBadRequest, call: func(h *SpaceHandler) *httptest.ResponseRecorder {
+			return performSpaceRequestWithMeta(http.MethodGet, "/api/spaces/:space_id/members", "/api/spaces/not-a-uuid/members", "", scope, "00000000-0000-0000-0000-000000000093", "space-agent", h.Members)
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			audit := &spaceAuditServiceStub{}
+			h := NewSpaceHandler(&spaceServiceStub{}, audit)
+			rec := tt.call(h)
+			if rec.Code != tt.want {
+				t.Fatalf("status = %d, want %d: %s", rec.Code, tt.want, rec.Body.String())
+			}
+			if len(audit.events) != 1 {
+				t.Fatalf("expected one early-outcome audit, got %+v", audit.events)
+			}
+			event := audit.events[0]
+			if event.Status != domainaudit.StatusFailed || event.Source != "http" || event.RequestID == "" || event.UserAgent != "space-agent" || event.IPAddress == "" || event.AfterData != nil || event.BeforeData != nil {
+				t.Fatalf("unexpected HTTP audit provenance: %+v", event)
+			}
+		})
+	}
 }

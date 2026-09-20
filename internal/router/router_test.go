@@ -94,3 +94,16 @@ func TestRouteGroupsRegisterWithDryRunDB(t *testing.T) {
 		}
 	}
 }
+
+func TestSpaceRoutesRequireAuthentication(t *testing.T) {
+	routes := NewRoutes()
+	routes.DB = newRouterDryRunDB(t)
+	routes.SpaceRoutes()
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/spaces", nil)
+	routes.App.ServeHTTP(rec, req)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("unauthenticated spaces request = %d, want 401: %s", rec.Code, rec.Body.String())
+	}
+}

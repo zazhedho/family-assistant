@@ -17,14 +17,16 @@ import (
 )
 
 const (
-	createPermission = "spaces:create"
-	listPermission   = "spaces:list"
-	spaceOwnerRole   = "space_owner"
+	createPermission  = "spaces:create"
+	listPermission    = "spaces:list"
+	membersPermission = "members:list"
+	spaceOwnerRole    = "space_owner"
 )
 
 var (
-	ErrForbidden = serviceauthorization.ErrForbidden
-	ErrNotFound  = serviceauthorization.ErrNotFound
+	ErrForbidden                       = serviceauthorization.ErrForbidden
+	ErrNotFound                        = serviceauthorization.ErrNotFound
+	ErrPermissionRepositoryUnavailable = errors.New("membership permission repository is not configured")
 )
 
 type ValidationError = serviceauthorization.ValidationError
@@ -38,6 +40,19 @@ type Service interface {
 	List(context.Context, string) ([]domainspace.ResolvedMembership, error)
 	Create(context.Context, string, CreateInput) (*domainspace.Space, error)
 	Members(context.Context, string, string) ([]domainspace.ResolvedMembership, error)
+}
+
+type AuditProvenance struct {
+	RequestID string
+	IPAddress string
+	UserAgent string
+	Metadata  map[string]any
+}
+
+type auditProvenanceKey struct{}
+
+func WithAuditProvenance(ctx context.Context, provenance AuditProvenance) context.Context {
+	return context.WithValue(ctx, auditProvenanceKey{}, provenance)
 }
 
 type roleRepository interface {
@@ -59,21 +74,8 @@ type service struct {
 	audit       auditStore
 }
 
-func NewService(spaces domainspace.Repository, roles roleRepository, dependencies ...any) Service {
-	svc := &service{spaces: spaces, roles: roles}
-	for _, dependency := range dependencies {
-		switch value := dependency.(type) {
-		case permissionRepository:
-			svc.permissions = value
-		case auditStore:
-			svc.audit = value
-		}
-	}
-	return svc
-}
-
-func NewSpaceService(spaces domainspace.Repository, roles roleRepository, dependencies ...any) Service {
-	return NewService(spaces, roles, dependencies...)
+func NewService(spaces domainspace.Repository, roles roleRepository, permissions permissionRepository, audit auditStore) Service {
+	return &service{spaces: spaces, roles: roles, permissions: permissions, audit: audit}
 }
 
 func (s *service) List(ctx context.Context, userID string) ([]domainspace.ResolvedMembership, error) {
@@ -90,7 +92,7 @@ func (s *service) List(ctx context.Context, userID string) ([]domainspace.Resolv
 
 	allowed := make([]domainspace.ResolvedMembership, 0, len(memberships))
 	for _, membership := range memberships {
-		ok, err := s.hasPermission(ctx, membership.RoleID, "spaces", strings.TrimPrefix(listPermission, "spaces:"))
+		ok, err := s.hasPermission(ctx, membership.RoleID, listPermission)
 		if err != nil {
 			s.writeFailure(ctx, "list", membership.SpaceID, membership.ID, userID, err)
 			return nil, err
@@ -99,13 +101,26 @@ func (s *service) List(ctx context.Context, userID string) ([]domainspace.Resolv
 			continue
 		}
 		allowed = append(allowed, membership)
-		s.writeSuccess(ctx, "list", membership.SpaceID, membership.ID, userID, "Listed space membership")
 	}
 	if len(memberships) > 0 && len(allowed) == 0 {
 		err := ErrForbidden
 		s.writeFailure(ctx, "list", "", "", userID, err)
 		return nil, err
 	}
+	spaceID, memberID := "", ""
+	spaceIDs := make([]string, 0, len(allowed))
+	if len(allowed) > 0 {
+		spaceID = allowed[0].SpaceID
+		memberID = allowed[0].ID
+		for _, membership := range allowed {
+			spaceIDs = append(spaceIDs, membership.SpaceID)
+		}
+	}
+	event := s.newAuditEvent(ctx, "list", spaceID, memberID, "", userID)
+	event.Status = domainaudit.StatusSuccess
+	event.Message = "Listed space memberships"
+	event.Metadata = utils.MergeMetadata(event.Metadata, map[string]any{"space_ids": spaceIDs})
+	s.writeAudit(ctx, event)
 
 	return allowed, nil
 }
@@ -137,7 +152,7 @@ func (s *service) Create(ctx context.Context, userID string, input CreateInput) 
 	}
 	var actorMembership *domainspace.ResolvedMembership
 	for i := range memberships {
-		ok, permissionErr := s.hasPermission(ctx, memberships[i].RoleID, "spaces", strings.TrimPrefix(createPermission, "spaces:"))
+		ok, permissionErr := s.hasPermission(ctx, memberships[i].RoleID, createPermission)
 		if permissionErr != nil {
 			s.writeFailure(ctx, domainaudit.ActionCreate, memberships[i].SpaceID, memberships[i].ID, userID, permissionErr)
 			return nil, permissionErr
@@ -192,18 +207,10 @@ func (s *service) Create(ctx context.Context, userID string, input CreateInput) 
 		return nil, err
 	}
 
-	s.writeAudit(ctx, domainaudit.AuditEvent{
-		Action:                domainaudit.ActionCreate,
-		Resource:              "space",
-		ResourceID:            created.ID,
-		ActorUserID:           userID,
-		ActorMemberID:         actorMembership.ID,
-		ResourceOwnerMemberID: owner.ID,
-		Source:                "http",
-		Status:                domainaudit.StatusSuccess,
-		Message:               "Created shared space",
-		Metadata:              map[string]any{"space_id": created.ID},
-	})
+	event := s.newAuditEvent(ctx, domainaudit.ActionCreate, created.ID, actorMembership.ID, owner.ID, userID)
+	event.Status = domainaudit.StatusSuccess
+	event.Message = "Created shared space"
+	s.writeAudit(ctx, event)
 	return created, nil
 }
 
@@ -235,7 +242,7 @@ func (s *service) Members(ctx context.Context, userID, spaceID string) ([]domain
 		return nil, err
 	}
 
-	ok, err := s.hasPermission(ctx, actorMembership.RoleID, "members", "list")
+	ok, err := s.hasPermission(ctx, actorMembership.RoleID, membersPermission)
 	if err != nil {
 		s.writeFailure(ctx, "list", spaceID, actorMembership.ID, userID, err)
 		return nil, err
@@ -255,15 +262,19 @@ func (s *service) Members(ctx context.Context, userID, spaceID string) ([]domain
 	return members, nil
 }
 
-func (s *service) hasPermission(ctx context.Context, roleID, resource, action string) (bool, error) {
+func (s *service) hasPermission(ctx context.Context, roleID, permission string) (bool, error) {
 	if s.permissions == nil {
-		return authscope.FromContext(ctx).Has(resource, action), nil
+		return false, ErrPermissionRepositoryUnavailable
 	}
 	permissions, err := s.permissions.GetRolePermissions(ctx, roleID)
 	if err != nil {
 		return false, err
 	}
-	want := authscope.PermissionKey(resource, action)
+	parts := strings.SplitN(permission, ":", 2)
+	if len(parts) != 2 {
+		return false, &ValidationError{Field: "permission", Reason: "is invalid"}
+	}
+	want := authscope.PermissionKey(parts[0], parts[1])
 	for _, permission := range permissions {
 		if authscope.PermissionKey(permission.Resource, permission.Action) == want {
 			return true, nil
@@ -282,31 +293,58 @@ func validSharedCategory(category string) bool {
 }
 
 func (s *service) writeSuccess(ctx context.Context, action, spaceID, memberID, userID, message string) {
-	s.writeAudit(ctx, domainaudit.AuditEvent{
-		Action:        action,
-		Resource:      "space",
-		ResourceID:    spaceID,
-		ActorUserID:   userID,
-		ActorMemberID: memberID,
-		Source:        "http",
-		Status:        domainaudit.StatusSuccess,
-		Message:       message,
-		Metadata:      map[string]any{"space_id": spaceID},
-	})
+	event := s.newAuditEvent(ctx, action, spaceID, memberID, "", userID)
+	event.Status = domainaudit.StatusSuccess
+	event.Message = message
+	s.writeAudit(ctx, event)
 }
 
 func (s *service) writeFailure(ctx context.Context, action, spaceID, memberID, userID string, err error) {
-	s.writeAudit(ctx, domainaudit.AuditEvent{
-		Action:        action,
-		Resource:      "space",
-		ResourceID:    spaceID,
-		ActorUserID:   userID,
-		ActorMemberID: memberID,
-		Source:        "http",
-		Status:        domainaudit.StatusFailed,
-		ErrorMessage:  err.Error(),
-		Metadata:      map[string]any{"space_id": spaceID},
-	})
+	event := s.newAuditEvent(ctx, action, spaceID, memberID, "", userID)
+	event.Status = domainaudit.StatusFailed
+	event.ErrorMessage = FailureCategory(err)
+	s.writeAudit(ctx, event)
+}
+
+func (s *service) newAuditEvent(ctx context.Context, action, spaceID, memberID, ownerMemberID, userID string) domainaudit.AuditEvent {
+	scope := authscope.FromContext(ctx)
+	actorUserID := scope.ActorUserID()
+	if actorUserID == "" {
+		actorUserID = userID
+	}
+	provenance, _ := ctx.Value(auditProvenanceKey{}).(AuditProvenance)
+	metadata := utils.MergeMetadata(provenance.Metadata, map[string]any{"space_id": spaceID})
+	if scope.IsImpersonated && strings.TrimSpace(scope.UserID) != actorUserID {
+		metadata = utils.MergeMetadata(metadata, map[string]any{"subject_user_id": userID})
+	}
+	return domainaudit.AuditEvent{
+		Action:                action,
+		Resource:              "space",
+		ResourceID:            spaceID,
+		ActorUserID:           actorUserID,
+		ActorMemberID:         memberID,
+		ResourceOwnerMemberID: ownerMemberID,
+		Source:                "http",
+		ActorRole:             scope.ActorRole(),
+		RequestID:             provenance.RequestID,
+		IPAddress:             provenance.IPAddress,
+		UserAgent:             provenance.UserAgent,
+		Metadata:              metadata,
+	}
+}
+
+func FailureCategory(err error) string {
+	var validationErr *ValidationError
+	switch {
+	case errors.As(err, &validationErr), errors.Is(err, serviceauthorization.ErrInvalidResource):
+		return "validation"
+	case errors.Is(err, ErrForbidden):
+		return "forbidden"
+	case errors.Is(err, ErrNotFound), errors.Is(err, gorm.ErrRecordNotFound):
+		return "not_found"
+	default:
+		return "internal"
+	}
 }
 
 func (s *service) writeAudit(ctx context.Context, event domainaudit.AuditEvent) {

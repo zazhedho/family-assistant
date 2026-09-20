@@ -349,7 +349,7 @@ func (r *Routes) SpaceRoutes() {
 	roleRepository := roleRepo.NewRoleRepo(r.DB)
 	permissionRepository := r.permissionRepo()
 	svc := spaceSvc.NewService(repo, roleRepository, permissionRepository, r.auditService())
-	h := spaceHandler.NewSpaceHandler(svc)
+	h := spaceHandler.NewSpaceHandler(svc, r.auditService())
 	mdw := r.middleware(permissionRepository)
 
 	spaces := r.App.Group("/api/spaces").Use(mdw.AuthMiddleware())

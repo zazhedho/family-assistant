@@ -96,15 +96,7 @@ func main() {
 		}
 	}()
 
-	routes.UserRoutes()
-	routes.RoleRoutes()
-	routes.PermissionRoutes()
-	routes.MenuRoutes()
-	routes.AppConfigRoutes()
-	routes.AuditRoutes()
-	routes.LocationRoutes()
-	routes.SpaceRoutes()
-	FailOnError(routes.MediaRoutes(), "Failed to initialize media routes")
+	FailOnError(registerRoutes(routes), "Failed to initialize routes")
 
 	// Register session routes if Redis is available
 	if redisClient != nil {
@@ -115,6 +107,18 @@ func main() {
 
 	err = routes.App.Run(fmt.Sprintf(":%s", port))
 	FailOnError(err, "Failed run service")
+}
+
+func registerRoutes(routes *router.Routes) error {
+	routes.UserRoutes()
+	routes.RoleRoutes()
+	routes.PermissionRoutes()
+	routes.MenuRoutes()
+	routes.AppConfigRoutes()
+	routes.AuditRoutes()
+	routes.LocationRoutes()
+	routes.SpaceRoutes()
+	return routes.MediaRoutes()
 }
 
 func runMigration() {

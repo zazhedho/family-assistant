@@ -5,6 +5,7 @@ import (
 	"errors"
 	"testing"
 
+	"family-assistant/internal/authscope"
 	domainaudit "family-assistant/internal/domain/audit"
 	domainpermission "family-assistant/internal/domain/permission"
 	domainrole "family-assistant/internal/domain/role"
@@ -177,9 +178,10 @@ func TestCreateSharedSpaceTrimsButDoesNotUniquifyNames(t *testing.T) {
 func TestCreateSharedSpaceCreatesOwnerMembershipTransactionally(t *testing.T) {
 	repo := &spaceRepositoryStub{memberships: []domainspace.ResolvedMembership{membership("role-1", "personal", "user-1")}}
 	audit := &spaceAuditStub{}
-	service := newSpaceService(repo, map[string][]domainpermission.Permission{
+	roleRepo := &roleRepositoryStub{role: domainrole.Role{Id: "role-owner", Name: "space_owner"}}
+	service := NewService(repo, roleRepo, &permissionRepositoryStub{byRole: map[string][]domainpermission.Permission{
 		"role-1": {permission("spaces", "create")},
-	}, audit)
+	}}, audit)
 
 	created, err := service.Create(context.Background(), "user-1", CreateInput{Name: "Family", Category: domainspace.CategoryFamily})
 	if err != nil {
@@ -187,6 +189,9 @@ func TestCreateSharedSpaceCreatesOwnerMembershipTransactionally(t *testing.T) {
 	}
 	if repo.created == nil || repo.owner == nil {
 		t.Fatal("expected repository to receive both space and owner")
+	}
+	if roleRepo.name != "space_owner" {
+		t.Fatalf("owner role lookup = %q, want space_owner", roleRepo.name)
 	}
 	if repo.owner.SpaceID != created.ID || repo.owner.UserID != "user-1" || repo.owner.RoleID != "role-owner" || repo.owner.Status != domainspace.StatusActive {
 		t.Fatalf("unexpected owner: %+v", repo.owner)
@@ -202,7 +207,7 @@ func TestCreateSharedSpaceCreatesOwnerMembershipTransactionally(t *testing.T) {
 func TestCreateSharedSpaceAuditsFailureWithoutRequestBody(t *testing.T) {
 	repo := &spaceRepositoryStub{
 		memberships: []domainspace.ResolvedMembership{membership("role-1", "personal", "user-1")},
-		createErr:   errors.New("insert failed"),
+		createErr:   errors.New("insert failed: secret=raw-body password=top-secret"),
 	}
 	audit := &spaceAuditStub{}
 	service := newSpaceService(repo, map[string][]domainpermission.Permission{
@@ -213,7 +218,7 @@ func TestCreateSharedSpaceAuditsFailureWithoutRequestBody(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected repository error")
 	}
-	if len(audit.events) != 1 || audit.events[0].Status != domainaudit.StatusFailed || audit.events[0].ResourceID == "" || audit.events[0].ActorUserID != "user-1" || audit.events[0].ActorMemberID != "member-personal" || audit.events[0].Source != "http" || audit.events[0].AfterData != nil {
+	if len(audit.events) != 1 || audit.events[0].Status != domainaudit.StatusFailed || audit.events[0].ErrorMessage != "internal" || audit.events[0].ResourceID == "" || audit.events[0].ActorUserID != "user-1" || audit.events[0].ActorMemberID != "member-personal" || audit.events[0].Source != "http" || audit.events[0].AfterData != nil {
 		t.Fatalf("unexpected failure audit: %+v", audit.events)
 	}
 }
@@ -223,26 +228,94 @@ func TestListReturnsOnlyCallerActiveMemberships(t *testing.T) {
 		membership("role-1", "space-1", "user-1"),
 		membership("role-1", "space-2", "user-1"),
 	}}
-	service := newSpaceService(repo, map[string][]domainpermission.Permission{
+	svc := newSpaceService(repo, map[string][]domainpermission.Permission{
 		"role-1": {permission("spaces", "list")},
 	}, &spaceAuditStub{})
 
-	got, err := service.List(context.Background(), "user-1")
+	got, err := svc.List(context.Background(), "user-1")
 	if err != nil {
 		t.Fatalf("list spaces: %v", err)
 	}
-	if repo.listUserID != "user-1" || len(got) != 2 || got[0].UserID != "user-1" || got[1].UserID != "user-1" {
+	audit := svc.(*service).audit.(*spaceAuditStub)
+	if repo.listUserID != "user-1" || len(got) != 2 || got[0].UserID != "user-1" || got[1].UserID != "user-1" || len(audit.events) != 1 || audit.events[0].Status != domainaudit.StatusSuccess {
 		t.Fatalf("unexpected memberships: user=%q got=%+v", repo.listUserID, got)
+	}
+}
+
+func TestListAuditsEmptySuccess(t *testing.T) {
+	audit := &spaceAuditStub{}
+	service := newSpaceService(&spaceRepositoryStub{}, nil, audit)
+
+	got, err := service.List(context.Background(), "user-1")
+	if err != nil || len(got) != 0 {
+		t.Fatalf("list empty: got=%v err=%v", got, err)
+	}
+	if len(audit.events) != 1 || audit.events[0].Status != domainaudit.StatusSuccess || audit.events[0].Source != "http" || audit.events[0].ActorUserID != "user-1" {
+		t.Fatalf("expected one empty-list audit, got %+v", audit.events)
+	}
+}
+
+func TestListDeniesMembershipRoleWithoutListPermission(t *testing.T) {
+	audit := &spaceAuditStub{}
+	repo := &spaceRepositoryStub{memberships: []domainspace.ResolvedMembership{membership("role-1", "space-1", "user-1")}}
+	service := newSpaceService(repo, map[string][]domainpermission.Permission{"role-1": {}}, audit)
+
+	_, err := service.List(context.Background(), "user-1")
+	if !errors.Is(err, ErrForbidden) {
+		t.Fatalf("expected forbidden, got %v", err)
+	}
+	if len(audit.events) != 1 || audit.events[0].Status != domainaudit.StatusFailed || audit.events[0].ErrorMessage != "forbidden" {
+		t.Fatalf("expected one sanitized denial audit, got %+v", audit.events)
+	}
+}
+
+func TestCreateDeniesMembershipRoleWithoutCreatePermission(t *testing.T) {
+	audit := &spaceAuditStub{}
+	repo := &spaceRepositoryStub{memberships: []domainspace.ResolvedMembership{membership("role-1", "space-1", "user-1")}}
+	service := newSpaceService(repo, map[string][]domainpermission.Permission{"role-1": {}}, audit)
+
+	_, err := service.Create(context.Background(), "user-1", CreateInput{Name: "Family", Category: domainspace.CategoryFamily})
+	if !errors.Is(err, ErrForbidden) {
+		t.Fatalf("expected forbidden, got %v", err)
+	}
+	if len(audit.events) != 1 || audit.events[0].Status != domainaudit.StatusFailed || audit.events[0].ErrorMessage != "forbidden" {
+		t.Fatalf("expected one sanitized denial audit, got %+v", audit.events)
+	}
+}
+
+func TestAuthorizationFailsClosedWithoutMembershipPermissionRepository(t *testing.T) {
+	repo := &spaceRepositoryStub{
+		memberships: []domainspace.ResolvedMembership{membership("role-1", "space-1", "user-1")},
+		membership: func() *domainspace.ResolvedMembership {
+			m := membership("role-1", "space-1", "user-1")
+			return &m
+		}(),
+	}
+	ctx := authscope.WithContext(context.Background(), authscope.New("user-1", "Jane", "superadmin", []string{"spaces:list", "spaces:create", "members:list"}))
+	service := NewService(repo, &roleRepositoryStub{role: domainrole.Role{Id: "role-owner", Name: "space_owner"}}, nil, &spaceAuditStub{})
+
+	if _, err := service.List(ctx, "user-1"); err == nil {
+		t.Fatal("list authorized from global authscope without membership permission repository")
+	}
+	if _, err := service.Create(ctx, "user-1", CreateInput{Name: "Family", Category: domainspace.CategoryFamily}); err == nil {
+		t.Fatal("create authorized from global authscope without membership permission repository")
+	}
+	if _, err := service.Members(ctx, "user-1", "space-1"); err == nil {
+		t.Fatal("members authorized from global authscope without membership permission repository")
 	}
 }
 
 func TestMembersReturnsNotFoundWithoutActiveCallerMembership(t *testing.T) {
 	repo := &spaceRepositoryStub{}
-	service := newSpaceService(repo, nil, &spaceAuditStub{})
+	audit := &spaceAuditStub{}
+	service := newSpaceService(repo, nil, audit)
 
 	_, err := service.Members(context.Background(), "user-1", "00000000-0000-0000-0000-000000000001")
 	if !errors.Is(err, ErrNotFound) {
 		t.Fatalf("expected not found, got %v", err)
+	}
+	if len(audit.events) != 1 || audit.events[0].Status != domainaudit.StatusFailed || audit.events[0].ErrorMessage != "not_found" {
+		t.Fatalf("expected one not-found audit, got %+v", audit.events)
 	}
 }
 
@@ -251,13 +324,17 @@ func TestMembersRequiresMembershipScopedPermission(t *testing.T) {
 		m := membership("role-1", "space-1", "user-1")
 		return &m
 	}()}
+	audit := &spaceAuditStub{}
 	service := newSpaceService(repo, map[string][]domainpermission.Permission{
 		"role-1": {permission("members", "view")},
-	}, &spaceAuditStub{})
+	}, audit)
 
 	_, err := service.Members(context.Background(), "user-1", "space-1")
 	if !errors.Is(err, ErrForbidden) {
 		t.Fatalf("expected forbidden, got %v", err)
+	}
+	if len(audit.events) != 1 || audit.events[0].Status != domainaudit.StatusFailed || audit.events[0].ErrorMessage != "forbidden" {
+		t.Fatalf("expected one forbidden audit, got %+v", audit.events)
 	}
 }
 
@@ -269,16 +346,47 @@ func TestMembersListsMembersAfterActiveCallerAuthorization(t *testing.T) {
 		}(),
 		listed: []domainspace.ResolvedMembership{membership("role-1", "space-1", "user-1")},
 	}
+	audit := &spaceAuditStub{}
 	service := newSpaceService(repo, map[string][]domainpermission.Permission{
 		"role-1": {permission("members", "list")},
-	}, &spaceAuditStub{})
+	}, audit)
 
 	got, err := service.Members(context.Background(), "user-1", "space-1")
 	if err != nil {
 		t.Fatalf("list members: %v", err)
 	}
-	if repo.findUserID != "user-1" || repo.findSpaceID != "space-1" || repo.memberSpace != "space-1" || len(got) != 1 {
+	if repo.findUserID != "user-1" || repo.findSpaceID != "space-1" || repo.memberSpace != "space-1" || len(got) != 1 || len(audit.events) != 1 || audit.events[0].Status != domainaudit.StatusSuccess {
 		t.Fatalf("unexpected member lookup: %+v", got)
+	}
+}
+
+func TestAuditUsesInitiatorAndHTTPProvenanceDuringImpersonation(t *testing.T) {
+	audit := &spaceAuditStub{}
+	repo := &spaceRepositoryStub{memberships: []domainspace.ResolvedMembership{membership("role-1", "target-space", "target-user")}}
+	scope := authscope.New("target-user", "Target", "member", nil)
+	scope.IsImpersonated = true
+	scope.OriginalUserID = "operator-user"
+	scope.OriginalUsername = "Operator"
+	scope.OriginalRole = "admin"
+	ctx := authscope.WithContext(context.Background(), scope)
+	ctx = WithAuditProvenance(ctx, AuditProvenance{RequestID: "request-1", IPAddress: "192.0.2.1", UserAgent: "test-agent"})
+	service := newSpaceService(repo, map[string][]domainpermission.Permission{
+		"role-1": {permission("spaces", "create")},
+	}, audit)
+
+	_, err := service.Create(ctx, "target-user", CreateInput{Name: "Family", Category: domainspace.CategoryFamily})
+	if err != nil {
+		t.Fatalf("create impersonated space: %v", err)
+	}
+	if len(audit.events) != 1 {
+		t.Fatalf("expected one audit, got %+v", audit.events)
+	}
+	event := audit.events[0]
+	if event.ActorUserID != "operator-user" || event.ActorRole != "admin" || event.ActorMemberID != "member-target-space" || event.RequestID != "request-1" || event.IPAddress != "192.0.2.1" || event.UserAgent != "test-agent" {
+		t.Fatalf("unexpected initiator/provenance: %+v", event)
+	}
+	if event.Metadata["subject_user_id"] != "target-user" {
+		t.Fatalf("expected effective subject metadata, got %+v", event.Metadata)
 	}
 }
 
