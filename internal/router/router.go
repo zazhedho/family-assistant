@@ -13,6 +13,7 @@ import (
 	permissioncache "family-assistant/internal/cache/permission"
 	appConfigHandler "family-assistant/internal/handlers/http/appconfig"
 	auditHandler "family-assistant/internal/handlers/http/audit"
+	invitationHandler "family-assistant/internal/handlers/http/invitation"
 	locationHandler "family-assistant/internal/handlers/http/location"
 	mediaHandler "family-assistant/internal/handlers/http/media"
 	menuHandler "family-assistant/internal/handlers/http/menu"
@@ -28,6 +29,7 @@ import (
 	appConfigRepo "family-assistant/internal/repositories/appconfig"
 	auditRepo "family-assistant/internal/repositories/audit"
 	authRepo "family-assistant/internal/repositories/auth"
+	invitationRepo "family-assistant/internal/repositories/invitation"
 	locationRepo "family-assistant/internal/repositories/location"
 	mediaRepo "family-assistant/internal/repositories/media"
 	menuRepo "family-assistant/internal/repositories/menu"
@@ -41,6 +43,7 @@ import (
 	appConfigSvc "family-assistant/internal/services/appconfig"
 	auditSvc "family-assistant/internal/services/audit"
 	serviceidentity "family-assistant/internal/services/identity"
+	invitationSvc "family-assistant/internal/services/invitation"
 	locationSvc "family-assistant/internal/services/location"
 	mediaSvc "family-assistant/internal/services/media"
 	menuSvc "family-assistant/internal/services/menu"
@@ -348,8 +351,12 @@ func (r *Routes) SpaceRoutes() {
 	repo := spaceRepo.NewRepository(r.DB)
 	roleRepository := roleRepo.NewRoleRepo(r.DB)
 	permissionRepository := r.permissionRepo()
-	svc := spaceSvc.NewService(repo, roleRepository, permissionRepository, r.auditService())
-	h := spaceHandler.NewSpaceHandler(svc, r.auditService())
+	auditService := r.auditService()
+	svc := spaceSvc.NewService(repo, roleRepository, permissionRepository, auditService)
+	h := spaceHandler.NewSpaceHandler(svc, auditService)
+	invitations := invitationRepo.NewRepository(r.DB)
+	invitationService := invitationSvc.NewService(invitations, repo, roleRepository, permissionRepository, auditService, config.LoadInvitationConfig())
+	invitationHandler := invitationHandler.NewInvitationHandler(invitationService, userRepo.NewUserRepo(r.DB), auditService)
 	mdw := r.middleware(permissionRepository)
 
 	spaces := r.App.Group("/api/spaces").Use(mdw.AuthMiddleware())
@@ -357,6 +364,12 @@ func (r *Routes) SpaceRoutes() {
 		spaces.GET("", h.List)
 		spaces.POST("", h.Create)
 		spaces.GET("/:space_id/members", h.Members)
+		spaces.POST("/:space_id/invitations", invitationHandler.Create)
+	}
+
+	invitationRoutes := r.App.Group("/api/invitations").Use(mdw.AuthMiddleware())
+	{
+		invitationRoutes.POST("/accept", invitationHandler.Accept)
 	}
 }
 
