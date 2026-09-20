@@ -139,6 +139,15 @@ func (h *ReminderHandler) Complete(ctx *gin.Context) {
 		h.writeError(ctx, err)
 		return
 	}
+	reminderID, err := parseUUID(ctx.Param("reminder_id"), "reminder_id")
+	if err != nil {
+		h.writeError(ctx, err)
+		return
+	}
+	if reminderID == "" {
+		h.writeError(ctx, &serviceauthorization.ValidationError{Field: "reminder_id", Reason: "is required"})
+		return
+	}
 	actor, err := h.actor(ctx, spaceID)
 	if err != nil {
 		h.writeError(ctx, err)
@@ -148,7 +157,7 @@ func (h *ReminderHandler) Complete(ctx *gin.Context) {
 		h.writeError(ctx, errors.New("reminder service is not configured"))
 		return
 	}
-	reminder, err := h.Service.Complete(ctx.Request.Context(), actor, actor.SpaceID, ctx.Param("reminder_id"))
+	reminder, err := h.Service.Complete(ctx.Request.Context(), actor, actor.SpaceID, reminderID)
 	if err != nil {
 		h.writeError(ctx, err)
 		return

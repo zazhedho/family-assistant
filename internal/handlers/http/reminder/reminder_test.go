@@ -193,6 +193,18 @@ func TestReminderCompleteUsesSpaceAndReminderPath(t *testing.T) {
 	}
 }
 
+func TestReminderCompleteRejectsInvalidReminderUUIDBeforeService(t *testing.T) {
+	service := &reminderHTTPServiceStub{}
+	h := NewReminderHandler(service, &userResolverStub{actor: httpTestActor()}, httpPermissions())
+	rec := performReminderHTTPRequest(http.MethodPost, "/api/reminders/not-a-uuid/complete?space_id="+httpSpaceID, "", authscope.New("user-trusted", "Jane", "user", nil), h.Complete)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("invalid reminder ID status = %d, want 400: %s", rec.Code, rec.Body.String())
+	}
+	if service.completeID != "" {
+		t.Fatalf("invalid reminder ID reached service: %q", service.completeID)
+	}
+}
+
 func TestReminderHTTPMapsServiceErrorsSafely(t *testing.T) {
 	for _, tt := range []struct {
 		name string

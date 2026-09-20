@@ -204,6 +204,10 @@ func TestHTTPHandlerExposesOnlyCurrentMCPToolsWhenRemindersAreAbsent(t *testing.
 
 func TestHTTPHandlerProtectedSpaceToolMapsSuccessForbiddenAndNotFound(t *testing.T) {
 	spaceID := "00000000-0000-0000-0000-000000000201"
+	expectedMember := domainspace.ResolvedMembership{
+		ID: "member-1", SpaceID: spaceID, SpaceName: "Jane", SpaceType: domainspace.TypePersonal,
+		UserID: "user-1", RoleID: "role-owner", RoleName: "space_owner", Status: domainspace.StatusActive,
+	}
 	resolver := &resolverStub{
 		actor: serviceidentity.ActorContext{UserID: "user-1", Memberships: []domainspace.ResolvedMembership{{
 			ID: "00000000-0000-0000-0000-000000000301", SpaceID: spaceID, SpaceName: "Jane", SpaceType: domainspace.TypePersonal,
@@ -217,7 +221,7 @@ func TestHTTPHandlerProtectedSpaceToolMapsSuccessForbiddenAndNotFound(t *testing
 		err     error
 		want    string
 	}{
-		{name: "success", members: []domainspace.ResolvedMembership{{SpaceID: spaceID, UserID: "user-1"}}},
+		{name: "success", members: []domainspace.ResolvedMembership{expectedMember}},
 		{name: "forbidden", err: serviceauthorization.ErrForbidden, want: "forbidden"},
 		{name: "not found", err: serviceauthorization.ErrNotFound, want: "not found"},
 	} {
@@ -234,6 +238,19 @@ func TestHTTPHandlerProtectedSpaceToolMapsSuccessForbiddenAndNotFound(t *testing
 			if tt.err == nil {
 				if response.Error != nil || response.Result == nil || response.Result.IsError || len(response.Result.StructuredOutput) == 0 {
 					t.Fatalf("success response = %+v", response)
+				}
+				if resolver.resolveCall != 1 || resolver.profileID != "profile" || resolver.channel != "whatsapp" {
+					t.Fatalf("resolver identity = calls:%d profile:%q channel:%q, want one trusted profile call", resolver.resolveCall, resolver.profileID, resolver.channel)
+				}
+				if service.membersCalls != 1 || service.membersUser != "user-1" || service.membersSpace != spaceID {
+					t.Fatalf("space service args = calls:%d user:%q space:%q, want one call for trusted user and selected Space", service.membersCalls, service.membersUser, service.membersSpace)
+				}
+				var got []domainspace.ResolvedMembership
+				if err := json.Unmarshal(response.Result.StructuredOutput, &got); err != nil {
+					t.Fatalf("decode success structured output: %v", err)
+				}
+				if len(got) != 1 || got[0] != expectedMember {
+					t.Fatalf("success payload = %+v, want %+v", got, []domainspace.ResolvedMembership{expectedMember})
 				}
 				return
 			}
