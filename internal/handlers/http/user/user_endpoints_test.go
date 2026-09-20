@@ -440,6 +440,40 @@ func TestUserHandlerAuthTokenFlows(t *testing.T) {
 	}
 }
 
+func TestUserHandlerGoogleBirthDateValidationReturnsBadRequest(t *testing.T) {
+	tests := []struct {
+		name string
+		err  string
+	}{
+		{name: "malformed", err: "birth_date must use YYYY-MM-DD"},
+		{name: "future", err: "birth_date cannot be in the future"},
+		{name: "underage", err: "account holder must be at least 18 years old"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			handler := NewUserHandler(&userServiceTestDouble{googleErr: errors.New(tt.err)}, nil, nil, nil, nil, nil, nil, nil)
+			ctx, rec := newUserHandlerTestContext(t, http.MethodPost, "/google/login", `{"id_token":"token","birth_date":"2008-01-01"}`, nil)
+
+			handler.GoogleLogin(ctx)
+			assertUserHandlerStatus(t, rec, http.StatusBadRequest)
+
+			var body struct {
+				Error struct {
+					Code    int    `json:"code"`
+					Message string `json:"message"`
+				} `json:"error"`
+			}
+			if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+				t.Fatalf("unmarshal response: %v", err)
+			}
+			if body.Error.Code != http.StatusBadRequest || body.Error.Message != tt.err {
+				t.Fatalf("expected validation error code/message, got %+v", body.Error)
+			}
+		})
+	}
+}
+
 func TestUserHandlerRegisterOTPAndStopImpersonationFlows(t *testing.T) {
 	t.Setenv("JWT_KEY", "test-secret-must-be-at-least-32-bytes")
 	otpService := &otpServiceUserHandlerTestDouble{}

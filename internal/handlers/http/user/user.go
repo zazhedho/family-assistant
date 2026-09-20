@@ -587,6 +587,9 @@ func (h *HandlerUser) GoogleLogin(ctx *gin.Context) {
 			res = response.ErrorResponse(statusCode, messages.MsgSomethingWrong, logId, "Google account email is not available.")
 		case errors.Is(err, serviceuser.ErrPublicRegistrationDisabled):
 			res = response.Forbidden(logId, "Public registration is currently disabled.")
+		case strings.HasPrefix(err.Error(), "birth_date "),
+			strings.HasPrefix(err.Error(), "account holder must be at least "):
+			res = response.ErrorResponse(http.StatusBadRequest, messages.MsgSomethingWrong, logId, err.Error())
 		}
 		ctx.JSON(statusCode, res)
 		return

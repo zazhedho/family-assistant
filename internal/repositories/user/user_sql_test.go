@@ -96,9 +96,14 @@ func TestStoreWithPersonalSpaceRollsBackMembershipFailure(t *testing.T) {
 	repo := NewUserRepo(db)
 
 	mock.ExpectBegin()
-	mock.ExpectExec(`INSERT INTO "users"`).WillReturnResult(sqlmock.NewResult(1, 1))
-	mock.ExpectExec(`INSERT INTO "spaces"`).WillReturnResult(sqlmock.NewResult(1, 1))
-	mock.ExpectExec(`INSERT INTO "space_members"`).WillReturnError(errors.New("insert member"))
+	mock.ExpectExec(`INSERT INTO "users"`).WithArgs(argsWithID("user-1", 19)...).WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectExec(`INSERT INTO "spaces"`).WithArgs(
+		"space-1", "Jane Doe's Space", domainspace.TypePersonal, domainspace.CategoryPersonal,
+		domainspace.StatusActive, "user-1", sqlmock.AnyArg(), sqlmock.AnyArg(), nil,
+	).WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectExec(`INSERT INTO "space_members"`).WithArgs(
+		"member-1", "space-1", "user-1", "owner-role", domainspace.StatusActive, sqlmock.AnyArg(), sqlmock.AnyArg(), nil,
+	).WillReturnError(errors.New("insert member"))
 	mock.ExpectRollback()
 
 	err := repo.StoreWithPersonalSpace(context.Background(), domainuser.Users{
@@ -128,9 +133,77 @@ func TestStoreWithPersonalSpaceRollsBackMembershipFailure(t *testing.T) {
 	}
 }
 
+func TestStoreWithPersonalSpaceCommitsWithExactBindings(t *testing.T) {
+	db, mock := newSpaceStoreMockDB(t)
+	repo := NewUserRepo(db)
+
+	mock.ExpectBegin()
+	mock.ExpectExec(`INSERT INTO "users"`).WithArgs(argsWithID("user-1", 19)...).WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectExec(`INSERT INTO "spaces"`).WithArgs(
+		"space-1", "Jane Doe's Space", domainspace.TypePersonal, domainspace.CategoryPersonal,
+		domainspace.StatusActive, "user-1", sqlmock.AnyArg(), sqlmock.AnyArg(), nil,
+	).WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectExec(`INSERT INTO "space_members"`).WithArgs(
+		"member-1", "space-1", "user-1", "owner-role", domainspace.StatusActive, sqlmock.AnyArg(), sqlmock.AnyArg(), nil,
+	).WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectCommit()
+
+	err := repo.StoreWithPersonalSpace(context.Background(), domainuser.Users{
+		Id:       "user-1",
+		Name:     "Jane Doe",
+		Email:    "jane@example.com",
+		Password: "hashed",
+	}, domainspace.Space{
+		ID:              "space-1",
+		Name:            "Jane Doe's Space",
+		Type:            domainspace.TypePersonal,
+		Category:        domainspace.CategoryPersonal,
+		Status:          domainspace.StatusActive,
+		CreatedByUserID: "user-1",
+	}, domainspace.Member{
+		ID:      "member-1",
+		SpaceID: "space-1",
+		UserID:  "user-1",
+		RoleID:  "owner-role",
+		Status:  domainspace.StatusActive,
+	})
+	if err != nil {
+		t.Fatalf("store with personal space: %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("expectations: %v", err)
+	}
+}
+
+func TestStoreWithPersonalSpaceRollsBackUserInsertFailure(t *testing.T) {
+	db, mock := newSpaceStoreMockDB(t)
+	repo := NewUserRepo(db)
+	wantErr := errors.New("insert user")
+
+	mock.ExpectBegin()
+	mock.ExpectExec(`INSERT INTO "users"`).WithArgs(argsWithID("user-1", 19)...).WillReturnError(wantErr)
+	mock.ExpectRollback()
+
+	err := repo.StoreWithPersonalSpace(context.Background(), domainuser.Users{Id: "user-1", Name: "Jane Doe", Email: "jane@example.com", Password: "hashed"}, domainspace.Space{ID: "space-1", CreatedByUserID: "user-1"}, domainspace.Member{ID: "member-1", SpaceID: "space-1", UserID: "user-1", RoleID: "owner-role"})
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("expected user insert error, got %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("expectations: %v", err)
+	}
+}
+
 func anyArgs(total int) []driver.Value {
 	args := make([]driver.Value, 0, total)
 	for i := 0; i < total; i++ {
+		args = append(args, sqlmock.AnyArg())
+	}
+	return args
+}
+
+func argsWithID(id string, total int) []driver.Value {
+	args := []driver.Value{id}
+	for len(args) < total {
 		args = append(args, sqlmock.AnyArg())
 	}
 	return args
