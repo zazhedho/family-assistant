@@ -29,6 +29,7 @@ var (
 	ErrForbidden                       = serviceauthorization.ErrForbidden
 	ErrNotFound                        = serviceauthorization.ErrNotFound
 	ErrInvalidInvitation               = domaininvitation.ErrInvalidInvitation
+	ErrMembershipConflict              = domaininvitation.ErrMembershipConflict
 	ErrPermissionRepositoryUnavailable = errors.New("membership permission repository is not configured")
 )
 
@@ -151,6 +152,11 @@ func (s *service) Create(ctx context.Context, userID string, input CreateInput) 
 		s.writeFailure(ctx, spaceID, roleName, userID, err)
 		return nil, "", err
 	}
+	if actorMembership.SpaceType != domainspace.TypeShared || actorMembership.Status != domainspace.StatusActive {
+		err = ErrForbidden
+		s.writeFailure(ctx, spaceID, roleName, userID, err)
+		return nil, "", err
+	}
 	allowed, permissionErr := s.hasPermission(ctx, actorMembership.RoleID, createPermission)
 	if permissionErr != nil {
 		s.writeFailure(ctx, spaceID, roleName, userID, permissionErr)
@@ -226,21 +232,24 @@ func (s *service) Accept(ctx context.Context, rawToken string, user domainuser.U
 		return nil, err
 	}
 	hash := sha256.Sum256([]byte(rawToken))
-	member, err := s.invitations.Accept(ctx, hex.EncodeToString(hash[:]), userID, normalizedEmail, s.now().UTC())
+	acceptance, err := s.invitations.Accept(ctx, hex.EncodeToString(hash[:]), userID, normalizedEmail, s.now().UTC())
 	if err != nil {
 		s.writeFailure(ctx, "", "", userID, err)
 		return nil, err
 	}
-	if member == nil {
+	if acceptance == nil || acceptance.Member == nil {
 		s.writeFailure(ctx, "", "", userID, ErrInvalidInvitation)
 		return nil, ErrInvalidInvitation
 	}
-	event := s.newAuditEvent(ctx, domainaudit.ActionCreate, member.ID, member.SpaceID, "", userID, "", false)
+	roleName := strings.TrimSpace(acceptance.RoleName)
+	if roleName == "" {
+		roleName = acceptance.RoleID
+	}
+	event := s.newAuditEvent(ctx, domainaudit.ActionAccept, acceptance.InvitationID, acceptance.SpaceID, acceptance.Member.ID, userID, roleName, acceptance.EmailBound)
 	event.Status = domainaudit.StatusSuccess
 	event.Message = "Accepted space invitation"
-	event.Resource = "space_member"
 	s.writeAudit(ctx, event)
-	return member, nil
+	return acceptance.Member, nil
 }
 
 func validTargetRole(roleName string) bool {
@@ -300,7 +309,7 @@ func (s *service) newAuditEvent(ctx context.Context, action, resourceID, spaceID
 	}
 	return domainaudit.AuditEvent{
 		Action:        action,
-		Resource:      "invitation",
+		Resource:      "space_invitation",
 		ResourceID:    resourceID,
 		ActorUserID:   actorUserID,
 		ActorMemberID: memberID,

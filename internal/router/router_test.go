@@ -88,6 +88,8 @@ func TestRouteGroupsRegisterWithDryRunDB(t *testing.T) {
 		"GET /api/spaces",
 		"POST /api/spaces",
 		"GET /api/spaces/:space_id/members",
+		"POST /api/spaces/:space_id/invitations",
+		"POST /api/invitations/accept",
 	} {
 		if !registered[want] {
 			t.Fatalf("expected route %s to be registered", want)
@@ -105,5 +107,23 @@ func TestSpaceRoutesRequireAuthentication(t *testing.T) {
 	routes.App.ServeHTTP(rec, req)
 	if rec.Code != http.StatusUnauthorized {
 		t.Fatalf("unauthenticated spaces request = %d, want 401: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestInvitationRoutesRequireAuthentication(t *testing.T) {
+	routes := NewRoutes()
+	routes.DB = newRouterDryRunDB(t)
+	routes.SpaceRoutes()
+
+	for _, path := range []string{
+		"/api/spaces/00000000-0000-0000-0000-000000000001/invitations",
+		"/api/invitations/accept",
+	} {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, path, nil)
+		routes.App.ServeHTTP(rec, req)
+		if rec.Code != http.StatusUnauthorized {
+			t.Fatalf("unauthenticated invitation request %s = %d, want 401: %s", path, rec.Code, rec.Body.String())
+		}
 	}
 }

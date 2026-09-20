@@ -54,6 +54,7 @@ const (
 	ActionUpdate  = "update"
 	ActionDelete  = "delete"
 	ActionAssign  = "assign"
+	ActionAccept  = "accept"
 	ActionLogin   = "login"
 	ActionLogout  = "logout"
 	ActionRefresh = "refresh"

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"time"
 
+	domainspace "family-assistant/internal/domain/space"
 	"gorm.io/gorm"
 )
 
@@ -14,7 +15,10 @@ const (
 	StatusRevoked  = "REVOKED"
 )
 
-var ErrInvalidInvitation = errors.New("invalid invitation")
+var (
+	ErrInvalidInvitation  = errors.New("invalid invitation")
+	ErrMembershipConflict = errors.New("invitation recipient is already a member")
+)
 
 func (Invitation) TableName() string {
 	return "space_invitations"
@@ -35,3 +39,15 @@ type Invitation struct {
 	UpdatedAt         time.Time      `json:"updated_at" gorm:"column:updated_at"`
 	DeletedAt         gorm.DeletedAt `json:"-" gorm:"column:deleted_at"`
 }
+
+type Acceptance struct {
+	InvitationID string
+	SpaceID      string
+	RoleID       string
+	RoleName     string
+	EmailBound   bool
+	Invitation   *Invitation
+	Member       *domainspace.Member
+}
+
+type AcceptResult = Acceptance

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"family-assistant/internal/authscope"
@@ -32,6 +33,7 @@ type invitationServiceStub struct {
 	createInput serviceinvitation.CreateInput
 	acceptToken string
 	acceptUser  domainuser.Users
+	acceptErrs  map[string]error
 }
 
 func (s *invitationServiceStub) Create(_ context.Context, userID string, input serviceinvitation.CreateInput) (*domaininvitation.Invitation, string, error) {
@@ -40,15 +42,20 @@ func (s *invitationServiceStub) Create(_ context.Context, userID string, input s
 }
 func (s *invitationServiceStub) Accept(_ context.Context, token string, user domainuser.Users) (*domainspace.Member, error) {
 	s.acceptToken, s.acceptUser = token, user
+	if err := s.acceptErrs[token]; err != nil {
+		return nil, err
+	}
 	return s.accepted, s.acceptErr
 }
 
 type invitationUserRepositoryStub struct {
-	user domainuser.Users
-	err  error
+	user       domainuser.Users
+	err        error
+	lookupUser string
 }
 
-func (s *invitationUserRepositoryStub) GetByID(context.Context, string) (domainuser.Users, error) {
+func (s *invitationUserRepositoryStub) GetByID(_ context.Context, userID string) (domainuser.Users, error) {
+	s.lookupUser = userID
 	return s.user, s.err
 }
 func (s *invitationUserRepositoryStub) GetAll(context.Context, filter.BaseParams) ([]domainuser.Users, int64, error) {
@@ -84,6 +91,10 @@ func (s *invitationAuditServiceStub) GetByID(context.Context, string) (dto.Audit
 }
 
 func performInvitationRequest(method, route, path, body string, scope authscope.Scope, handler gin.HandlerFunc) *httptest.ResponseRecorder {
+	return performInvitationRequestWithMeta(method, route, path, body, scope, "", "", handler)
+}
+
+func performInvitationRequestWithMeta(method, route, path, body string, scope authscope.Scope, requestID, userAgent string, handler gin.HandlerFunc) *httptest.ResponseRecorder {
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
 	router.Handle(method, route, func(ctx *gin.Context) {
@@ -93,6 +104,12 @@ func performInvitationRequest(method, route, path, body string, scope authscope.
 	req := httptest.NewRequest(method, path, bytes.NewBufferString(body))
 	if body != "" {
 		req.Header.Set("Content-Type", "application/json")
+	}
+	if requestID != "" {
+		req.Header.Set("X-Request-ID", requestID)
+	}
+	if userAgent != "" {
+		req.Header.Set("User-Agent", userAgent)
 	}
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
@@ -137,8 +154,51 @@ func TestAcceptInvitationUsesAuthenticatedUserAndBodyToken(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d: %s", rec.Code, rec.Body.String())
 	}
-	if service.acceptToken != "raw-token" || service.acceptUser.Id != "user-2" {
+	if users.lookupUser != "user-2" || service.acceptToken != "raw-token" || service.acceptUser.Id != "user-2" {
 		t.Fatalf("unexpected accept args: token=%q user=%+v", service.acceptToken, service.acceptUser)
+	}
+}
+
+func TestAcceptInvitationMapsAcceptedReplayAndExpirySafely(t *testing.T) {
+	service := &invitationServiceStub{
+		accepted: &domainspace.Member{ID: "member-2", SpaceID: "space-1", UserID: "user-2"},
+		acceptErrs: map[string]error{
+			"replayed": serviceinvitation.ErrInvalidInvitation,
+			"expired":  serviceinvitation.ErrInvalidInvitation,
+			"guessed":  serviceinvitation.ErrInvalidInvitation,
+		},
+	}
+	users := &invitationUserRepositoryStub{user: domainuser.Users{Id: "user-2", Email: "jane@example.com"}}
+	h := NewInvitationHandler(service, users, &invitationAuditServiceStub{})
+	scope := authscope.New("user-2", "Jane", "viewer", nil)
+
+	for _, tt := range []struct {
+		token string
+		want  int
+	}{
+		{token: "valid", want: http.StatusOK},
+		{token: "replayed", want: http.StatusBadRequest},
+		{token: "expired", want: http.StatusBadRequest},
+		{token: "guessed", want: http.StatusBadRequest},
+	} {
+		t.Run(tt.token, func(t *testing.T) {
+			rec := performInvitationRequest(http.MethodPost, "/api/invitations/accept", "/api/invitations/accept", `{"token":"`+tt.token+`"}`, scope, h.Accept)
+			if rec.Code != tt.want {
+				t.Fatalf("status = %d, want %d: %s", rec.Code, tt.want, rec.Body.String())
+			}
+		})
+	}
+}
+
+func TestAcceptInvitationMapsExistingMembershipToConflict(t *testing.T) {
+	h := NewInvitationHandler(
+		&invitationServiceStub{acceptErr: serviceinvitation.ErrMembershipConflict},
+		&invitationUserRepositoryStub{user: domainuser.Users{Id: "user-2", Email: "jane@example.com"}},
+		&invitationAuditServiceStub{},
+	)
+	rec := performInvitationRequest(http.MethodPost, "/api/invitations/accept", "/api/invitations/accept", `{"token":"raw-token"}`, authscope.New("user-2", "Jane", "viewer", nil), h.Accept)
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409: %s", rec.Code, rec.Body.String())
 	}
 }
 
@@ -164,6 +224,26 @@ func TestInvitationHandlersMapSafeErrorsAndRequireAuthentication(t *testing.T) {
 	rec = performInvitationRequest(http.MethodPost, "/api/invitations/accept", "/api/invitations/accept", `{"token":"raw-token"}`, authscope.Scope{}, h.Accept)
 	if rec.Code != http.StatusUnauthorized {
 		t.Fatalf("unauthenticated status = %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestInvitationHandlerAuditsEarlyFailureWithHTTPProvenanceAndNoBody(t *testing.T) {
+	audit := &invitationAuditServiceStub{}
+	h := NewInvitationHandler(&invitationServiceStub{}, &invitationUserRepositoryStub{}, audit)
+	rec := performInvitationRequestWithMeta(http.MethodPost, "/api/invitations/accept", "/api/invitations/accept", `{"token":"raw-secret-token","extra":"secret"}`, authscope.New("user-2", "Jane", "viewer", nil), "request-1", "invite-agent", h.Accept)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400: %s", rec.Code, rec.Body.String())
+	}
+	if len(audit.events) != 1 {
+		t.Fatalf("audit events = %+v", audit.events)
+	}
+	event := audit.events[0]
+	if event.Status != domainaudit.StatusFailed || event.Source != "http" || event.RequestID == "" || event.UserAgent != "invite-agent" || event.BeforeData != nil || event.AfterData != nil {
+		t.Fatalf("unexpected early audit: %+v", event)
+	}
+	encoded, _ := json.Marshal(event)
+	if strings.Contains(string(encoded), "raw-secret-token") || strings.Contains(string(encoded), "request_body") {
+		t.Fatalf("request body leaked into audit: %s", encoded)
 	}
 }
 

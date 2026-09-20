@@ -7,6 +7,7 @@ import (
 	"time"
 
 	domaininvitation "family-assistant/internal/domain/invitation"
+	domainspace "family-assistant/internal/domain/space"
 
 	"github.com/DATA-DOG/go-sqlmock"
 	"gorm.io/driver/postgres"
@@ -53,6 +54,11 @@ func invitationRows(inv *domaininvitation.Invitation) *sqlmock.Rows {
 	)
 }
 
+func spaceRows(spaceID, spaceType, status string) *sqlmock.Rows {
+	return sqlmock.NewRows([]string{"id", "name", "type", "category", "status", "created_by_user_id", "created_at", "updated_at", "deleted_at"}).
+		AddRow(spaceID, "Shared", spaceType, domainspace.CategoryFamily, status, "owner-1", time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC), nil, nil)
+}
+
 func TestAcceptLocksInvitationAndAtomicallyAddsMembership(t *testing.T) {
 	db, mock := newInvitationMockDB(t)
 	repo := NewRepository(db)
@@ -63,19 +69,158 @@ func TestAcceptLocksInvitationAndAtomicallyAddsMembership(t *testing.T) {
 	mock.ExpectQuery(`SELECT .*FROM "space_invitations".*token_hash = \$1.*deleted_at IS NULL.*FOR UPDATE`).
 		WithArgs(inv.TokenHash, 1).
 		WillReturnRows(invitationRows(inv))
-	mock.ExpectExec(`INSERT INTO "space_members"`).WillReturnResult(sqlmock.NewResult(1, 1))
-	mock.ExpectExec(`UPDATE "space_invitations"`).WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectQuery(`SELECT .*FROM "spaces".*id = \$1.*type = \$2.*status = \$3.*deleted_at IS NULL.*FOR UPDATE`).
+		WithArgs(inv.SpaceID, domainspace.TypeShared, domainspace.StatusActive, 1).
+		WillReturnRows(spaceRows(inv.SpaceID, domainspace.TypeShared, domainspace.StatusActive))
+	mock.ExpectExec(`INSERT INTO "space_members"`).
+		WithArgs(sqlmock.AnyArg(), inv.SpaceID, "user-2", inv.RoleID, domainspace.StatusActive, now, sqlmock.AnyArg(), nil).
+		WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectExec(`UPDATE "space_invitations"`).
+		WithArgs(now, "user-2", domaininvitation.StatusAccepted, now, inv.ID).
+		WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectCommit()
 
-	member, err := repo.Accept(context.Background(), inv.TokenHash, "user-2", "jane@example.com", now)
+	acceptance, err := repo.Accept(context.Background(), inv.TokenHash, "user-2", "jane@example.com", now)
 	if err != nil {
 		t.Fatalf("accept invitation: %v", err)
 	}
-	if member == nil || member.SpaceID != inv.SpaceID || member.UserID != "user-2" || member.RoleID != inv.RoleID || member.Status != "ACTIVE" {
-		t.Fatalf("unexpected member: %#v", member)
+	if acceptance == nil || acceptance.Member == nil || acceptance.Member.SpaceID != inv.SpaceID || acceptance.Member.UserID != "user-2" || acceptance.Member.RoleID != inv.RoleID || acceptance.Member.Status != "ACTIVE" {
+		t.Fatalf("unexpected acceptance: %#v", acceptance)
+	}
+	if acceptance.InvitationID != inv.ID || acceptance.SpaceID != inv.SpaceID || acceptance.RoleID != inv.RoleID || !acceptance.EmailBound {
+		t.Fatalf("unexpected invitation metadata: %#v", acceptance)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("sql expectations: %v", err)
+	}
+}
+
+func TestAcceptUnboundEmailSucceedsAndReportsUnbound(t *testing.T) {
+	db, mock := newInvitationMockDB(t)
+	repo := NewRepository(db)
+	inv := invitationFixture()
+	inv.InvitedEmail = ""
+	now := time.Date(2026, 9, 20, 11, 0, 0, 0, time.UTC)
+
+	mock.ExpectBegin()
+	mock.ExpectQuery(`SELECT .*FROM "space_invitations".*token_hash = \$1.*deleted_at IS NULL.*FOR UPDATE`).
+		WithArgs(inv.TokenHash, 1).WillReturnRows(invitationRows(inv))
+	mock.ExpectQuery(`SELECT .*FROM "spaces".*id = \$1.*type = \$2.*status = \$3.*deleted_at IS NULL.*FOR UPDATE`).
+		WithArgs(inv.SpaceID, domainspace.TypeShared, domainspace.StatusActive, 1).
+		WillReturnRows(spaceRows(inv.SpaceID, domainspace.TypeShared, domainspace.StatusActive))
+	mock.ExpectExec(`INSERT INTO "space_members"`).
+		WithArgs(sqlmock.AnyArg(), inv.SpaceID, "user-2", inv.RoleID, domainspace.StatusActive, now, sqlmock.AnyArg(), nil).
+		WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectExec(`UPDATE "space_invitations"`).
+		WithArgs(now, "user-2", domaininvitation.StatusAccepted, now, inv.ID).
+		WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectCommit()
+
+	acceptance, err := repo.Accept(context.Background(), inv.TokenHash, "user-2", "different@example.com", now)
+	if err != nil {
+		t.Fatalf("accept unbound invitation: %v", err)
+	}
+	if acceptance == nil || acceptance.EmailBound {
+		t.Fatalf("acceptance = %#v, want unbound", acceptance)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("sql expectations: %v", err)
+	}
+}
+
+func TestAcceptMapsDuplicateMembershipToConflictAndRollsBack(t *testing.T) {
+	db, mock := newInvitationMockDB(t)
+	repo := NewRepository(db)
+	inv := invitationFixture()
+	now := time.Date(2026, 9, 20, 11, 0, 0, 0, time.UTC)
+
+	mock.ExpectBegin()
+	mock.ExpectQuery(`SELECT .*FROM "space_invitations".*token_hash = \$1.*deleted_at IS NULL.*FOR UPDATE`).WithArgs(inv.TokenHash, 1).WillReturnRows(invitationRows(inv))
+	mock.ExpectQuery(`SELECT .*FROM "spaces".*id = \$1.*type = \$2.*status = \$3.*deleted_at IS NULL.*FOR UPDATE`).WithArgs(inv.SpaceID, domainspace.TypeShared, domainspace.StatusActive, 1).WillReturnRows(spaceRows(inv.SpaceID, domainspace.TypeShared, domainspace.StatusActive))
+	mock.ExpectExec(`INSERT INTO "space_members"`).WithArgs(sqlmock.AnyArg(), inv.SpaceID, "user-2", inv.RoleID, domainspace.StatusActive, now, sqlmock.AnyArg(), nil).WillReturnError(gorm.ErrDuplicatedKey)
+	mock.ExpectRollback()
+
+	_, err := repo.Accept(context.Background(), inv.TokenHash, "user-2", "jane@example.com", now)
+	if !errors.Is(err, domaininvitation.ErrMembershipConflict) {
+		t.Fatalf("error = %v, want membership conflict", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("sql expectations: %v", err)
+	}
+}
+
+func TestAcceptRollsBackWhenMembershipInsertFails(t *testing.T) {
+	db, mock := newInvitationMockDB(t)
+	repo := NewRepository(db)
+	inv := invitationFixture()
+	now := time.Date(2026, 9, 20, 11, 0, 0, 0, time.UTC)
+	insertErr := errors.New("insert membership")
+
+	mock.ExpectBegin()
+	mock.ExpectQuery(`SELECT .*FROM "space_invitations".*token_hash = \$1.*deleted_at IS NULL.*FOR UPDATE`).WithArgs(inv.TokenHash, 1).WillReturnRows(invitationRows(inv))
+	mock.ExpectQuery(`SELECT .*FROM "spaces".*id = \$1.*type = \$2.*status = \$3.*deleted_at IS NULL.*FOR UPDATE`).WithArgs(inv.SpaceID, domainspace.TypeShared, domainspace.StatusActive, 1).WillReturnRows(spaceRows(inv.SpaceID, domainspace.TypeShared, domainspace.StatusActive))
+	mock.ExpectExec(`INSERT INTO "space_members"`).WithArgs(sqlmock.AnyArg(), inv.SpaceID, "user-2", inv.RoleID, domainspace.StatusActive, now, sqlmock.AnyArg(), nil).WillReturnError(insertErr)
+	mock.ExpectRollback()
+
+	_, err := repo.Accept(context.Background(), inv.TokenHash, "user-2", "jane@example.com", now)
+	if !errors.Is(err, insertErr) {
+		t.Fatalf("error = %v, want insert error", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("sql expectations: %v", err)
+	}
+}
+
+func TestAcceptRollsBackWhenInvitationUpdateFails(t *testing.T) {
+	db, mock := newInvitationMockDB(t)
+	repo := NewRepository(db)
+	inv := invitationFixture()
+	now := time.Date(2026, 9, 20, 11, 0, 0, 0, time.UTC)
+	updateErr := errors.New("consume invitation")
+
+	mock.ExpectBegin()
+	mock.ExpectQuery(`SELECT .*FROM "space_invitations".*token_hash = \$1.*deleted_at IS NULL.*FOR UPDATE`).WithArgs(inv.TokenHash, 1).WillReturnRows(invitationRows(inv))
+	mock.ExpectQuery(`SELECT .*FROM "spaces".*id = \$1.*type = \$2.*status = \$3.*deleted_at IS NULL.*FOR UPDATE`).WithArgs(inv.SpaceID, domainspace.TypeShared, domainspace.StatusActive, 1).WillReturnRows(spaceRows(inv.SpaceID, domainspace.TypeShared, domainspace.StatusActive))
+	mock.ExpectExec(`INSERT INTO "space_members"`).WithArgs(sqlmock.AnyArg(), inv.SpaceID, "user-2", inv.RoleID, domainspace.StatusActive, now, sqlmock.AnyArg(), nil).WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectExec(`UPDATE "space_invitations"`).WithArgs(now, "user-2", domaininvitation.StatusAccepted, now, inv.ID).WillReturnError(updateErr)
+	mock.ExpectRollback()
+
+	_, err := repo.Accept(context.Background(), inv.TokenHash, "user-2", "jane@example.com", now)
+	if !errors.Is(err, updateErr) {
+		t.Fatalf("error = %v, want update error", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("sql expectations: %v", err)
+	}
+}
+
+func TestAcceptRejectsInactiveOrPersonalParentSpace(t *testing.T) {
+	for _, tt := range []struct {
+		name      string
+		spaceType string
+		status    string
+	}{
+		{name: "personal", spaceType: domainspace.TypePersonal, status: domainspace.StatusActive},
+		{name: "archived", spaceType: domainspace.TypeShared, status: domainspace.StatusArchived},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			db, mock := newInvitationMockDB(t)
+			repo := NewRepository(db)
+			inv := invitationFixture()
+			now := time.Date(2026, 9, 20, 11, 0, 0, 0, time.UTC)
+			mock.ExpectBegin()
+			mock.ExpectQuery(`SELECT .*FROM "space_invitations".*token_hash = \$1.*deleted_at IS NULL.*FOR UPDATE`).WithArgs(inv.TokenHash, 1).WillReturnRows(invitationRows(inv))
+			mock.ExpectQuery(`SELECT .*FROM "spaces".*id = \$1.*type = \$2.*status = \$3.*deleted_at IS NULL.*FOR UPDATE`).WithArgs(inv.SpaceID, domainspace.TypeShared, domainspace.StatusActive, 1).WillReturnRows(spaceRows(inv.SpaceID, tt.spaceType, tt.status))
+			mock.ExpectRollback()
+
+			_, err := repo.Accept(context.Background(), inv.TokenHash, "user-2", "jane@example.com", now)
+			if !errors.Is(err, domaininvitation.ErrInvalidInvitation) {
+				t.Fatalf("error = %v, want invalid invitation", err)
+			}
+			if err := mock.ExpectationsWereMet(); err != nil {
+				t.Fatalf("sql expectations: %v", err)
+			}
+		})
 	}
 }
 

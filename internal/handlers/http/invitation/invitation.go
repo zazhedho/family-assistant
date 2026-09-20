@@ -227,6 +227,8 @@ func invitationHTTPError(err error) (int, string) {
 		return http.StatusUnauthorized, "authentication required"
 	case errors.Is(err, serviceinvitation.ErrInvalidInvitation):
 		return http.StatusBadRequest, "invalid invitation"
+	case errors.Is(err, serviceinvitation.ErrMembershipConflict):
+		return http.StatusConflict, "conflict"
 	case errors.Is(err, serviceinvitation.ErrForbidden), errors.Is(err, serviceauthorization.ErrForbidden):
 		return http.StatusForbidden, messages.AccessDenied
 	case errors.Is(err, serviceinvitation.ErrNotFound), errors.Is(err, serviceauthorization.ErrNotFound), errors.Is(err, gorm.ErrRecordNotFound):

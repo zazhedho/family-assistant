@@ -37,12 +37,12 @@ func (r *Repository) Create(ctx context.Context, invitation *domaininvitation.In
 	return r.DB.WithContext(ctx).Create(invitation).Error
 }
 
-func (r *Repository) Accept(ctx context.Context, tokenHash, userID, normalizedEmail string, now time.Time) (*domainspace.Member, error) {
+func (r *Repository) Accept(ctx context.Context, tokenHash, userID, normalizedEmail string, now time.Time) (*domaininvitation.Acceptance, error) {
 	if strings.TrimSpace(tokenHash) == "" || strings.TrimSpace(userID) == "" {
 		return nil, domaininvitation.ErrInvalidInvitation
 	}
 
-	var member *domainspace.Member
+	var acceptance *domaininvitation.Acceptance
 	err := r.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var invitation domaininvitation.Invitation
 		err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
@@ -63,7 +63,21 @@ func (r *Repository) Accept(ctx context.Context, tokenHash, userID, normalizedEm
 			return domaininvitation.ErrInvalidInvitation
 		}
 
-		member = &domainspace.Member{
+		var space domainspace.Space
+		err = tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("id = ? AND type = ? AND status = ? AND deleted_at IS NULL", invitation.SpaceID, domainspace.TypeShared, domainspace.StatusActive).
+			Take(&space).Error
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return domaininvitation.ErrInvalidInvitation
+		}
+		if err != nil {
+			return err
+		}
+		if space.Type != domainspace.TypeShared || space.Status != domainspace.StatusActive || space.DeletedAt.Valid {
+			return domaininvitation.ErrInvalidInvitation
+		}
+
+		member := &domainspace.Member{
 			ID:        utils.CreateUUID(),
 			SpaceID:   invitation.SpaceID,
 			UserID:    strings.TrimSpace(userID),
@@ -72,6 +86,9 @@ func (r *Repository) Accept(ctx context.Context, tokenHash, userID, normalizedEm
 			CreatedAt: now,
 		}
 		if err := tx.WithContext(ctx).Create(member).Error; err != nil {
+			if errors.Is(err, gorm.ErrDuplicatedKey) {
+				return domaininvitation.ErrMembershipConflict
+			}
 			return err
 		}
 
@@ -83,10 +100,21 @@ func (r *Repository) Accept(ctx context.Context, tokenHash, userID, normalizedEm
 		}).Error; err != nil {
 			return err
 		}
+		safeInvitation := invitation
+		safeInvitation.TokenHash = ""
+		acceptance = &domaininvitation.Acceptance{
+			InvitationID: invitation.ID,
+			SpaceID:      invitation.SpaceID,
+			RoleID:       invitation.RoleID,
+			RoleName:     invitation.RoleID,
+			EmailBound:   strings.TrimSpace(invitation.InvitedEmail) != "",
+			Invitation:   &safeInvitation,
+			Member:       member,
+		}
 		return nil
 	})
 	if err != nil {
 		return nil, err
 	}
-	return member, nil
+	return acceptance, nil
 }
