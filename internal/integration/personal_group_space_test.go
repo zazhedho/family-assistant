@@ -19,6 +19,7 @@ import (
 	mcpHandler "family-assistant/internal/handlers/mcp"
 	auditRepo "family-assistant/internal/repositories/audit"
 	identityRepo "family-assistant/internal/repositories/identity"
+	onboardingRepo "family-assistant/internal/repositories/onboarding"
 	permissionRepo "family-assistant/internal/repositories/permission"
 	reminderRepo "family-assistant/internal/repositories/reminder"
 	roleRepo "family-assistant/internal/repositories/role"
@@ -27,6 +28,7 @@ import (
 	auditService "family-assistant/internal/services/audit"
 	"family-assistant/internal/services/authorization"
 	identityService "family-assistant/internal/services/identity"
+	onboardingService "family-assistant/internal/services/onboarding"
 	permissionService "family-assistant/internal/services/permission"
 	reminderService "family-assistant/internal/services/reminder"
 	spaceService "family-assistant/internal/services/space"
@@ -70,6 +72,7 @@ func TestPersonalGroupSpaceArchitecture(t *testing.T) {
 	permissions := permissionService.NewPermissionService(permissionsRepo)
 	spacesRepo := spaceRepo.NewRepository(db)
 	rolesRepo := roleRepo.NewRoleRepo(db)
+	accountRegistrar := onboardingService.NewService(onboardingRepo.NewRepository(db), rolesRepo, audits)
 	spaces := spaceService.NewService(spacesRepo, rolesRepo, permissionsRepo, audits)
 	identities := identityService.NewResolver(identityRepo.NewRepository(db), spacesRepo, permissions)
 	links := identityService.NewLinkService(identityRepo.NewRepository(db), audits, config.IdentityConfig{TTL: 10 * time.Minute})
@@ -94,8 +97,182 @@ func TestPersonalGroupSpaceArchitecture(t *testing.T) {
 	mcpServer := httptest.NewServer(mcpHandler.NewHTTPHandler(config.MCPConfig{
 		ServerKey:     "integration-only-server-key",
 		ProfileHeader: "X-Hermes-Profile",
-	}, identities, links, spaces, reminders))
+	}, identities, links, accountRegistrar, spaces, reminders))
 	t.Cleanup(mcpServer.Close)
+
+	newAccountProfile := "hermes-profile-new-account"
+	created := callMCPTool(t, mcpServer.URL, newAccountProfile, "integration-only-server-key", "account_register", map[string]any{
+		"name": "WhatsApp User", "birth_date": "1990-05-20", "consent": true,
+	})
+	var createdAccount struct {
+		Status  string `json:"status"`
+		UserID  string `json:"user_id"`
+		SpaceID string `json:"space_id"`
+	}
+	decodeStructured(t, created.StructuredOutput, &createdAccount)
+	if created.IsError || createdAccount.Status != "created" || createdAccount.UserID == "" || createdAccount.SpaceID == "" {
+		t.Fatalf("account_register = %+v/%+v", created, createdAccount)
+	}
+
+	replayed := callMCPTool(t, mcpServer.URL, newAccountProfile, "integration-only-server-key", "account_register", map[string]any{
+		"name": "WhatsApp User", "birth_date": "1990-05-20", "consent": true,
+	})
+	var replayedAccount struct {
+		Status  string `json:"status"`
+		UserID  string `json:"user_id"`
+		SpaceID string `json:"space_id"`
+	}
+	decodeStructured(t, replayed.StructuredOutput, &replayedAccount)
+	if replayed.IsError || replayedAccount.Status != "existing" || replayedAccount.UserID != createdAccount.UserID || replayedAccount.SpaceID != createdAccount.SpaceID {
+		t.Fatalf("account_register replay = %+v/%+v, want existing original IDs", replayed, replayedAccount)
+	}
+
+	secondProfile := "hermes-profile-second-account"
+	secondCreated := callMCPTool(t, mcpServer.URL, secondProfile, "integration-only-server-key", "account_register", map[string]any{
+		"name": "Second WhatsApp User", "birth_date": "1989-04-12", "consent": true,
+	})
+	var secondAccount struct {
+		Status  string `json:"status"`
+		UserID  string `json:"user_id"`
+		SpaceID string `json:"space_id"`
+	}
+	decodeStructured(t, secondCreated.StructuredOutput, &secondAccount)
+	if secondCreated.IsError || secondAccount.Status != "created" || secondAccount.UserID == "" || secondAccount.SpaceID == "" || secondAccount.UserID == createdAccount.UserID || secondAccount.SpaceID == createdAccount.SpaceID {
+		t.Fatalf("second account_register = %+v/%+v, want distinct created IDs", secondCreated, secondAccount)
+	}
+
+	newProfileSpaces := callMCPTool(t, mcpServer.URL, newAccountProfile, "integration-only-server-key", "space_list", map[string]any{})
+	var newProfileSpacesOutput mcpSpaceListOutput
+	decodeStructured(t, newProfileSpaces.StructuredOutput, &newProfileSpacesOutput)
+	if newProfileSpaces.IsError || !hasSpace(newProfileSpacesOutput.Spaces, createdAccount.SpaceID) {
+		t.Fatalf("new profile space_list = %+v", newProfileSpaces)
+	}
+
+	for _, account := range []struct {
+		name      string
+		userID    string
+		spaceID   string
+		profileID string
+		birthDate string
+	}{
+		{name: "first", userID: createdAccount.UserID, spaceID: createdAccount.SpaceID, profileID: newAccountProfile, birthDate: "1990-05-20"},
+		{name: "second", userID: secondAccount.UserID, spaceID: secondAccount.SpaceID, profileID: secondProfile, birthDate: "1989-04-12"},
+	} {
+		t.Run("persisted "+account.name+" onboarding rows", func(t *testing.T) {
+			var user struct {
+				LoginProvider         string
+				BirthDate             time.Time
+				AgeVerificationMethod string
+				AgeVerifiedAt         *time.Time
+			}
+			if err := db.Raw(`SELECT login_provider, birth_date, age_verification_method, age_verified_at FROM users WHERE id = ?`, account.userID).Scan(&user).Error; err != nil {
+				t.Fatal(err)
+			}
+			birthDate, err := time.Parse("2006-01-02", account.birthDate)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if user.LoginProvider != "hermes" || !user.BirthDate.Equal(birthDate) || user.AgeVerificationMethod != "self_declared" || user.AgeVerifiedAt == nil {
+				t.Fatalf("user row = %+v, want hermes/%s/self_declared/verified", user, account.birthDate)
+			}
+
+			var count int64
+			if err := db.Raw(`SELECT COUNT(*) FROM spaces WHERE created_by_user_id = ? AND type = 'PERSONAL' AND status = 'ACTIVE' AND deleted_at IS NULL`, account.userID).Scan(&count).Error; err != nil {
+				t.Fatal(err)
+			}
+			if count != 1 {
+				t.Fatalf("personal spaces for %s = %d, want 1", account.userID, count)
+			}
+			if err := db.Raw(`SELECT COUNT(*) FROM space_members sm JOIN roles r ON r.id = sm.role_id WHERE sm.space_id = ? AND sm.user_id = ? AND r.name = 'space_owner' AND sm.status = 'ACTIVE' AND sm.deleted_at IS NULL`, account.spaceID, account.userID).Scan(&count).Error; err != nil {
+				t.Fatal(err)
+			}
+			if count != 1 {
+				t.Fatalf("space_owner membership for %s = %d, want 1", account.userID, count)
+			}
+			if err := db.Raw(`SELECT COUNT(*) FROM external_identities WHERE user_id = ? AND provider = 'hermes' AND external_id = ? AND status = 'ACTIVE' AND deleted_at IS NULL`, account.userID, account.profileID).Scan(&count).Error; err != nil {
+				t.Fatal(err)
+			}
+			if count != 1 {
+				t.Fatalf("active Hermes identity for %s = %d, want 1", account.profileID, count)
+			}
+		})
+	}
+
+	var nullCredentialCount int64
+	if err := db.Raw(`SELECT COUNT(*) FROM users WHERE id IN (?, ?) AND email IS NULL AND password IS NULL AND phone IS NULL`, createdAccount.UserID, secondAccount.UserID).Scan(&nullCredentialCount).Error; err != nil {
+		t.Fatal(err)
+	}
+	if nullCredentialCount != 2 {
+		t.Fatalf("external-only users with NULL credentials = %d, want 2", nullCredentialCount)
+	}
+
+	var beforeUnderage struct {
+		Users      int64
+		Spaces     int64
+		Members    int64
+		Identities int64
+	}
+	for _, query := range []struct {
+		name string
+		out  *int64
+	}{
+		{name: "users", out: &beforeUnderage.Users},
+		{name: "spaces", out: &beforeUnderage.Spaces},
+		{name: "space_members", out: &beforeUnderage.Members},
+		{name: "external_identities", out: &beforeUnderage.Identities},
+	} {
+		if err := db.Raw("SELECT COUNT(*) FROM " + query.name).Scan(query.out).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	underageProfile := "hermes-profile-underage"
+	underage := callMCPTool(t, mcpServer.URL, underageProfile, "integration-only-server-key", "account_register", map[string]any{
+		"name": "Underage WhatsApp User", "birth_date": "2010-09-21", "consent": true,
+	})
+	if !underage.IsError || mcpText(underage) != "invalid input" {
+		t.Fatalf("underage account_register = %+v, want invalid input", underage)
+	}
+
+	var afterUnderage struct {
+		Users      int64
+		Spaces     int64
+		Members    int64
+		Identities int64
+	}
+	for _, query := range []struct {
+		name string
+		out  *int64
+	}{
+		{name: "users", out: &afterUnderage.Users},
+		{name: "spaces", out: &afterUnderage.Spaces},
+		{name: "space_members", out: &afterUnderage.Members},
+		{name: "external_identities", out: &afterUnderage.Identities},
+	} {
+		if err := db.Raw("SELECT COUNT(*) FROM " + query.name).Scan(query.out).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	if afterUnderage != beforeUnderage {
+		t.Fatalf("underage account changed account tables: before=%+v after=%+v", beforeUnderage, afterUnderage)
+	}
+
+	var onboardingAudits []struct {
+		Metadata     string
+		Message      string
+		ErrorMessage string
+	}
+	if err := db.Raw(`SELECT COALESCE(metadata, ''), COALESCE(message, ''), COALESCE(error_message, '') FROM audit_trails WHERE resource = 'external_account'`).Scan(&onboardingAudits).Error; err != nil {
+		t.Fatal(err)
+	}
+	for _, audit := range onboardingAudits {
+		encoded := audit.Metadata + audit.Message + audit.ErrorMessage
+		for _, privateValue := range []string{"1990-05-20", "1989-04-12", "2010-09-21", newAccountProfile, secondProfile, underageProfile} {
+			if strings.Contains(encoded, privateValue) {
+				t.Fatalf("private onboarding value %q leaked in audit %+v", privateValue, audit)
+			}
+		}
+	}
 
 	adultOne := registerAndLogin(t, httpServer.URL, "Adult One", "adult-one@example.test", "081234567890")
 	adultTwo := registerAndLogin(t, httpServer.URL, "Adult Two", "adult-two@example.test", "081234567891")

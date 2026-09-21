@@ -198,12 +198,21 @@ X-Hermes-Channel: whatsapp
 The endpoint is `http://127.0.0.1:8081/mcp` by default. The exact tool allowlist
 is:
 
+- `account_register`
 - `identity_link`
 - `space_list`
 - `space_get_members`
 - `reminder_create`
 - `reminder_list`
 - `reminder_complete`
+
+For a new WhatsApp account, Hermes asks for the user's name and birth date,
+explains that the birth date is used for minimum-age validation, shows a
+confirmation summary, and then calls `account_register` once with
+`consent: true`. Email and password are not requested. Replaying the same
+profile is idempotent and returns the existing account; underage independent
+registration is rejected. `identity_link` remains available for pre-existing
+HTTP or Google accounts.
 
 `identity_link` consumes a one-time code issued through the authenticated HTTP
 endpoint. `X-Hermes-Profile` is resolved dynamically to the linked user, and

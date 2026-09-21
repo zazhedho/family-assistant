@@ -8,6 +8,7 @@ import (
 	mcpHandler "family-assistant/internal/handlers/mcp"
 	identityRepo "family-assistant/internal/repositories/identity"
 	invitationRepo "family-assistant/internal/repositories/invitation"
+	onboardingRepo "family-assistant/internal/repositories/onboarding"
 	permissionRepo "family-assistant/internal/repositories/permission"
 	reminderRepo "family-assistant/internal/repositories/reminder"
 	roleRepo "family-assistant/internal/repositories/role"
@@ -17,6 +18,7 @@ import (
 	authorizationService "family-assistant/internal/services/authorization"
 	identityService "family-assistant/internal/services/identity"
 	invitationService "family-assistant/internal/services/invitation"
+	onboardingService "family-assistant/internal/services/onboarding"
 	permissionService "family-assistant/internal/services/permission"
 	reminderService "family-assistant/internal/services/reminder"
 	spaceService "family-assistant/internal/services/space"
@@ -142,6 +144,7 @@ func run() error {
 	)
 	identityRepository := identityRepo.NewRepository(routes.DB)
 	identityLink := identityService.NewLinkService(identityRepository, audit, config.LoadIdentityConfig())
+	accountRegistrar := onboardingService.NewService(onboardingRepo.NewRepository(routes.DB), roleRepository, audit)
 	identityResolver := identityService.NewResolver(identityRepository, spaceRepository, permissions)
 	reminders := reminderService.NewReminderService(
 		reminderRepo.NewRepository(routes.DB), spaceRepository, authorizationService.NewAuthorizer(), audit,
@@ -162,7 +165,7 @@ func run() error {
 	var mcpServer *http.Server
 	var mcpListener net.Listener
 	if mcpConfig.Enabled {
-		mcpServer, mcpListener, err = mcpHandler.Listen(mcpConfig, identityResolver, identityLink, spaces, reminders)
+		mcpServer, mcpListener, err = mcpHandler.Listen(mcpConfig, identityResolver, identityLink, accountRegistrar, spaces, reminders)
 		FailOnError(err, "Failed to bind MCP server")
 	}
 

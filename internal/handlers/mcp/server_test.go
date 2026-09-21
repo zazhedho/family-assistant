@@ -18,6 +18,7 @@ import (
 	domainspace "family-assistant/internal/domain/space"
 	serviceauthorization "family-assistant/internal/services/authorization"
 	serviceidentity "family-assistant/internal/services/identity"
+	serviceonboarding "family-assistant/internal/services/onboarding"
 	"family-assistant/pkg/config"
 )
 
@@ -26,7 +27,7 @@ func TestListenPropagatesBindErrorSynchronously(t *testing.T) {
 	server, bound, err := listenMCP(config.MCPConfig{
 		Addr:      "127.0.0.1:8081",
 		ServerKey: "secret",
-	}, nil, nil, nil, nil, func(string, string) (net.Listener, error) {
+	}, nil, nil, nil, nil, nil, func(string, string) (net.Listener, error) {
 		return nil, errAddressInUse
 	})
 	if !errors.Is(err, errAddressInUse) {
@@ -38,7 +39,7 @@ func TestListenPropagatesBindErrorSynchronously(t *testing.T) {
 }
 
 func TestHTTPServerUsesSafeTimeoutsWithoutWriteTimeout(t *testing.T) {
-	server := NewHTTPServer(config.MCPConfig{Addr: "127.0.0.1:0"}, nil, nil, nil, nil)
+	server := NewHTTPServer(config.MCPConfig{Addr: "127.0.0.1:0"}, nil, nil, nil, nil, nil)
 	if server.ReadHeaderTimeout <= 0 {
 		t.Fatal("expected MCP ReadHeaderTimeout")
 	}
@@ -58,7 +59,7 @@ func TestHTTPHandlerMountsMCPOnlyAtExactPath(t *testing.T) {
 			Source:   "mcp",
 			RoleName: "parent",
 		},
-	}, nil, nil, nil)
+	}, nil, nil, nil, nil)
 
 	for _, path := range []string{"/", "/other", "/mcp/"} {
 		req := httptest.NewRequest(http.MethodPost, path, nil)
@@ -129,6 +130,30 @@ func callMCPServer(t *testing.T, serverURL, profile, key, method string, params 
 	return decoded
 }
 
+func mcpHTTPStatus(t *testing.T, serverURL, profile, key, method string, params map[string]any) int {
+	t.Helper()
+	payload, err := json.Marshal(map[string]any{
+		"jsonrpc": "2.0", "id": 1, "method": method, "params": params,
+	})
+	if err != nil {
+		t.Fatalf("marshal MCP request: %v", err)
+	}
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, serverURL+"/mcp", bytes.NewReader(payload)) // #nosec G704 -- local httptest server.
+	if err != nil {
+		t.Fatalf("build MCP request: %v", err)
+	}
+	req.Header.Set("Accept", "application/json, text/event-stream")
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+key)
+	req.Header.Set("X-Hermes-Profile", profile)
+	response, err := http.DefaultClient.Do(req) // #nosec G704 -- local httptest server.
+	if err != nil {
+		t.Fatalf("MCP request: %v", err)
+	}
+	defer func() { _ = response.Body.Close() }()
+	return response.StatusCode
+}
+
 func initializeMCPServer(t *testing.T, serverURL string) {
 	t.Helper()
 	response := callMCPServer(t, serverURL, "new-profile", "secret", "initialize", map[string]any{
@@ -145,7 +170,7 @@ func TestHTTPHandlerIdentityLinkNeedsOnlyServerAuthentication(t *testing.T) {
 		ID: "identity-1", UserID: "user-1", Provider: domainidentity.ProviderHermes,
 		ExternalID: "new-profile", Status: domainidentity.StatusActive,
 	}}
-	handler := NewHTTPHandler(config.MCPConfig{ServerKey: "secret"}, &resolverStub{err: serviceidentity.ErrUnauthenticated}, linkService, nil, nil)
+	handler := NewHTTPHandler(config.MCPConfig{ServerKey: "secret"}, &resolverStub{err: serviceidentity.ErrUnauthenticated}, linkService, nil, nil, nil)
 	server := httptest.NewServer(handler)
 	t.Cleanup(server.Close)
 
@@ -163,7 +188,7 @@ func TestHTTPHandlerIdentityLinkNeedsOnlyServerAuthentication(t *testing.T) {
 
 func TestHTTPHandlerProtectedToolRejectsUnlinkedProfile(t *testing.T) {
 	resolver := &resolverStub{err: serviceidentity.ErrUnauthenticated}
-	handler := NewHTTPHandler(config.MCPConfig{ServerKey: "secret"}, resolver, nil, nil, nil)
+	handler := NewHTTPHandler(config.MCPConfig{ServerKey: "secret"}, resolver, nil, nil, nil, nil)
 	server := httptest.NewServer(handler)
 	t.Cleanup(server.Close)
 
@@ -183,7 +208,7 @@ func TestHTTPHandlerProtectedToolRejectsUnlinkedProfile(t *testing.T) {
 }
 
 func TestHTTPHandlerExposesOnlyCurrentMCPToolsWhenRemindersAreAbsent(t *testing.T) {
-	handler := NewHTTPHandler(config.MCPConfig{ServerKey: "secret"}, &resolverStub{}, nil, nil, nil)
+	handler := NewHTTPHandler(config.MCPConfig{ServerKey: "secret"}, &resolverStub{}, nil, nil, nil, nil)
 	server := httptest.NewServer(handler)
 	t.Cleanup(server.Close)
 
@@ -197,14 +222,14 @@ func TestHTTPHandlerExposesOnlyCurrentMCPToolsWhenRemindersAreAbsent(t *testing.
 		got = append(got, tool.Name)
 	}
 	sort.Strings(got)
-	want := []string{"identity_link", "reminder_complete", "reminder_create", "reminder_list", "space_get_members", "space_list"}
+	want := []string{"account_register", "identity_link", "reminder_complete", "reminder_create", "reminder_list", "space_get_members", "space_list"}
 	if strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Fatalf("tools = %v, want %v", got, want)
 	}
 }
 
 func TestHTTPHandlerToolOutputSchemasUseHermesObjectRoot(t *testing.T) {
-	handler := NewHTTPHandler(config.MCPConfig{ServerKey: "secret"}, &resolverStub{}, nil, nil, nil)
+	handler := NewHTTPHandler(config.MCPConfig{ServerKey: "secret"}, &resolverStub{}, nil, nil, nil, nil)
 	server := httptest.NewServer(handler)
 	t.Cleanup(server.Close)
 
@@ -223,6 +248,34 @@ func TestHTTPHandlerToolOutputSchemasUseHermesObjectRoot(t *testing.T) {
 		if string(schema.Type) != `"object"` {
 			t.Errorf("%s output schema type = %q, want object: %s", tool.Name, schema.Type, tool.OutputSchema)
 		}
+	}
+}
+
+func TestHTTPHandlerAccountRegisterNeedsServerAuthenticationAndTrustedProfile(t *testing.T) {
+	registrar := &registrarStub{result: serviceonboarding.Result{Status: "created", UserID: "user-1", SpaceID: "space-1"}}
+	handler := NewHTTPHandler(config.MCPConfig{ServerKey: "secret"}, &resolverStub{err: serviceidentity.ErrUnauthenticated}, nil, registrar, nil, nil)
+	server := httptest.NewServer(handler)
+	t.Cleanup(server.Close)
+
+	params := map[string]any{
+		"name": "account_register", "arguments": map[string]any{
+			"name": "Jane Doe", "birth_date": "1990-05-20", "consent": true,
+		},
+	}
+	if status := mcpHTTPStatus(t, server.URL, "profile-1", "wrong", "tools/call", params); status != http.StatusUnauthorized {
+		t.Fatalf("wrong server key status = %d, want %d", status, http.StatusUnauthorized)
+	}
+	if status := mcpHTTPStatus(t, server.URL, "", "secret", "tools/call", params); status != http.StatusUnauthorized {
+		t.Fatalf("missing trusted profile status = %d, want %d", status, http.StatusUnauthorized)
+	}
+
+	initializeMCPServer(t, server.URL)
+	response := callMCPServer(t, server.URL, "profile-1", "secret", "tools/call", params)
+	if response.Error != nil || response.Result == nil || response.Result.IsError {
+		t.Fatalf("account_register failed without linked actor: %+v", response)
+	}
+	if registrar.calls != 1 || registrar.input.Provider != "hermes" || registrar.input.ExternalID != "profile-1" {
+		t.Fatalf("registrar input = %+v, calls = %d", registrar.input, registrar.calls)
 	}
 }
 
@@ -252,7 +305,7 @@ func TestHTTPHandlerProtectedSpaceToolMapsSuccessForbiddenAndNotFound(t *testing
 		t.Run(tt.name, func(t *testing.T) {
 			resolver.resolveCall = 0
 			service := &mcpSpaceServiceStub{members: tt.members, membersErr: tt.err}
-			handler := NewHTTPHandler(config.MCPConfig{ServerKey: "secret"}, resolver, nil, service, nil)
+			handler := NewHTTPHandler(config.MCPConfig{ServerKey: "secret"}, resolver, nil, nil, service, nil)
 			server := httptest.NewServer(handler)
 			t.Cleanup(server.Close)
 			initializeMCPServer(t, server.URL)
