@@ -45,6 +45,24 @@ func TestAccountRegisterUsesOnlyTrustedExternalRequest(t *testing.T) {
 	}
 }
 
+func TestAccountRegisterMapsExistingRegistrarResultSafely(t *testing.T) {
+	service := &registrarStub{result: serviceonboarding.Result{Status: "existing", UserID: "user-existing", SpaceID: "space-existing"}}
+	ctx := WithExternalRequest(context.Background(), ExternalRequest{
+		Provider: "hermes", ExternalID: "profile-existing", Channel: "whatsapp",
+	})
+
+	got, err := AccountRegister(ctx, service, AccountRegisterInput{
+		Name: "Existing User", BirthDate: "1990-05-20", Consent: true,
+	})
+	if err != nil || got != (AccountRegisterOutput{Status: "existing", UserID: "user-existing", SpaceID: "space-existing"}) {
+		t.Fatalf("output = %+v, err = %v", got, err)
+	}
+	encoded, err := json.Marshal(got)
+	if err != nil || strings.Contains(string(encoded), "1990-05-20") || strings.Contains(string(encoded), "profile-existing") {
+		t.Fatalf("unsafe output = %s, err = %v", encoded, err)
+	}
+}
+
 func TestAccountRegisterRequiresTrustedExternalRequest(t *testing.T) {
 	for _, tt := range []struct {
 		name string

@@ -199,11 +199,11 @@ func TestPersonalGroupSpaceArchitecture(t *testing.T) {
 	}
 
 	var nullCredentialCount int64
-	if err := db.Raw(`SELECT COUNT(*) FROM users WHERE id IN (?, ?) AND email IS NULL AND password IS NULL AND phone IS NULL`, createdAccount.UserID, secondAccount.UserID).Scan(&nullCredentialCount).Error; err != nil {
+	if err := db.Raw(`SELECT COUNT(*) FROM users WHERE id IN (?, ?) AND email IS NULL AND password IS NULL AND phone IS NULL AND password_changed_at IS NULL`, createdAccount.UserID, secondAccount.UserID).Scan(&nullCredentialCount).Error; err != nil {
 		t.Fatal(err)
 	}
 	if nullCredentialCount != 2 {
-		t.Fatalf("external-only users with NULL credentials = %d, want 2", nullCredentialCount)
+		t.Fatalf("external-only users with NULL credentials and password_changed_at = %d, want 2", nullCredentialCount)
 	}
 
 	var beforeUnderage struct {
