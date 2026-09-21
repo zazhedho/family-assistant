@@ -3,10 +3,12 @@ package authorization
 import (
 	"errors"
 	"testing"
+
+	domainauthorization "family-assistant/internal/domain/authorization"
 )
 
 func TestValidateResourceRequiresSpace(t *testing.T) {
-	for _, resource := range []Resource{
+	for _, resource := range []domainauthorization.Resource{
 		{},
 		{SpaceID: " \t"},
 	} {
@@ -21,11 +23,9 @@ func TestValidateResourceRequiresSpace(t *testing.T) {
 	}
 }
 
-func TestValidateResourceAcceptsSpaceResourceFields(t *testing.T) {
-	err := ValidateResource(Resource{
-		SpaceID:           "space-1",
-		CreatedByMemberID: "member-1",
-		AssigneeMemberID:  "member-2",
+func TestValidateResourceAcceptsSpaceResource(t *testing.T) {
+	err := ValidateResource(domainauthorization.Resource{
+		SpaceID: "space-1",
 	})
 	if err != nil {
 		t.Fatalf("ValidateResource() error = %v", err)

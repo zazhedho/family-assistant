@@ -59,6 +59,7 @@ func MapToolError(err error, logger ...*slog.Logger) error {
 	case errors.Is(err, serviceauthorization.ErrNotFound), errors.Is(err, gorm.ErrRecordNotFound):
 		return &MCPError{Code: "not_found", Message: ErrMCPNotFound.Error(), cause: err}
 	case errors.Is(err, serviceauthorization.ErrInvalidResource),
+		errors.Is(err, serviceidentity.ErrInvalidResource),
 		errors.Is(err, serviceidentity.ErrInvalidIdentityProvider),
 		errors.Is(err, serviceidentity.ErrInvalidExternalIdentity),
 		errors.Is(err, domainidentity.ErrInvalidLinkToken):

@@ -1,14 +1,12 @@
 package authorization
 
-import "strings"
+import (
+	"strings"
 
-type Resource struct {
-	SpaceID           string
-	CreatedByMemberID string
-	AssigneeMemberID  string
-}
+	domainauthorization "family-assistant/internal/domain/authorization"
+)
 
-func ValidateResource(resource Resource) error {
+func ValidateResource(resource domainauthorization.Resource) error {
 	if strings.TrimSpace(resource.SpaceID) == "" {
 		return &ValidationError{Field: "space_id", Reason: "is required"}
 	}

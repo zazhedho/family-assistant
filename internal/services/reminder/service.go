@@ -7,10 +7,12 @@ import (
 	"time"
 
 	domainaudit "family-assistant/internal/domain/audit"
+	domainauthorization "family-assistant/internal/domain/authorization"
 	domainidentity "family-assistant/internal/domain/identity"
 	domainreminder "family-assistant/internal/domain/reminder"
 	domainspace "family-assistant/internal/domain/space"
 	"family-assistant/internal/dto"
+	interfaceauthorization "family-assistant/internal/interfaces/authorization"
 	interfacereminder "family-assistant/internal/interfaces/reminder"
 	interfacespace "family-assistant/internal/interfaces/space"
 	"family-assistant/internal/services/authorization"
@@ -32,11 +34,11 @@ type auditStore interface {
 type service struct {
 	reminders interfacereminder.RepoReminderInterface
 	spaces    interfacespace.RepoSpaceInterface
-	authorize authorization.Authorizer
+	authorize interfaceauthorization.Authorizer
 	audit     auditStore
 }
 
-func NewReminderService(reminders interfacereminder.RepoReminderInterface, spaces interfacespace.RepoSpaceInterface, authorize authorization.Authorizer, audit auditStore) interfacereminder.ServiceReminderInterface {
+func NewReminderService(reminders interfacereminder.RepoReminderInterface, spaces interfacespace.RepoSpaceInterface, authorize interfaceauthorization.Authorizer, audit auditStore) interfacereminder.ServiceReminderInterface {
 	return &service{reminders: reminders, spaces: spaces, authorize: authorize, audit: audit}
 }
 
@@ -67,7 +69,7 @@ func (s *service) Create(ctx context.Context, actor domainidentity.ActorContext,
 		return nil, &authorization.ValidationError{Field: "scheduled_at", Reason: "is required"}
 	}
 
-	if err := s.authorize.Authorize(ctx, actor, createPermission, authorization.Resource{SpaceID: spaceID}); err != nil {
+	if err := s.authorize.Authorize(ctx, actor, createPermission, domainauthorization.Resource{SpaceID: spaceID}); err != nil {
 		return nil, err
 	}
 
@@ -115,7 +117,7 @@ func (s *service) List(ctx context.Context, actor domainidentity.ActorContext, i
 		event.ErrorMessage = failureCategory(err)
 		s.writeAudit(ctx, event)
 	}()
-	if err := s.authorize.Authorize(ctx, actor, listPermission, authorization.Resource{SpaceID: spaceID}); err != nil {
+	if err := s.authorize.Authorize(ctx, actor, listPermission, domainauthorization.Resource{SpaceID: spaceID}); err != nil {
 		return nil, err
 	}
 	members, err := s.spaces.ListActiveMembers(ctx, spaceID)
@@ -151,7 +153,7 @@ func (s *service) Complete(ctx context.Context, actor domainidentity.ActorContex
 		event.ErrorMessage = failureCategory(err)
 		s.writeAudit(ctx, event)
 	}()
-	if err := s.authorize.Authorize(ctx, actor, updatePermission, authorization.Resource{SpaceID: spaceID}); err != nil {
+	if err := s.authorize.Authorize(ctx, actor, updatePermission, domainauthorization.Resource{SpaceID: spaceID}); err != nil {
 		return nil, err
 	}
 	members, err := s.spaces.ListActiveMembers(ctx, spaceID)

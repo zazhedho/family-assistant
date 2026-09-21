@@ -4,20 +4,18 @@ import (
 	"context"
 	"strings"
 
+	domainauthorization "family-assistant/internal/domain/authorization"
 	domainidentity "family-assistant/internal/domain/identity"
+	interfaceauthorization "family-assistant/internal/interfaces/authorization"
 )
-
-type Authorizer interface {
-	Authorize(ctx context.Context, actor domainidentity.ActorContext, permission string, resource Resource) error
-}
 
 type authorizer struct{}
 
-func NewAuthorizer() Authorizer {
+func NewAuthorizer() interfaceauthorization.Authorizer {
 	return authorizer{}
 }
 
-func (authorizer) Authorize(_ context.Context, actor domainidentity.ActorContext, permission string, resource Resource) error {
+func (authorizer) Authorize(_ context.Context, actor domainidentity.ActorContext, permission string, resource domainauthorization.Resource) error {
 	if err := ValidateResource(resource); err != nil {
 		return err
 	}
@@ -36,4 +34,4 @@ func (authorizer) Authorize(_ context.Context, actor domainidentity.ActorContext
 	return ErrNotFound
 }
 
-var _ Authorizer = authorizer{}
+var _ interfaceauthorization.Authorizer = authorizer{}
