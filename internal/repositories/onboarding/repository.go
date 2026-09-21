@@ -55,11 +55,12 @@ func (r *Repository) Create(ctx context.Context, registration domainonboarding.R
 		if err := tx.WithContext(ctx).Create(&registration.Member).Error; err != nil {
 			return err
 		}
-		return tx.WithContext(ctx).Create(&registration.Identity).Error
+		identityErr := tx.WithContext(ctx).Create(&registration.Identity).Error
+		if isExternalIdentityDuplicate(identityErr) {
+			return domainidentity.ErrIdentityConflict
+		}
+		return identityErr
 	})
-	if isExternalIdentityDuplicate(err) {
-		return domainidentity.ErrIdentityConflict
-	}
 	return err
 }
 

@@ -176,6 +176,47 @@ func TestCreateMapsIdentityConflictAndRollsBack(t *testing.T) {
 	}
 }
 
+func TestCreateKeepsNonIdentityDuplicateErrors(t *testing.T) {
+	for _, name := range []string{"user", "space", "member"} {
+		t.Run(name, func(t *testing.T) {
+			db, mock := newOnboardingMockDB(t)
+			repo := NewRepository(db)
+			duplicateErr := &pgconn.PgError{Code: "23505", ConstraintName: name + "_unique"}
+
+			mock.ExpectBegin()
+			switch name {
+			case "user":
+				mock.ExpectExec(onboardingUserInsertQuery()).
+					WithArgs(onboardingUserArgsWithoutCredentials()...).
+					WillReturnError(duplicateErr)
+			case "space":
+				mock.ExpectExec(onboardingUserInsertQuery()).
+					WithArgs(onboardingUserArgsWithoutCredentials()...).
+					WillReturnResult(sqlmock.NewResult(1, 1))
+				mock.ExpectExec(`INSERT INTO "spaces"`).WillReturnError(duplicateErr)
+			case "member":
+				mock.ExpectExec(onboardingUserInsertQuery()).
+					WithArgs(onboardingUserArgsWithoutCredentials()...).
+					WillReturnResult(sqlmock.NewResult(1, 1))
+				mock.ExpectExec(`INSERT INTO "spaces"`).WillReturnResult(sqlmock.NewResult(1, 1))
+				mock.ExpectExec(`INSERT INTO "space_members"`).WillReturnError(duplicateErr)
+			}
+			mock.ExpectRollback()
+
+			err := repo.Create(context.Background(), validRegistration())
+			if !errors.Is(err, duplicateErr) {
+				t.Fatalf("error = %v, want original duplicate error", err)
+			}
+			if errors.Is(err, domainidentity.ErrIdentityConflict) {
+				t.Fatal("non-identity duplicate was mapped to ErrIdentityConflict")
+			}
+			if err := mock.ExpectationsWereMet(); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
 func TestFindByExternalIdentityNormalizesProviderAndExternalID(t *testing.T) {
 	db, mock := newOnboardingMockDB(t)
 	repo := NewRepository(db)
