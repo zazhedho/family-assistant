@@ -74,6 +74,33 @@ func TestReminderMigrationIsSpaceScoped(t *testing.T) {
 	}
 }
 
+func TestExternalOnlyUserMigration(t *testing.T) {
+	up := readMigration(t, "000010_allow_external_only_users.up.sql")
+	for _, required := range []string{
+		"ALTER COLUMN email DROP NOT NULL",
+		"ALTER COLUMN password DROP NOT NULL",
+	} {
+		if !strings.Contains(up, required) {
+			t.Errorf("up migration missing %q", required)
+		}
+	}
+
+	down := readMigration(t, "000010_allow_external_only_users.down.sql")
+	for _, required := range []string{
+		"@account.invalid",
+		"!external-only:",
+		"ALTER COLUMN email SET NOT NULL",
+		"ALTER COLUMN password SET NOT NULL",
+	} {
+		if !strings.Contains(down, required) {
+			t.Errorf("down migration missing safe rollback %q", required)
+		}
+	}
+	if strings.Contains(strings.ToUpper(down), "DELETE FROM USERS") {
+		t.Fatal("rollback must not delete credentialless accounts")
+	}
+}
+
 func readMigration(t *testing.T, name string) string {
 	t.Helper()
 	var (
@@ -87,6 +114,10 @@ func readMigration(t *testing.T, name string) string {
 		content, err = os.ReadFile("000008_seed_space_rbac.down.sql")
 	case "000009_create_reminders_table.up.sql":
 		content, err = os.ReadFile("000009_create_reminders_table.up.sql")
+	case "000010_allow_external_only_users.up.sql":
+		content, err = os.ReadFile("000010_allow_external_only_users.up.sql")
+	case "000010_allow_external_only_users.down.sql":
+		content, err = os.ReadFile("000010_allow_external_only_users.down.sql")
 	default:
 		t.Fatalf("unsupported migration %q", name)
 	}
