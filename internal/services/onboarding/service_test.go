@@ -13,6 +13,7 @@ import (
 	domainonboarding "family-assistant/internal/domain/onboarding"
 	domainrole "family-assistant/internal/domain/role"
 	domainspace "family-assistant/internal/domain/space"
+	interfaceonboarding "family-assistant/internal/interfaces/onboarding"
 	serviceidentity "family-assistant/internal/services/identity"
 
 	"github.com/google/uuid"
@@ -324,5 +325,7 @@ func TestRegisterAcceptsValidUnicodeName(t *testing.T) {
 }
 
 func TestServiceSatisfiesRegistrar(t *testing.T) {
-	var _ Registrar = (*Service)(nil)
+	var _ interfaceonboarding.ServiceOnboardingInterface = (*Service)(nil)
+	var _ interfaceonboarding.RoleFinder = (*roleFinderStub)(nil)
+	var _ interfaceonboarding.AuditStore = (*auditStoreStub)(nil)
 }

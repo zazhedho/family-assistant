@@ -16,9 +16,9 @@ import (
 	domainidentity "family-assistant/internal/domain/identity"
 	domainpermission "family-assistant/internal/domain/permission"
 	domainspace "family-assistant/internal/domain/space"
+	interfaceonboarding "family-assistant/internal/interfaces/onboarding"
 	serviceauthorization "family-assistant/internal/services/authorization"
 	serviceidentity "family-assistant/internal/services/identity"
-	serviceonboarding "family-assistant/internal/services/onboarding"
 	"family-assistant/pkg/config"
 )
 
@@ -252,7 +252,7 @@ func TestHTTPHandlerToolOutputSchemasUseHermesObjectRoot(t *testing.T) {
 }
 
 func TestHTTPHandlerAccountRegisterNeedsServerAuthenticationAndTrustedProfile(t *testing.T) {
-	registrar := &registrarStub{result: serviceonboarding.Result{Status: "created", UserID: "user-1", SpaceID: "space-1"}}
+	registrar := &registrarStub{result: interfaceonboarding.Result{Status: "created", UserID: "user-1", SpaceID: "space-1"}}
 	handler := NewHTTPHandler(config.MCPConfig{ServerKey: "secret"}, &resolverStub{err: serviceidentity.ErrUnauthenticated}, nil, registrar, nil, nil)
 	server := httptest.NewServer(handler)
 	t.Cleanup(server.Close)

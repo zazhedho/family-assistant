@@ -5,8 +5,8 @@ import (
 	"errors"
 	"strings"
 
+	interfaceonboarding "family-assistant/internal/interfaces/onboarding"
 	serviceidentity "family-assistant/internal/services/identity"
-	serviceonboarding "family-assistant/internal/services/onboarding"
 
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -23,7 +23,7 @@ type AccountRegisterOutput struct {
 	SpaceID string `json:"space_id"`
 }
 
-func AccountRegister(ctx context.Context, registrar serviceonboarding.Registrar, input AccountRegisterInput) (AccountRegisterOutput, error) {
+func AccountRegister(ctx context.Context, registrar interfaceonboarding.ServiceOnboardingInterface, input AccountRegisterInput) (AccountRegisterOutput, error) {
 	request, ok := ExternalRequestFromContext(ctx)
 	if !ok || strings.TrimSpace(request.Provider) == "" || strings.TrimSpace(request.ExternalID) == "" {
 		return AccountRegisterOutput{}, MapToolError(serviceidentity.ErrUnauthenticated)
@@ -31,7 +31,7 @@ func AccountRegister(ctx context.Context, registrar serviceonboarding.Registrar,
 	if registrar == nil {
 		return AccountRegisterOutput{}, MapToolError(errors.New("account registration service is not configured"))
 	}
-	result, err := registrar.Register(ctx, serviceonboarding.Input{
+	result, err := registrar.Register(ctx, interfaceonboarding.Input{
 		Name: input.Name, BirthDate: input.BirthDate, Consent: input.Consent,
 		Provider: request.Provider, ExternalID: request.ExternalID, Channel: request.Channel,
 	})
@@ -41,7 +41,7 @@ func AccountRegister(ctx context.Context, registrar serviceonboarding.Registrar,
 	return AccountRegisterOutput{Status: result.Status, UserID: result.UserID, SpaceID: result.SpaceID}, nil
 }
 
-func registerAccountTools(server *mcpsdk.Server, registrar serviceonboarding.Registrar) {
+func registerAccountTools(server *mcpsdk.Server, registrar interfaceonboarding.ServiceOnboardingInterface) {
 	mcpsdk.AddTool(server, &mcpsdk.Tool{
 		Name:        "account_register",
 		Description: "Ask for the user's name and birth date in YYYY-MM-DD format. Explain that the birth date is used for age-policy validation, show a summary, obtain explicit confirmation, then call with consent=true.",

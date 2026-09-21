@@ -6,6 +6,7 @@ import (
 	"errors"
 	"family-assistant/infrastructure/database"
 	mcpHandler "family-assistant/internal/handlers/mcp"
+	interfaceonboarding "family-assistant/internal/interfaces/onboarding"
 	identityRepo "family-assistant/internal/repositories/identity"
 	invitationRepo "family-assistant/internal/repositories/invitation"
 	onboardingRepo "family-assistant/internal/repositories/onboarding"
@@ -144,7 +145,7 @@ func run() error {
 	)
 	identityRepository := identityRepo.NewRepository(routes.DB)
 	identityLink := identityService.NewLinkService(identityRepository, audit, config.LoadIdentityConfig())
-	accountRegistrar := onboardingService.NewService(onboardingRepo.NewRepository(routes.DB), roleRepository, audit)
+	var accountRegistrar interfaceonboarding.ServiceOnboardingInterface = onboardingService.NewService(onboardingRepo.NewRepository(routes.DB), roleRepository, audit)
 	identityResolver := identityService.NewResolver(identityRepository, spaceRepository, permissions)
 	reminders := reminderService.NewReminderService(
 		reminderRepo.NewRepository(routes.DB), spaceRepository, authorizationService.NewAuthorizer(), audit,

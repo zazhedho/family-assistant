@@ -7,25 +7,25 @@ import (
 	"strings"
 	"testing"
 
+	interfaceonboarding "family-assistant/internal/interfaces/onboarding"
 	serviceidentity "family-assistant/internal/services/identity"
-	serviceonboarding "family-assistant/internal/services/onboarding"
 )
 
 type registrarStub struct {
-	input  serviceonboarding.Input
-	result serviceonboarding.Result
+	input  interfaceonboarding.Input
+	result interfaceonboarding.Result
 	err    error
 	calls  int
 }
 
-func (s *registrarStub) Register(_ context.Context, input serviceonboarding.Input) (serviceonboarding.Result, error) {
+func (s *registrarStub) Register(_ context.Context, input interfaceonboarding.Input) (interfaceonboarding.Result, error) {
 	s.calls++
 	s.input = input
 	return s.result, s.err
 }
 
 func TestAccountRegisterUsesOnlyTrustedExternalRequest(t *testing.T) {
-	service := &registrarStub{result: serviceonboarding.Result{Status: "created", UserID: "user-1", SpaceID: "space-1"}}
+	service := &registrarStub{result: interfaceonboarding.Result{Status: "created", UserID: "user-1", SpaceID: "space-1"}}
 	ctx := WithExternalRequest(context.Background(), ExternalRequest{
 		Provider: "hermes", ExternalID: "profile-1", Channel: "whatsapp",
 	})
@@ -46,7 +46,7 @@ func TestAccountRegisterUsesOnlyTrustedExternalRequest(t *testing.T) {
 }
 
 func TestAccountRegisterMapsExistingRegistrarResultSafely(t *testing.T) {
-	service := &registrarStub{result: serviceonboarding.Result{Status: "existing", UserID: "user-existing", SpaceID: "space-existing"}}
+	service := &registrarStub{result: interfaceonboarding.Result{Status: "existing", UserID: "user-existing", SpaceID: "space-existing"}}
 	ctx := WithExternalRequest(context.Background(), ExternalRequest{
 		Provider: "hermes", ExternalID: "profile-existing", Channel: "whatsapp",
 	})
@@ -90,7 +90,7 @@ func TestAccountRegisterMapsServiceErrorsSafely(t *testing.T) {
 	ctx := WithExternalRequest(context.Background(), ExternalRequest{Provider: "hermes", ExternalID: "profile-1", Channel: "whatsapp"})
 	for _, tt := range []struct {
 		name       string
-		registrar  serviceonboarding.Registrar
+		registrar  interfaceonboarding.ServiceOnboardingInterface
 		input      AccountRegisterInput
 		serviceErr error
 		wantCode   string
@@ -125,7 +125,7 @@ func TestAccountRegisterMapsServiceErrorsSafely(t *testing.T) {
 		},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			var registrar serviceonboarding.Registrar
+			var registrar interfaceonboarding.ServiceOnboardingInterface
 			if tt.name != "nil registrar" {
 				registrar = &registrarStub{err: tt.serviceErr}
 			}
@@ -141,4 +141,4 @@ func TestAccountRegisterMapsServiceErrorsSafely(t *testing.T) {
 	}
 }
 
-var _ serviceonboarding.Registrar = (*registrarStub)(nil)
+var _ interfaceonboarding.ServiceOnboardingInterface = (*registrarStub)(nil)

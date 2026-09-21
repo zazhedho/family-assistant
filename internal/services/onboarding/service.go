@@ -11,9 +11,9 @@ import (
 	domainaudit "family-assistant/internal/domain/audit"
 	domainidentity "family-assistant/internal/domain/identity"
 	domainonboarding "family-assistant/internal/domain/onboarding"
-	domainrole "family-assistant/internal/domain/role"
 	domainspace "family-assistant/internal/domain/space"
 	domainuser "family-assistant/internal/domain/user"
+	interfaceonboarding "family-assistant/internal/interfaces/onboarding"
 	serviceidentity "family-assistant/internal/services/identity"
 	"family-assistant/pkg/config"
 	"family-assistant/utils"
@@ -24,41 +24,14 @@ const (
 	StatusExisting = "existing"
 )
 
-type Input struct {
-	Name       string
-	BirthDate  string
-	Consent    bool
-	Provider   string
-	ExternalID string
-	Channel    string
-}
-
-type Result struct {
-	Status  string
-	UserID  string
-	SpaceID string
-}
-
-type Registrar interface {
-	Register(context.Context, Input) (Result, error)
-}
-
-type RoleFinder interface {
-	GetByName(context.Context, string) (domainrole.Role, error)
-}
-
-type AuditStore interface {
-	Store(context.Context, domainaudit.AuditEvent) error
-}
-
 type Service struct {
 	repository domainonboarding.Repository
-	roles      RoleFinder
-	audit      AuditStore
+	roles      interfaceonboarding.RoleFinder
+	audit      interfaceonboarding.AuditStore
 	now        func() time.Time
 }
 
-func NewService(repository domainonboarding.Repository, roles RoleFinder, audit AuditStore) *Service {
+func NewService(repository domainonboarding.Repository, roles interfaceonboarding.RoleFinder, audit interfaceonboarding.AuditStore) *Service {
 	return &Service{
 		repository: repository,
 		roles:      roles,
@@ -67,50 +40,50 @@ func NewService(repository domainonboarding.Repository, roles RoleFinder, audit 
 	}
 }
 
-func (s *Service) Register(ctx context.Context, input Input) (Result, error) {
+func (s *Service) Register(ctx context.Context, input interfaceonboarding.Input) (interfaceonboarding.Result, error) {
 	provider := domainidentity.NormalizeProvider(input.Provider)
 	externalID := strings.TrimSpace(input.ExternalID)
 	channel := strings.TrimSpace(input.Channel)
 	if provider == "" || externalID == "" {
-		return Result{}, s.fail(ctx, channel, provider, serviceidentity.ErrUnauthenticated)
+		return interfaceonboarding.Result{}, s.fail(ctx, channel, provider, serviceidentity.ErrUnauthenticated)
 	}
 	if !input.Consent {
-		return Result{}, s.fail(ctx, channel, provider, &serviceidentity.ValidationError{Field: "consent", Reason: "is required"})
+		return interfaceonboarding.Result{}, s.fail(ctx, channel, provider, &serviceidentity.ValidationError{Field: "consent", Reason: "is required"})
 	}
 
 	name := utils.TitleCase(utils.StripHTML(input.Name))
 	if count := utf8.RuneCountInString(name); count < 3 || count > 100 {
-		return Result{}, s.fail(ctx, channel, provider, &serviceidentity.ValidationError{Field: "name", Reason: "must contain 3 to 100 characters"})
+		return interfaceonboarding.Result{}, s.fail(ctx, channel, provider, &serviceidentity.ValidationError{Field: "name", Reason: "must contain 3 to 100 characters"})
 	}
 	birthDate, err := parseBirthDate(input.BirthDate, s.now().UTC())
 	if err != nil {
-		return Result{}, s.fail(ctx, channel, provider, err)
+		return interfaceonboarding.Result{}, s.fail(ctx, channel, provider, err)
 	}
 	if s.repository == nil {
-		return Result{}, s.fail(ctx, channel, provider, errors.New("onboarding repository is not configured"))
+		return interfaceonboarding.Result{}, s.fail(ctx, channel, provider, errors.New("onboarding repository is not configured"))
 	}
 
 	existing, err := s.repository.FindByExternalIdentity(ctx, provider, externalID)
 	if err == nil {
 		if strings.TrimSpace(existing.UserID) == "" || strings.TrimSpace(existing.SpaceID) == "" {
-			return Result{}, s.fail(ctx, channel, provider, errors.New("existing account is not configured"))
+			return interfaceonboarding.Result{}, s.fail(ctx, channel, provider, errors.New("existing account is not configured"))
 		}
-		return Result{Status: StatusExisting, UserID: existing.UserID, SpaceID: existing.SpaceID}, nil
+		return interfaceonboarding.Result{Status: StatusExisting, UserID: existing.UserID, SpaceID: existing.SpaceID}, nil
 	}
 	if !errors.Is(err, domainidentity.ErrIdentityNotFound) {
-		return Result{}, s.fail(ctx, channel, provider, err)
+		return interfaceonboarding.Result{}, s.fail(ctx, channel, provider, err)
 	}
 	if s.roles == nil {
-		return Result{}, s.fail(ctx, channel, provider, errors.New("onboarding roles are not configured"))
+		return interfaceonboarding.Result{}, s.fail(ctx, channel, provider, errors.New("onboarding roles are not configured"))
 	}
 
 	viewer, err := s.roles.GetByName(ctx, utils.RoleViewer)
 	if err != nil || strings.TrimSpace(viewer.Id) == "" {
-		return Result{}, s.fail(ctx, channel, provider, errors.New("role viewer is not configured"))
+		return interfaceonboarding.Result{}, s.fail(ctx, channel, provider, errors.New("role viewer is not configured"))
 	}
 	owner, err := s.roles.GetByName(ctx, "space_owner")
 	if err != nil || strings.TrimSpace(owner.Id) == "" {
-		return Result{}, s.fail(ctx, channel, provider, errors.New("role space_owner is not configured"))
+		return interfaceonboarding.Result{}, s.fail(ctx, channel, provider, errors.New("role space_owner is not configured"))
 	}
 
 	registration := s.newRegistration(name, birthDate, provider, externalID, viewer.Id, owner.Id)
@@ -118,13 +91,13 @@ func (s *Service) Register(ctx context.Context, input Input) (Result, error) {
 		if errors.Is(err, domainidentity.ErrIdentityConflict) {
 			winner, findErr := s.repository.FindByExternalIdentity(ctx, provider, externalID)
 			if findErr == nil && strings.TrimSpace(winner.UserID) != "" && strings.TrimSpace(winner.SpaceID) != "" {
-				return Result{Status: StatusExisting, UserID: winner.UserID, SpaceID: winner.SpaceID}, nil
+				return interfaceonboarding.Result{Status: StatusExisting, UserID: winner.UserID, SpaceID: winner.SpaceID}, nil
 			}
 		}
-		return Result{}, s.fail(ctx, channel, provider, err)
+		return interfaceonboarding.Result{}, s.fail(ctx, channel, provider, err)
 	}
 	s.success(ctx, channel, provider, registration.User.Id)
-	return Result{Status: StatusCreated, UserID: registration.User.Id, SpaceID: registration.Space.ID}, nil
+	return interfaceonboarding.Result{Status: StatusCreated, UserID: registration.User.Id, SpaceID: registration.Space.ID}, nil
 }
 
 func parseBirthDate(raw string, now time.Time) (*time.Time, error) {
@@ -247,4 +220,4 @@ func failureCategory(err error) string {
 	}
 }
 
-var _ Registrar = (*Service)(nil)
+var _ interfaceonboarding.ServiceOnboardingInterface = (*Service)(nil)
