@@ -16,7 +16,7 @@ import (
 	domainidentity "family-assistant/internal/domain/identity"
 	domainpermission "family-assistant/internal/domain/permission"
 	domainspace "family-assistant/internal/domain/space"
-	interfaceonboarding "family-assistant/internal/interfaces/onboarding"
+	"family-assistant/internal/dto"
 	serviceauthorization "family-assistant/internal/services/authorization"
 	serviceidentity "family-assistant/internal/services/identity"
 	"family-assistant/pkg/config"
@@ -53,7 +53,7 @@ func TestHTTPServerUsesSafeTimeoutsWithoutWriteTimeout(t *testing.T) {
 
 func TestHTTPHandlerMountsMCPOnlyAtExactPath(t *testing.T) {
 	handler := NewHTTPHandler(config.MCPConfig{ServerKey: "secret"}, &resolverStub{
-		actor: serviceidentity.ActorContext{
+		actor: domainidentity.ActorContext{
 			UserID:   "user-1",
 			MemberID: "member-1",
 			Source:   "mcp",
@@ -252,7 +252,7 @@ func TestHTTPHandlerToolOutputSchemasUseHermesObjectRoot(t *testing.T) {
 }
 
 func TestHTTPHandlerAccountRegisterNeedsServerAuthenticationAndTrustedProfile(t *testing.T) {
-	registrar := &registrarStub{result: interfaceonboarding.Result{Status: "created", UserID: "user-1", SpaceID: "space-1"}}
+	registrar := &registrarStub{result: dto.AccountRegistrationResult{Status: "created", UserID: "user-1", SpaceID: "space-1"}}
 	handler := NewHTTPHandler(config.MCPConfig{ServerKey: "secret"}, &resolverStub{err: serviceidentity.ErrUnauthenticated}, nil, registrar, nil, nil)
 	server := httptest.NewServer(handler)
 	t.Cleanup(server.Close)
@@ -286,7 +286,7 @@ func TestHTTPHandlerProtectedSpaceToolMapsSuccessForbiddenAndNotFound(t *testing
 		UserID: "user-1", RoleID: "role-owner", RoleName: "space_owner", Status: domainspace.StatusActive,
 	}
 	resolver := &resolverStub{
-		actor: serviceidentity.ActorContext{UserID: "user-1", Memberships: []domainspace.ResolvedMembership{{
+		actor: domainidentity.ActorContext{UserID: "user-1", Memberships: []domainspace.ResolvedMembership{{
 			ID: "00000000-0000-0000-0000-000000000301", SpaceID: spaceID, SpaceName: "Jane", SpaceType: domainspace.TypePersonal,
 			UserID: "user-1", RoleID: "role-owner", RoleName: "space_owner", Status: domainspace.StatusActive,
 		}}},

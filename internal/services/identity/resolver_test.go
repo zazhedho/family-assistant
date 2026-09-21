@@ -9,8 +9,14 @@ import (
 	domainidentity "family-assistant/internal/domain/identity"
 	domainpermission "family-assistant/internal/domain/permission"
 	domainspace "family-assistant/internal/domain/space"
+	interfaceidentity "family-assistant/internal/interfaces/identity"
 
 	"gorm.io/gorm"
+)
+
+var (
+	_ interfaceidentity.Resolver     = (*ResolverService)(nil)
+	_ interfaceidentity.UserResolver = (*ResolverService)(nil)
 )
 
 type identityRepositoryStub struct {
@@ -260,7 +266,7 @@ func TestResolverReturnsControlledErrorWhenDependenciesMissing(t *testing.T) {
 }
 
 func TestActorContextHasPermission(t *testing.T) {
-	actor := ActorContext{Permissions: map[string]struct{}{"reminders:create": {}}}
+	actor := domainidentity.ActorContext{Permissions: map[string]struct{}{"reminders:create": {}}}
 
 	if !actor.HasPermission("reminders:create") {
 		t.Fatal("expected permission")

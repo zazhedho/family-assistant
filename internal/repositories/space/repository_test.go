@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	domainspace "family-assistant/internal/domain/space"
+	interfacespace "family-assistant/internal/interfaces/space"
 
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/google/uuid"
@@ -254,6 +255,6 @@ func TestListActiveMembersFiltersDeletedAndInactiveRows(t *testing.T) {
 	}
 }
 
-func TestRepositorySatisfiesDomainInterface(t *testing.T) {
-	var _ domainspace.Repository = (*Repository)(nil)
+func TestRepositorySatisfiesInterface(t *testing.T) {
+	var _ interfacespace.RepoSpaceInterface = (*Repository)(nil)
 }

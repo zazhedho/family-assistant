@@ -7,6 +7,7 @@ import (
 	"time"
 
 	domainidentity "family-assistant/internal/domain/identity"
+	interfaceidentity "family-assistant/internal/interfaces/identity"
 	"family-assistant/utils"
 
 	"gorm.io/gorm"
@@ -17,11 +18,11 @@ type Repository struct {
 	DB *gorm.DB
 }
 
-func NewRepository(db *gorm.DB) *Repository {
+func NewRepository(db *gorm.DB) interfaceidentity.RepoIdentityInterface {
 	return &Repository{DB: db}
 }
 
-var _ domainidentity.Repository = (*Repository)(nil)
+var _ interfaceidentity.RepoIdentityInterface = (*Repository)(nil)
 
 func (r *Repository) CreateLinkToken(ctx context.Context, token *domainidentity.LinkToken) error {
 	if token == nil {

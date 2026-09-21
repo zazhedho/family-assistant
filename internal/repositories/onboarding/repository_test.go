@@ -11,6 +11,7 @@ import (
 	domainonboarding "family-assistant/internal/domain/onboarding"
 	domainspace "family-assistant/internal/domain/space"
 	domainuser "family-assistant/internal/domain/user"
+	interfaceonboarding "family-assistant/internal/interfaces/onboarding"
 
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -250,4 +251,8 @@ func TestFindByExternalIdentityMapsRecordNotFound(t *testing.T) {
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func TestRepositorySatisfiesInterface(t *testing.T) {
+	var _ interfaceonboarding.RepoOnboardingInterface = (*Repository)(nil)
 }

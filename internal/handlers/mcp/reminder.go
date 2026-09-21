@@ -6,10 +6,13 @@ import (
 	"strings"
 	"time"
 
+	domainidentity "family-assistant/internal/domain/identity"
 	domainreminder "family-assistant/internal/domain/reminder"
+	"family-assistant/internal/dto"
+	interfaceidentity "family-assistant/internal/interfaces/identity"
+	interfacereminder "family-assistant/internal/interfaces/reminder"
 	serviceauthorization "family-assistant/internal/services/authorization"
 	serviceidentity "family-assistant/internal/services/identity"
-	servicereminder "family-assistant/internal/services/reminder"
 
 	"github.com/google/uuid"
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
@@ -49,7 +52,7 @@ type ReminderListOutput struct {
 	Reminders []ReminderOutput `json:"reminders"`
 }
 
-func ReminderCreate(ctx context.Context, resolver serviceidentity.Resolver, service servicereminder.Service, input ReminderCreateInput) (ReminderOutput, error) {
+func ReminderCreate(ctx context.Context, resolver interfaceidentity.Resolver, service interfacereminder.ServiceReminderInterface, input ReminderCreateInput) (ReminderOutput, error) {
 	actor, err := reminderActor(ctx, resolver, input.Space)
 	if err != nil {
 		return ReminderOutput{}, MapToolError(err)
@@ -68,7 +71,7 @@ func ReminderCreate(ctx context.Context, resolver serviceidentity.Resolver, serv
 	if service == nil {
 		return ReminderOutput{}, MapToolError(errors.New("reminder service is not configured"))
 	}
-	reminder, err := service.Create(ctx, actor, servicereminder.CreateInput{
+	reminder, err := service.Create(ctx, actor, dto.ReminderCreateInput{
 		Space: actor.SpaceID, Title: input.Title, Description: input.Description, ScheduledAt: *scheduledAt, AssigneeMemberID: assignee,
 	})
 	if err != nil {
@@ -77,7 +80,7 @@ func ReminderCreate(ctx context.Context, resolver serviceidentity.Resolver, serv
 	return reminderOutput(reminder), nil
 }
 
-func ReminderList(ctx context.Context, resolver serviceidentity.Resolver, service servicereminder.Service, input ReminderListInput) ([]ReminderOutput, error) {
+func ReminderList(ctx context.Context, resolver interfaceidentity.Resolver, service interfacereminder.ServiceReminderInterface, input ReminderListInput) ([]ReminderOutput, error) {
 	actor, err := reminderActor(ctx, resolver, input.Space)
 	if err != nil {
 		return nil, MapToolError(err)
@@ -89,7 +92,7 @@ func ReminderList(ctx context.Context, resolver serviceidentity.Resolver, servic
 	if err != nil {
 		return nil, MapToolError(err)
 	}
-	listInput := servicereminder.ListInput{Space: actor.SpaceID, Status: status}
+	listInput := dto.ReminderListInput{Space: actor.SpaceID, Status: status}
 	if listInput.From, err = parseReminderTime(input.From, "from", false); err != nil {
 		return nil, MapToolError(err)
 	}
@@ -107,7 +110,7 @@ func ReminderList(ctx context.Context, resolver serviceidentity.Resolver, servic
 	return result, nil
 }
 
-func ReminderComplete(ctx context.Context, resolver serviceidentity.Resolver, service servicereminder.Service, input ReminderCompleteInput) (ReminderOutput, error) {
+func ReminderComplete(ctx context.Context, resolver interfaceidentity.Resolver, service interfacereminder.ServiceReminderInterface, input ReminderCompleteInput) (ReminderOutput, error) {
 	actor, err := reminderActor(ctx, resolver, input.Space)
 	if err != nil {
 		return ReminderOutput{}, MapToolError(err)
@@ -126,10 +129,10 @@ func ReminderComplete(ctx context.Context, resolver serviceidentity.Resolver, se
 	return reminderOutput(reminder), nil
 }
 
-func reminderActor(ctx context.Context, resolver serviceidentity.Resolver, selector string) (serviceidentity.ActorContext, error) {
+func reminderActor(ctx context.Context, resolver interfaceidentity.Resolver, selector string) (domainidentity.ActorContext, error) {
 	actor, err := RequireActor(ctx, resolver)
 	if err != nil {
-		return serviceidentity.ActorContext{}, err
+		return domainidentity.ActorContext{}, err
 	}
 	return serviceidentity.SelectSpace(ctx, actor, selector, selectorPermissions(resolver))
 }
@@ -184,7 +187,7 @@ func reminderOutput(reminder *domainreminder.Reminder) ReminderOutput {
 	}
 }
 
-func registerReminderTools(server *mcpsdk.Server, service servicereminder.Service, resolver serviceidentity.Resolver) {
+func registerReminderTools(server *mcpsdk.Server, service interfacereminder.ServiceReminderInterface, resolver interfaceidentity.Resolver) {
 	mcpsdk.AddTool(server, &mcpsdk.Tool{
 		Name: "reminder_create", Description: "Create a reminder in an authorized Space.",
 	}, func(ctx context.Context, _ *mcpsdk.CallToolRequest, input ReminderCreateInput) (*mcpsdk.CallToolResult, ReminderOutput, error) {

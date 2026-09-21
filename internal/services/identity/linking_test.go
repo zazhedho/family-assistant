@@ -13,6 +13,7 @@ import (
 	"family-assistant/internal/authscope"
 	domainaudit "family-assistant/internal/domain/audit"
 	domainidentity "family-assistant/internal/domain/identity"
+	interfaceidentity "family-assistant/internal/interfaces/identity"
 	"family-assistant/pkg/config"
 )
 
@@ -346,5 +347,5 @@ func assertNoSecrets(t *testing.T, event domainaudit.AuditEvent, secrets ...stri
 }
 
 func TestLinkServiceSatisfiesInterface(t *testing.T) {
-	var _ LinkService = (*service)(nil)
+	var _ interfaceidentity.LinkService = (*service)(nil)
 }

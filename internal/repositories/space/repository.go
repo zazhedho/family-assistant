@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	domainspace "family-assistant/internal/domain/space"
+	interfacespace "family-assistant/internal/interfaces/space"
 	"family-assistant/utils"
 
 	"gorm.io/gorm"
@@ -15,11 +16,11 @@ type Repository struct {
 	DB *gorm.DB
 }
 
-func NewRepository(db *gorm.DB) *Repository {
+func NewRepository(db *gorm.DB) interfacespace.RepoSpaceInterface {
 	return &Repository{DB: db}
 }
 
-var _ domainspace.Repository = (*Repository)(nil)
+var _ interfacespace.RepoSpaceInterface = (*Repository)(nil)
 
 var (
 	errSpaceRequired       = errors.New("space is required")

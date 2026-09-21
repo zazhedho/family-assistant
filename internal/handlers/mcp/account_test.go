@@ -7,25 +7,26 @@ import (
 	"strings"
 	"testing"
 
+	"family-assistant/internal/dto"
 	interfaceonboarding "family-assistant/internal/interfaces/onboarding"
 	serviceidentity "family-assistant/internal/services/identity"
 )
 
 type registrarStub struct {
-	input  interfaceonboarding.Input
-	result interfaceonboarding.Result
+	input  dto.AccountRegistrationInput
+	result dto.AccountRegistrationResult
 	err    error
 	calls  int
 }
 
-func (s *registrarStub) Register(_ context.Context, input interfaceonboarding.Input) (interfaceonboarding.Result, error) {
+func (s *registrarStub) Register(_ context.Context, input dto.AccountRegistrationInput) (dto.AccountRegistrationResult, error) {
 	s.calls++
 	s.input = input
 	return s.result, s.err
 }
 
 func TestAccountRegisterUsesOnlyTrustedExternalRequest(t *testing.T) {
-	service := &registrarStub{result: interfaceonboarding.Result{Status: "created", UserID: "user-1", SpaceID: "space-1"}}
+	service := &registrarStub{result: dto.AccountRegistrationResult{Status: "created", UserID: "user-1", SpaceID: "space-1"}}
 	ctx := WithExternalRequest(context.Background(), ExternalRequest{
 		Provider: "hermes", ExternalID: "profile-1", Channel: "whatsapp",
 	})
@@ -46,7 +47,7 @@ func TestAccountRegisterUsesOnlyTrustedExternalRequest(t *testing.T) {
 }
 
 func TestAccountRegisterMapsExistingRegistrarResultSafely(t *testing.T) {
-	service := &registrarStub{result: interfaceonboarding.Result{Status: "existing", UserID: "user-existing", SpaceID: "space-existing"}}
+	service := &registrarStub{result: dto.AccountRegistrationResult{Status: "existing", UserID: "user-existing", SpaceID: "space-existing"}}
 	ctx := WithExternalRequest(context.Background(), ExternalRequest{
 		Provider: "hermes", ExternalID: "profile-existing", Channel: "whatsapp",
 	})

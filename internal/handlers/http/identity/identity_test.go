@@ -14,7 +14,7 @@ import (
 	domainaudit "family-assistant/internal/domain/audit"
 	domainidentity "family-assistant/internal/domain/identity"
 	"family-assistant/internal/dto"
-	serviceidentity "family-assistant/internal/services/identity"
+	interfaceidentity "family-assistant/internal/interfaces/identity"
 	"family-assistant/pkg/filter"
 
 	"github.com/gin-gonic/gin"
@@ -183,5 +183,5 @@ func TestIdentityHandlerAuditsEarlyFailureWithoutBodyOrSecrets(t *testing.T) {
 }
 
 func TestIdentityServiceStubSatisfiesInterface(t *testing.T) {
-	var _ serviceidentity.LinkService = (*identityServiceStub)(nil)
+	var _ interfaceidentity.LinkService = (*identityServiceStub)(nil)
 }

@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	domainidentity "family-assistant/internal/domain/identity"
 	domainpermission "family-assistant/internal/domain/permission"
 	serviceidentity "family-assistant/internal/services/identity"
 	"family-assistant/pkg/config"
@@ -27,7 +28,7 @@ func TestSecretDigestUsesFixedSizeHashForComparison(t *testing.T) {
 }
 
 type resolverStub struct {
-	actor       serviceidentity.ActorContext
+	actor       domainidentity.ActorContext
 	err         error
 	profileID   string
 	channel     string
@@ -35,14 +36,14 @@ type resolverStub struct {
 	permissions []domainpermission.Permission
 }
 
-func (s *resolverStub) Resolve(_ context.Context, profileID, channel string) (serviceidentity.ActorContext, error) {
+func (s *resolverStub) Resolve(_ context.Context, profileID, channel string) (domainidentity.ActorContext, error) {
 	s.resolveCall++
 	s.profileID = profileID
 	s.channel = channel
 	return s.actor, s.err
 }
 
-func (s *resolverStub) ResolveExternal(ctx context.Context, _ string, profileID, channel string) (serviceidentity.ActorContext, error) {
+func (s *resolverStub) ResolveExternal(ctx context.Context, _ string, profileID, channel string) (domainidentity.ActorContext, error) {
 	return s.Resolve(ctx, profileID, channel)
 }
 
@@ -95,7 +96,7 @@ func TestMCPAuthMiddlewareRejectsUnauthenticatedRequests(t *testing.T) {
 }
 
 func TestMCPAuthMiddlewareUsesConfiguredProfileHeaderAndAttachesTrustedExternalRequest(t *testing.T) {
-	resolver := &resolverStub{actor: serviceidentity.ActorContext{
+	resolver := &resolverStub{actor: domainidentity.ActorContext{
 		UserID:   "user-1",
 		MemberID: "member-1",
 		Source:   "mcp",
@@ -156,7 +157,7 @@ func TestMCPAuthMiddlewareDoesNotResolveActor(t *testing.T) {
 }
 
 func TestRequireActorUsesOnlyTrustedExternalRequest(t *testing.T) {
-	resolver := &resolverStub{actor: serviceidentity.ActorContext{UserID: "user-1"}}
+	resolver := &resolverStub{actor: domainidentity.ActorContext{UserID: "user-1"}}
 	ctx := WithExternalRequest(context.Background(), ExternalRequest{
 		Provider: "hermes", ExternalID: "profile-parent", Channel: "whatsapp",
 	})

@@ -11,8 +11,10 @@ import (
 	"family-assistant/internal/authscope"
 	domainaudit "family-assistant/internal/domain/audit"
 	domainspace "family-assistant/internal/domain/space"
+	"family-assistant/internal/dto"
 	handlercommon "family-assistant/internal/handlers/http/common"
 	interfaceaudit "family-assistant/internal/interfaces/audit"
+	interfacespace "family-assistant/internal/interfaces/space"
 	serviceauthorization "family-assistant/internal/services/authorization"
 	servicespace "family-assistant/internal/services/space"
 	"family-assistant/pkg/messages"
@@ -27,7 +29,7 @@ import (
 var errUnauthenticated = errors.New("authentication required")
 
 type SpaceHandler struct {
-	Service servicespace.Service
+	Service interfacespace.ServiceSpaceInterface
 	handlercommon.AuditWriter
 }
 
@@ -36,7 +38,7 @@ type createRequest struct {
 	Category string `json:"category"`
 }
 
-func NewSpaceHandler(service servicespace.Service, auditService interfaceaudit.ServiceAuditInterface) *SpaceHandler {
+func NewSpaceHandler(service interfacespace.ServiceSpaceInterface, auditService interfaceaudit.ServiceAuditInterface) *SpaceHandler {
 	return &SpaceHandler{
 		Service:     service,
 		AuditWriter: handlercommon.NewAuditWriter(auditService, "SpaceHandler"),
@@ -87,7 +89,7 @@ func (h *SpaceHandler) Create(ctx *gin.Context) {
 		writeSpaceError(ctx, err)
 		return
 	}
-	space, err := h.Service.Create(withAuditProvenance(ctx), userID, servicespace.CreateInput{Name: request.Name, Category: request.Category})
+	space, err := h.Service.Create(withAuditProvenance(ctx), userID, dto.SpaceCreateInput{Name: request.Name, Category: request.Category})
 	if err != nil {
 		writeSpaceError(ctx, err)
 		return

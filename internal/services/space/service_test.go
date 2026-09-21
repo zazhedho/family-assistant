@@ -11,9 +11,14 @@ import (
 	domainpermission "family-assistant/internal/domain/permission"
 	domainrole "family-assistant/internal/domain/role"
 	domainspace "family-assistant/internal/domain/space"
+	"family-assistant/internal/dto"
+	interfacespace "family-assistant/internal/interfaces/space"
+	serviceauthorization "family-assistant/internal/services/authorization"
 
 	"gorm.io/gorm"
 )
+
+var _ interfacespace.ServiceSpaceInterface = (*service)(nil)
 
 type spaceRepositoryStub struct {
 	memberships []domainspace.ResolvedMembership
@@ -113,7 +118,7 @@ func (s *spaceAuditStub) Store(_ context.Context, event domainaudit.AuditEvent) 
 	return nil
 }
 
-func newSpaceService(repo *spaceRepositoryStub, permissions map[string][]domainpermission.Permission, audit *spaceAuditStub) Service {
+func newSpaceService(repo *spaceRepositoryStub, permissions map[string][]domainpermission.Permission, audit *spaceAuditStub) interfacespace.ServiceSpaceInterface {
 	return NewService(repo, &roleRepositoryStub{role: domainrole.Role{Id: "role-owner", Name: "space_owner"}}, &permissionRepositoryStub{byRole: permissions}, audit)
 }
 
@@ -131,8 +136,8 @@ func TestCreateSharedSpaceRejectsPersonalCategory(t *testing.T) {
 		"role-1": {permission("spaces", "create")},
 	}, &spaceAuditStub{})
 
-	_, err := service.Create(context.Background(), "user-1", CreateInput{Name: "Mine", Category: domainspace.CategoryPersonal})
-	var validationErr *ValidationError
+	_, err := service.Create(context.Background(), "user-1", dto.SpaceCreateInput{Name: "Mine", Category: domainspace.CategoryPersonal})
+	var validationErr *serviceauthorization.ValidationError
 	if !errors.As(err, &validationErr) || validationErr.Field != "category" {
 		t.Fatalf("expected category validation error, got %v", err)
 	}
@@ -146,7 +151,7 @@ func TestCreateSharedSpaceAcceptsAllowlistedCategories(t *testing.T) {
 				"role-1": {permission("spaces", "create")},
 			}, &spaceAuditStub{})
 
-			created, err := service.Create(context.Background(), "user-1", CreateInput{Name: " Shared ", Category: category})
+			created, err := service.Create(context.Background(), "user-1", dto.SpaceCreateInput{Name: " Shared ", Category: category})
 			if err != nil {
 				t.Fatalf("create shared space: %v", err)
 			}
@@ -163,11 +168,11 @@ func TestCreateSharedSpaceTrimsButDoesNotUniquifyNames(t *testing.T) {
 		"role-1": {permission("spaces", "create")},
 	}, &spaceAuditStub{})
 
-	first, err := service.Create(context.Background(), "user-1", CreateInput{Name: "  Shared  ", Category: domainspace.CategoryFamily})
+	first, err := service.Create(context.Background(), "user-1", dto.SpaceCreateInput{Name: "  Shared  ", Category: domainspace.CategoryFamily})
 	if err != nil {
 		t.Fatalf("first create: %v", err)
 	}
-	second, err := service.Create(context.Background(), "user-1", CreateInput{Name: "Shared", Category: domainspace.CategoryFamily})
+	second, err := service.Create(context.Background(), "user-1", dto.SpaceCreateInput{Name: "Shared", Category: domainspace.CategoryFamily})
 	if err != nil {
 		t.Fatalf("second create: %v", err)
 	}
@@ -184,7 +189,7 @@ func TestCreateSharedSpaceCreatesOwnerMembershipTransactionally(t *testing.T) {
 		"role-1": {permission("spaces", "create")},
 	}}, audit)
 
-	created, err := service.Create(context.Background(), "user-1", CreateInput{Name: "Family", Category: domainspace.CategoryFamily})
+	created, err := service.Create(context.Background(), "user-1", dto.SpaceCreateInput{Name: "Family", Category: domainspace.CategoryFamily})
 	if err != nil {
 		t.Fatalf("create shared space: %v", err)
 	}
@@ -215,7 +220,7 @@ func TestCreateSharedSpaceAuditsFailureWithoutRequestBody(t *testing.T) {
 		"role-1": {permission("spaces", "create")},
 	}, audit)
 
-	_, err := service.Create(context.Background(), "user-1", CreateInput{Name: "Family", Category: domainspace.CategoryFamily})
+	_, err := service.Create(context.Background(), "user-1", dto.SpaceCreateInput{Name: "Family", Category: domainspace.CategoryFamily})
 	if err == nil {
 		t.Fatal("expected repository error")
 	}
@@ -287,7 +292,7 @@ func TestCreateDeniesMembershipRoleWithoutCreatePermission(t *testing.T) {
 	repo := &spaceRepositoryStub{memberships: []domainspace.ResolvedMembership{membership("role-1", "space-1", "user-1")}}
 	service := newSpaceService(repo, map[string][]domainpermission.Permission{"role-1": {}}, audit)
 
-	_, err := service.Create(context.Background(), "user-1", CreateInput{Name: "Family", Category: domainspace.CategoryFamily})
+	_, err := service.Create(context.Background(), "user-1", dto.SpaceCreateInput{Name: "Family", Category: domainspace.CategoryFamily})
 	if !errors.Is(err, ErrForbidden) {
 		t.Fatalf("expected forbidden, got %v", err)
 	}
@@ -316,7 +321,7 @@ func TestAuthorizationFailsClosedWithoutMembershipPermissionRepository(t *testin
 	if _, err := service.List(ctx, "user-1"); err == nil {
 		t.Fatal("list authorized from global authscope without membership permission repository")
 	}
-	if _, err := service.Create(ctx, "user-1", CreateInput{Name: "Family", Category: domainspace.CategoryFamily}); err == nil {
+	if _, err := service.Create(ctx, "user-1", dto.SpaceCreateInput{Name: "Family", Category: domainspace.CategoryFamily}); err == nil {
 		t.Fatal("create authorized from global authscope without membership permission repository")
 	}
 	if _, err := service.Members(ctx, "user-1", "space-1"); err == nil {
@@ -393,7 +398,7 @@ func TestAuditUsesInitiatorAndHTTPProvenanceDuringImpersonation(t *testing.T) {
 		"role-1": {permission("spaces", "create")},
 	}, audit)
 
-	_, err := service.Create(ctx, "target-user", CreateInput{Name: "Family", Category: domainspace.CategoryFamily})
+	_, err := service.Create(ctx, "target-user", dto.SpaceCreateInput{Name: "Family", Category: domainspace.CategoryFamily})
 	if err != nil {
 		t.Fatalf("create impersonated space: %v", err)
 	}
@@ -409,8 +414,8 @@ func TestAuditUsesInitiatorAndHTTPProvenanceDuringImpersonation(t *testing.T) {
 	}
 }
 
-func TestSpaceRepositoryStubSatisfiesDomainInterface(t *testing.T) {
-	var _ domainspace.Repository = (*spaceRepositoryStub)(nil)
+func TestSpaceRepositoryStubSatisfiesInterface(t *testing.T) {
+	var _ interfacespace.RepoSpaceInterface = (*spaceRepositoryStub)(nil)
 	var _ interface {
 		Store(context.Context, domainaudit.AuditEvent) error
 	} = (*spaceAuditStub)(nil)

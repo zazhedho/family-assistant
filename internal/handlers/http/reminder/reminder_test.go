@@ -9,11 +9,13 @@ import (
 	"time"
 
 	"family-assistant/internal/authscope"
+	domainidentity "family-assistant/internal/domain/identity"
 	domainpermission "family-assistant/internal/domain/permission"
 	domainreminder "family-assistant/internal/domain/reminder"
 	domainspace "family-assistant/internal/domain/space"
+	"family-assistant/internal/dto"
+	interfacereminder "family-assistant/internal/interfaces/reminder"
 	serviceauthorization "family-assistant/internal/services/authorization"
-	serviceidentity "family-assistant/internal/services/identity"
 	servicereminder "family-assistant/internal/services/reminder"
 
 	"github.com/gin-gonic/gin"
@@ -26,11 +28,11 @@ const (
 )
 
 type reminderHTTPServiceStub struct {
-	createActor   serviceidentity.ActorContext
-	createInput   servicereminder.CreateInput
-	listActor     serviceidentity.ActorContext
-	listInput     servicereminder.ListInput
-	completeActor serviceidentity.ActorContext
+	createActor   domainidentity.ActorContext
+	createInput   dto.ReminderCreateInput
+	listActor     domainidentity.ActorContext
+	listInput     dto.ReminderListInput
+	completeActor domainidentity.ActorContext
 	completeSpace string
 	completeID    string
 	created       *domainreminder.Reminder
@@ -41,7 +43,7 @@ type reminderHTTPServiceStub struct {
 	completeErr   error
 }
 
-func (s *reminderHTTPServiceStub) Create(_ context.Context, actor serviceidentity.ActorContext, input servicereminder.CreateInput) (*domainreminder.Reminder, error) {
+func (s *reminderHTTPServiceStub) Create(_ context.Context, actor domainidentity.ActorContext, input dto.ReminderCreateInput) (*domainreminder.Reminder, error) {
 	s.createActor, s.createInput = actor, input
 	if s.createErr != nil {
 		return nil, s.createErr
@@ -52,7 +54,7 @@ func (s *reminderHTTPServiceStub) Create(_ context.Context, actor serviceidentit
 	return &domainreminder.Reminder{ID: httpReminderID, SpaceID: input.Space, Title: input.Title, AssigneeMemberID: input.AssigneeMemberID, Status: domainreminder.StatusPending, ScheduledAt: input.ScheduledAt}, nil
 }
 
-func (s *reminderHTTPServiceStub) List(_ context.Context, actor serviceidentity.ActorContext, input servicereminder.ListInput) ([]domainreminder.Reminder, error) {
+func (s *reminderHTTPServiceStub) List(_ context.Context, actor domainidentity.ActorContext, input dto.ReminderListInput) ([]domainreminder.Reminder, error) {
 	s.listActor, s.listInput = actor, input
 	if s.listErr != nil {
 		return nil, s.listErr
@@ -60,7 +62,7 @@ func (s *reminderHTTPServiceStub) List(_ context.Context, actor serviceidentity.
 	return s.listed, nil
 }
 
-func (s *reminderHTTPServiceStub) Complete(_ context.Context, actor serviceidentity.ActorContext, spaceID, reminderID string) (*domainreminder.Reminder, error) {
+func (s *reminderHTTPServiceStub) Complete(_ context.Context, actor domainidentity.ActorContext, spaceID, reminderID string) (*domainreminder.Reminder, error) {
 	s.completeActor, s.completeSpace, s.completeID = actor, spaceID, reminderID
 	if s.completeErr != nil {
 		return nil, s.completeErr
@@ -72,14 +74,14 @@ func (s *reminderHTTPServiceStub) Complete(_ context.Context, actor serviceident
 }
 
 type userResolverStub struct {
-	actor   serviceidentity.ActorContext
+	actor   domainidentity.ActorContext
 	err     error
 	userID  string
 	channel string
 	calls   int
 }
 
-func (s *userResolverStub) ResolveUser(_ context.Context, userID, channel string) (serviceidentity.ActorContext, error) {
+func (s *userResolverStub) ResolveUser(_ context.Context, userID, channel string) (domainidentity.ActorContext, error) {
 	s.calls++
 	s.userID, s.channel = userID, channel
 	return s.actor, s.err
@@ -95,8 +97,8 @@ func (s *permissionLoaderStub) GetRolePermissions(_ context.Context, roleID stri
 	return s.permissions, nil
 }
 
-func httpTestActor() serviceidentity.ActorContext {
-	return serviceidentity.ActorContext{
+func httpTestActor() domainidentity.ActorContext {
+	return domainidentity.ActorContext{
 		UserID: "user-trusted",
 		Memberships: []domainspace.ResolvedMembership{{
 			ID: httpMemberID, SpaceID: httpSpaceID, SpaceName: "Jane", SpaceType: domainspace.TypePersonal,
@@ -234,4 +236,4 @@ func TestReminderHTTPRequiresAuthentication(t *testing.T) {
 	}
 }
 
-var _ servicereminder.Service = (*reminderHTTPServiceStub)(nil)
+var _ interfacereminder.ServiceReminderInterface = (*reminderHTTPServiceStub)(nil)

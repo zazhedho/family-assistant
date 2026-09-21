@@ -1,4 +1,4 @@
-package serviceidentity
+package domainidentity
 
 import domainspace "family-assistant/internal/domain/space"
 

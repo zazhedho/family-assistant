@@ -8,7 +8,7 @@ import (
 	"testing"
 
 	domainidentity "family-assistant/internal/domain/identity"
-	serviceidentity "family-assistant/internal/services/identity"
+	interfaceidentity "family-assistant/internal/interfaces/identity"
 )
 
 type identityLinkServiceStub struct {
@@ -100,4 +100,4 @@ func TestIdentityLinkMapsTokenErrorsWithoutLeakingCode(t *testing.T) {
 	}
 }
 
-var _ serviceidentity.LinkService = (*identityLinkServiceStub)(nil)
+var _ interfaceidentity.LinkService = (*identityLinkServiceStub)(nil)

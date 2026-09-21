@@ -6,6 +6,7 @@ import (
 	"time"
 
 	domainreminder "family-assistant/internal/domain/reminder"
+	interfacereminder "family-assistant/internal/interfaces/reminder"
 	"family-assistant/utils"
 
 	"gorm.io/gorm"
@@ -15,11 +16,11 @@ type Repository struct {
 	DB *gorm.DB
 }
 
-func NewRepository(db *gorm.DB) *Repository {
+func NewRepository(db *gorm.DB) interfacereminder.RepoReminderInterface {
 	return &Repository{DB: db}
 }
 
-var _ domainreminder.Repository = (*Repository)(nil)
+var _ interfacereminder.RepoReminderInterface = (*Repository)(nil)
 
 func (r *Repository) Create(ctx context.Context, reminder *domainreminder.Reminder) error {
 	if reminder == nil {

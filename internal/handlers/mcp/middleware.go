@@ -9,11 +9,10 @@ import (
 	"strings"
 
 	domainidentity "family-assistant/internal/domain/identity"
+	interfaceidentity "family-assistant/internal/interfaces/identity"
 	serviceidentity "family-assistant/internal/services/identity"
 	"family-assistant/pkg/config"
 )
-
-type ActorContext = serviceidentity.ActorContext
 
 type actorContextKey struct{}
 
@@ -25,15 +24,15 @@ type ExternalRequest struct {
 
 type externalRequestContextKey struct{}
 
-func WithActorContext(ctx context.Context, actor serviceidentity.ActorContext) context.Context {
+func WithActorContext(ctx context.Context, actor domainidentity.ActorContext) context.Context {
 	return context.WithValue(ctx, actorContextKey{}, actor)
 }
 
-func ActorFromContext(ctx context.Context) (serviceidentity.ActorContext, bool) {
+func ActorFromContext(ctx context.Context) (domainidentity.ActorContext, bool) {
 	if ctx == nil {
-		return serviceidentity.ActorContext{}, false
+		return domainidentity.ActorContext{}, false
 	}
-	actor, ok := ctx.Value(actorContextKey{}).(serviceidentity.ActorContext)
+	actor, ok := ctx.Value(actorContextKey{}).(domainidentity.ActorContext)
 	return actor, ok
 }
 
@@ -103,7 +102,7 @@ func (m *AuthMiddleware) Handler(next http.Handler) http.Handler {
 	})
 }
 
-func resolveExternalActor(ctx context.Context, resolver serviceidentity.Resolver, request ExternalRequest) (serviceidentity.ActorContext, error) {
+func resolveExternalActor(ctx context.Context, resolver interfaceidentity.Resolver, request ExternalRequest) (domainidentity.ActorContext, error) {
 	provider := strings.TrimSpace(request.Provider)
 	if provider == "" {
 		provider = domainidentity.ProviderHermes
@@ -111,22 +110,22 @@ func resolveExternalActor(ctx context.Context, resolver serviceidentity.Resolver
 	externalID := strings.TrimSpace(request.ExternalID)
 	channel := strings.TrimSpace(request.Channel)
 	if resolver == nil {
-		return serviceidentity.ActorContext{}, serviceidentity.ErrResolverMisconfigured
+		return domainidentity.ActorContext{}, serviceidentity.ErrResolverMisconfigured
 	}
 	return resolver.ResolveExternal(ctx, provider, externalID, channel)
 }
 
-func RequireActor(ctx context.Context, resolver serviceidentity.Resolver) (serviceidentity.ActorContext, error) {
+func RequireActor(ctx context.Context, resolver interfaceidentity.Resolver) (domainidentity.ActorContext, error) {
 	request, ok := ExternalRequestFromContext(ctx)
 	if !ok || strings.TrimSpace(request.Provider) == "" || strings.TrimSpace(request.ExternalID) == "" || strings.TrimSpace(request.Channel) == "" {
-		return serviceidentity.ActorContext{}, serviceidentity.ErrUnauthenticated
+		return domainidentity.ActorContext{}, serviceidentity.ErrUnauthenticated
 	}
 	actor, err := resolveExternalActor(ctx, resolver, request)
 	if err != nil {
-		return serviceidentity.ActorContext{}, err
+		return domainidentity.ActorContext{}, err
 	}
 	if strings.TrimSpace(actor.UserID) == "" {
-		return serviceidentity.ActorContext{}, serviceidentity.ErrUnauthenticated
+		return domainidentity.ActorContext{}, serviceidentity.ErrUnauthenticated
 	}
 	return actor, nil
 }

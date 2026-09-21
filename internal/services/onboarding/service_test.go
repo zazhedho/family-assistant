@@ -13,6 +13,7 @@ import (
 	domainonboarding "family-assistant/internal/domain/onboarding"
 	domainrole "family-assistant/internal/domain/role"
 	domainspace "family-assistant/internal/domain/space"
+	"family-assistant/internal/dto"
 	interfaceonboarding "family-assistant/internal/interfaces/onboarding"
 	serviceidentity "family-assistant/internal/services/identity"
 
@@ -103,8 +104,8 @@ func newServiceHarness(t *testing.T) *serviceHarness {
 	return &serviceHarness{service: service, repository: repository, roles: roles, audit: audit}
 }
 
-func validInput() Input {
-	return Input{
+func validInput() dto.AccountRegistrationInput {
+	return dto.AccountRegistrationInput{
 		Name:       "Jane Doe",
 		BirthDate:  "1990-05-20",
 		Consent:    true,
@@ -116,7 +117,7 @@ func validInput() Input {
 
 func TestRegisterCreatesExternalOnlyAccountAndPersonalSpace(t *testing.T) {
 	h := newServiceHarness(t)
-	got, err := h.service.Register(context.Background(), Input{
+	got, err := h.service.Register(context.Background(), dto.AccountRegistrationInput{
 		Name: " <b>jane doe</b> ", BirthDate: "1990-05-20", Consent: true,
 		Provider: " HERMES ", ExternalID: " profile-1 ", Channel: "whatsapp",
 	})
@@ -146,7 +147,7 @@ func TestRegisterReturnsExistingWithoutCreating(t *testing.T) {
 	h.repository.found = domainonboarding.AccountRef{UserID: "user-1", SpaceID: "space-1"}
 	h.repository.findErr = nil
 	got, err := h.service.Register(context.Background(), validInput())
-	if err != nil || got != (Result{Status: StatusExisting, UserID: "user-1", SpaceID: "space-1"}) || h.repository.createCalls != 0 {
+	if err != nil || got != (dto.AccountRegistrationResult{Status: StatusExisting, UserID: "user-1", SpaceID: "space-1"}) || h.repository.createCalls != 0 {
 		t.Fatalf("result = %+v, create calls = %d, err = %v", got, h.repository.createCalls, err)
 	}
 }
@@ -159,7 +160,7 @@ func TestRegisterRecoversConcurrentIdentityConflict(t *testing.T) {
 	}
 	h.repository.createErr = domainidentity.ErrIdentityConflict
 	got, err := h.service.Register(context.Background(), validInput())
-	if err != nil || got != (Result{Status: StatusExisting, UserID: "winner-user", SpaceID: "winner-space"}) || h.repository.createCalls != 1 {
+	if err != nil || got != (dto.AccountRegistrationResult{Status: StatusExisting, UserID: "winner-user", SpaceID: "winner-space"}) || h.repository.createCalls != 1 {
 		t.Fatalf("result = %+v, create calls = %d, err = %v", got, h.repository.createCalls, err)
 	}
 }
@@ -181,7 +182,7 @@ func TestRegisterRejectsInvalidConsentNameAndBirthDateWithoutPersistence(t *test
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			h := newServiceHarness(t)
-			_, err := h.service.Register(context.Background(), Input{
+			_, err := h.service.Register(context.Background(), dto.AccountRegistrationInput{
 				Name: tt.displayName, BirthDate: tt.birthDate, Consent: tt.consent,
 				Provider: "hermes", ExternalID: "profile-1", Channel: "whatsapp",
 			})
@@ -238,7 +239,7 @@ func TestRegisterRequiresExternalIdentity(t *testing.T) {
 			input.Provider = tt.provider
 			input.ExternalID = tt.external
 			got, err := h.service.Register(context.Background(), input)
-			if !errors.Is(err, serviceidentity.ErrUnauthenticated) || got != (Result{}) || h.repository.findCalls != 0 || h.repository.createCalls != 0 {
+			if !errors.Is(err, serviceidentity.ErrUnauthenticated) || got != (dto.AccountRegistrationResult{}) || h.repository.findCalls != 0 || h.repository.createCalls != 0 {
 				t.Fatalf("result = %+v, err = %v, find calls = %d, create calls = %d", got, err, h.repository.findCalls, h.repository.createCalls)
 			}
 		})
@@ -258,7 +259,7 @@ func TestRegisterMissingRoleFailsWithoutPersistence(t *testing.T) {
 			h := newServiceHarness(t)
 			h.roles.roles[tt.role] = domainrole.Role{}
 			got, err := h.service.Register(context.Background(), validInput())
-			if err == nil || got != (Result{}) || h.repository.createCalls != 0 || len(h.audit.events) != 1 || h.audit.events[0].Status != domainaudit.StatusFailed {
+			if err == nil || got != (dto.AccountRegistrationResult{}) || h.repository.createCalls != 0 || len(h.audit.events) != 1 || h.audit.events[0].Status != domainaudit.StatusFailed {
 				t.Fatalf("result = %+v, err = %v, create calls = %d, audits = %#v", got, err, h.repository.createCalls, h.audit.events)
 			}
 		})
@@ -270,7 +271,7 @@ func TestRegisterUnexpectedRepositoryFailuresReturnNoIDs(t *testing.T) {
 		h := newServiceHarness(t)
 		h.repository.findErr = errors.New("find failed")
 		got, err := h.service.Register(context.Background(), validInput())
-		if err == nil || got != (Result{}) || h.repository.createCalls != 0 {
+		if err == nil || got != (dto.AccountRegistrationResult{}) || h.repository.createCalls != 0 {
 			t.Fatalf("result = %+v, err = %v, create calls = %d", got, err, h.repository.createCalls)
 		}
 	})
@@ -278,7 +279,7 @@ func TestRegisterUnexpectedRepositoryFailuresReturnNoIDs(t *testing.T) {
 		h := newServiceHarness(t)
 		h.repository.createErr = errors.New("create failed")
 		got, err := h.service.Register(context.Background(), validInput())
-		if err == nil || got != (Result{}) || h.repository.createCalls != 1 {
+		if err == nil || got != (dto.AccountRegistrationResult{}) || h.repository.createCalls != 1 {
 			t.Fatalf("result = %+v, err = %v, create calls = %d", got, err, h.repository.createCalls)
 		}
 	})

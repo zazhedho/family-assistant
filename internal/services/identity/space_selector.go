@@ -6,7 +6,9 @@ import (
 	"strings"
 
 	"family-assistant/internal/authscope"
+	domainidentity "family-assistant/internal/domain/identity"
 	domainspace "family-assistant/internal/domain/space"
+	interfaceidentity "family-assistant/internal/interfaces/identity"
 
 	"github.com/google/uuid"
 )
@@ -36,14 +38,14 @@ func (*ValidationError) Unwrap() error {
 	return ErrInvalidResource
 }
 
-func SelectSpace(ctx context.Context, actor ActorContext, selector string, permissions PermissionLoader) (ActorContext, error) {
+func SelectSpace(ctx context.Context, actor domainidentity.ActorContext, selector string, permissions interfaceidentity.PermissionLoader) (domainidentity.ActorContext, error) {
 	if strings.TrimSpace(actor.UserID) == "" {
-		return ActorContext{}, ErrUnauthenticated
+		return domainidentity.ActorContext{}, ErrUnauthenticated
 	}
 
 	active := activeMembershipsForUser(actor.UserID, actor.Memberships)
 	if len(active) == 0 {
-		return ActorContext{}, ErrNotFound
+		return domainidentity.ActorContext{}, ErrNotFound
 	}
 
 	selector = strings.TrimSpace(selector)
@@ -52,13 +54,13 @@ func SelectSpace(ctx context.Context, actor ActorContext, selector string, permi
 		for i := range active {
 			if strings.EqualFold(strings.TrimSpace(active[i].SpaceType), domainspace.TypePersonal) {
 				if selected != nil {
-					return ActorContext{}, ErrSpaceSelectionMisconfigured
+					return domainidentity.ActorContext{}, ErrSpaceSelectionMisconfigured
 				}
 				selected = &active[i]
 			}
 		}
 		if selected == nil {
-			return ActorContext{}, ErrNotFound
+			return domainidentity.ActorContext{}, ErrNotFound
 		}
 	} else {
 		for i := range active {
@@ -76,24 +78,24 @@ func SelectSpace(ctx context.Context, actor ActorContext, selector string, permi
 			}
 			switch len(matches) {
 			case 0:
-				return ActorContext{}, ErrNotFound
+				return domainidentity.ActorContext{}, ErrNotFound
 			case 1:
 				selected = matches[0]
 			default:
-				return ActorContext{}, &ValidationError{Field: "space", Reason: "matches multiple active Spaces"}
+				return domainidentity.ActorContext{}, &ValidationError{Field: "space", Reason: "matches multiple active Spaces"}
 			}
 		}
 	}
 
 	if selected == nil || strings.TrimSpace(selected.SpaceID) == "" || strings.TrimSpace(selected.ID) == "" || strings.TrimSpace(selected.RoleID) == "" || strings.TrimSpace(selected.RoleName) == "" {
-		return ActorContext{}, ErrSpaceSelectionMisconfigured
+		return domainidentity.ActorContext{}, ErrSpaceSelectionMisconfigured
 	}
 	if permissions == nil {
-		return ActorContext{}, ErrResolverMisconfigured
+		return domainidentity.ActorContext{}, ErrResolverMisconfigured
 	}
 	permissionSet, err := permissionsForRole(ctx, permissions, selected.RoleID)
 	if err != nil {
-		return ActorContext{}, err
+		return domainidentity.ActorContext{}, err
 	}
 
 	selectedActor := actor
@@ -134,7 +136,7 @@ func sameSpaceName(left, right string) bool {
 	return strings.EqualFold(strings.TrimSpace(left), strings.TrimSpace(right))
 }
 
-func permissionsForRole(ctx context.Context, loader PermissionLoader, roleID string) (map[string]struct{}, error) {
+func permissionsForRole(ctx context.Context, loader interfaceidentity.PermissionLoader, roleID string) (map[string]struct{}, error) {
 	permissions, err := loader.GetRolePermissions(ctx, strings.TrimSpace(roleID))
 	if err != nil {
 		return nil, err

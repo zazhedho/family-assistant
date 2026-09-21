@@ -1,9 +1,17 @@
 package domainreminder
 
 import (
+	"errors"
 	"time"
 
 	"gorm.io/gorm"
+)
+
+var (
+	ErrSpaceIDRequired    = errors.New("space_id is required")
+	ErrReminderRequired   = errors.New("reminder is required")
+	ErrReminderIDRequired = errors.New("reminder_id is required")
+	ErrStatusConflict     = errors.New("reminder status conflict")
 )
 
 type Status string
@@ -13,6 +21,13 @@ const (
 	StatusCompleted Status = "COMPLETED"
 	StatusCancelled Status = "CANCELLED" //nolint:misspell // persisted API enum; preserve spelling.
 )
+
+type ListFilter struct {
+	SpaceID string
+	Status  *Status
+	From    *time.Time
+	To      *time.Time
+}
 
 func (Reminder) TableName() string {
 	return "reminders"

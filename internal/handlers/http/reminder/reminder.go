@@ -9,7 +9,11 @@ import (
 	"time"
 
 	"family-assistant/internal/authscope"
+	domainidentity "family-assistant/internal/domain/identity"
 	domainreminder "family-assistant/internal/domain/reminder"
+	"family-assistant/internal/dto"
+	interfaceidentity "family-assistant/internal/interfaces/identity"
+	interfacereminder "family-assistant/internal/interfaces/reminder"
 	serviceauthorization "family-assistant/internal/services/authorization"
 	serviceidentity "family-assistant/internal/services/identity"
 	servicereminder "family-assistant/internal/services/reminder"
@@ -22,12 +26,12 @@ import (
 )
 
 type ReminderHandler struct {
-	Service     servicereminder.Service
-	Resolver    serviceidentity.UserResolver
-	Permissions serviceidentity.PermissionLoader
+	Service     interfacereminder.ServiceReminderInterface
+	Resolver    interfaceidentity.UserResolver
+	Permissions interfaceidentity.PermissionLoader
 }
 
-func NewReminderHandler(service servicereminder.Service, resolver serviceidentity.UserResolver, permissions serviceidentity.PermissionLoader) *ReminderHandler {
+func NewReminderHandler(service interfacereminder.ServiceReminderInterface, resolver interfaceidentity.UserResolver, permissions interfaceidentity.PermissionLoader) *ReminderHandler {
 	return &ReminderHandler{Service: service, Resolver: resolver, Permissions: permissions}
 }
 
@@ -79,7 +83,7 @@ func (h *ReminderHandler) Create(ctx *gin.Context) {
 		h.writeError(ctx, errors.New("reminder service is not configured"))
 		return
 	}
-	reminder, err := h.Service.Create(ctx.Request.Context(), actor, servicereminder.CreateInput{
+	reminder, err := h.Service.Create(ctx.Request.Context(), actor, dto.ReminderCreateInput{
 		Title: request.Title, Description: request.Description, ScheduledAt: *scheduledAt,
 		Space: actor.SpaceID, AssigneeMemberID: assigneeID,
 	})
@@ -106,7 +110,7 @@ func (h *ReminderHandler) List(ctx *gin.Context) {
 		h.writeError(ctx, err)
 		return
 	}
-	input := servicereminder.ListInput{
+	input := dto.ReminderListInput{
 		Space: actor.SpaceID, Status: status,
 	}
 	if input.From, err = parseHTTPTime(ctx.Query("from"), "from", false); err != nil {
@@ -165,22 +169,22 @@ func (h *ReminderHandler) Complete(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, response.Response(http.StatusOK, "Reminder completed successfully", utils.GenerateLogId(ctx), toResponse(reminder)))
 }
 
-func (h *ReminderHandler) actor(ctx *gin.Context, selector string) (serviceidentity.ActorContext, error) {
+func (h *ReminderHandler) actor(ctx *gin.Context, selector string) (domainidentity.ActorContext, error) {
 	scope := authscope.FromContext(ctx.Request.Context())
 	userID := strings.TrimSpace(scope.UserID)
 	if userID == "" {
-		return serviceidentity.ActorContext{}, serviceidentity.ErrUnauthenticated
+		return domainidentity.ActorContext{}, serviceidentity.ErrUnauthenticated
 	}
 	if h.Resolver == nil {
-		return serviceidentity.ActorContext{}, errors.New("user resolver is not configured")
+		return domainidentity.ActorContext{}, errors.New("user resolver is not configured")
 	}
 	actor, err := h.Resolver.ResolveUser(ctx.Request.Context(), userID, "http")
 	if err != nil {
-		return serviceidentity.ActorContext{}, err
+		return domainidentity.ActorContext{}, err
 	}
 	actor, err = serviceidentity.SelectSpace(ctx.Request.Context(), actor, selector, h.Permissions)
 	if err != nil {
-		return serviceidentity.ActorContext{}, err
+		return domainidentity.ActorContext{}, err
 	}
 	if scope.IsImpersonated {
 		actor.InitiatorUserID = strings.TrimSpace(scope.OriginalUserID)

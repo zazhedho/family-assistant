@@ -8,6 +8,7 @@ import (
 
 	domaininvitation "family-assistant/internal/domain/invitation"
 	domainspace "family-assistant/internal/domain/space"
+	interfaceinvitation "family-assistant/internal/interfaces/invitation"
 	"family-assistant/utils"
 
 	"gorm.io/gorm"
@@ -18,11 +19,11 @@ type Repository struct {
 	DB *gorm.DB
 }
 
-func NewRepository(db *gorm.DB) *Repository {
+func NewRepository(db *gorm.DB) interfaceinvitation.RepoInvitationInterface {
 	return &Repository{DB: db}
 }
 
-var _ domaininvitation.Repository = (*Repository)(nil)
+var _ interfaceinvitation.RepoInvitationInterface = (*Repository)(nil)
 
 func (r *Repository) Create(ctx context.Context, invitation *domaininvitation.Invitation) error {
 	if invitation == nil {

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 
+	interfaceidentity "family-assistant/internal/interfaces/identity"
 	serviceidentity "family-assistant/internal/services/identity"
 
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
@@ -21,7 +22,7 @@ type IdentityLinkOutput struct {
 	ExternalID string `json:"external_id"`
 }
 
-func IdentityLink(ctx context.Context, service serviceidentity.LinkService, input IdentityLinkInput) (IdentityLinkOutput, error) {
+func IdentityLink(ctx context.Context, service interfaceidentity.LinkService, input IdentityLinkInput) (IdentityLinkOutput, error) {
 	request, ok := ExternalRequestFromContext(ctx)
 	if !ok || strings.TrimSpace(request.Provider) == "" || strings.TrimSpace(request.ExternalID) == "" {
 		return IdentityLinkOutput{}, MapToolError(serviceidentity.ErrUnauthenticated)
@@ -46,7 +47,7 @@ func IdentityLink(ctx context.Context, service serviceidentity.LinkService, inpu
 	}, nil
 }
 
-func registerIdentityTools(server *mcpsdk.Server, service serviceidentity.LinkService) {
+func registerIdentityTools(server *mcpsdk.Server, service interfaceidentity.LinkService) {
 	mcpsdk.AddTool(server, &mcpsdk.Tool{
 		Name: "identity_link", Description: "Link this Hermes profile with a one-time identity code.",
 	}, func(ctx context.Context, _ *mcpsdk.CallToolRequest, input IdentityLinkInput) (*mcpsdk.CallToolResult, IdentityLinkOutput, error) {

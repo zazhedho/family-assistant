@@ -7,12 +7,17 @@ import (
 	"time"
 
 	domainaudit "family-assistant/internal/domain/audit"
+	domainidentity "family-assistant/internal/domain/identity"
 	domainreminder "family-assistant/internal/domain/reminder"
 	domainspace "family-assistant/internal/domain/space"
+	"family-assistant/internal/dto"
+	interfacereminder "family-assistant/internal/interfaces/reminder"
 	"family-assistant/internal/services/authorization"
-	serviceidentity "family-assistant/internal/services/identity"
 	"gorm.io/gorm"
 )
+
+var _ interfacereminder.ServiceReminderInterface = (*service)(nil)
+var _ domainidentity.ActorContext = domainidentity.ActorContext{}
 
 const (
 	personalSpaceID = "space-personal"
@@ -100,12 +105,12 @@ func (s *auditStoreStub) Store(_ context.Context, event domainaudit.AuditEvent) 
 	return nil
 }
 
-func actor(spaceID, spaceType, memberID, role string, permissions ...string) serviceidentity.ActorContext {
+func actor(spaceID, spaceType, memberID, role string, permissions ...string) domainidentity.ActorContext {
 	permissionSet := make(map[string]struct{}, len(permissions))
 	for _, permission := range permissions {
 		permissionSet[permission] = struct{}{}
 	}
-	return serviceidentity.ActorContext{
+	return domainidentity.ActorContext{
 		UserID:           "user-1",
 		SpaceID:          spaceID,
 		SpaceType:        spaceType,
@@ -129,7 +134,7 @@ func membership(spaceID, memberID, role, userID string) domainspace.ResolvedMemb
 	}
 }
 
-func newReminderService(repo *reminderRepositoryStub, spaces *spaceRepositoryStub, audit *auditStoreStub) Service {
+func newReminderService(repo *reminderRepositoryStub, spaces *spaceRepositoryStub, audit *auditStoreStub) interfacereminder.ServiceReminderInterface {
 	if audit == nil {
 		return NewReminderService(repo, spaces, authorization.NewAuthorizer(), nil)
 	}
@@ -144,7 +149,7 @@ func TestCreateDefaultsToActorPersonalSpace(t *testing.T) {
 	service := newReminderService(repo, spaces, nil)
 	actor := actor(personalSpaceID, domainspace.TypePersonal, creatorID, "space_owner", "reminders:create")
 
-	created, err := service.Create(context.Background(), actor, CreateInput{
+	created, err := service.Create(context.Background(), actor, dto.ReminderCreateInput{
 		Title:       "Pay electricity bill",
 		ScheduledAt: time.Date(2026, 9, 20, 8, 0, 0, 0, time.UTC),
 	})
@@ -171,7 +176,7 @@ func TestCreateRejectsAssigneeOutsideActorSpaceAsNotFound(t *testing.T) {
 	service := newReminderService(repo, spaces, nil)
 	actor := actor(sharedSpaceID, domainspace.TypeShared, creatorID, "space_member", "reminders:create")
 
-	_, err := service.Create(context.Background(), actor, CreateInput{
+	_, err := service.Create(context.Background(), actor, dto.ReminderCreateInput{
 		Title:            "Review budget",
 		ScheduledAt:      time.Date(2026, 9, 20, 8, 0, 0, 0, time.UTC),
 		AssigneeMemberID: stringPtr(assigneeID),
@@ -197,7 +202,7 @@ func TestListSharedReturnsRemindersForActiveMemberWithoutAssignmentFilter(t *tes
 	service := newReminderService(repo, spaces, nil)
 	actor := actor(sharedSpaceID, domainspace.TypeShared, creatorID, "space_owner", "reminders:list")
 
-	got, err := service.List(context.Background(), actor, ListInput{Space: sharedSpaceID})
+	got, err := service.List(context.Background(), actor, dto.ReminderListInput{Space: sharedSpaceID})
 	if err != nil {
 		t.Fatalf("list reminders: %v", err)
 	}
@@ -215,7 +220,7 @@ func TestListAuditsSanitizedSuccessMetadata(t *testing.T) {
 	service := newReminderService(repo, spaces, audit)
 	actor := actor(sharedSpaceID, domainspace.TypeShared, creatorID, "space_member", "reminders:list")
 
-	if _, err := service.List(context.Background(), actor, ListInput{}); err != nil {
+	if _, err := service.List(context.Background(), actor, dto.ReminderListInput{}); err != nil {
 		t.Fatalf("list reminders: %v", err)
 	}
 	if len(audit.events) != 1 {
@@ -261,7 +266,7 @@ func TestCreateAuditsSanitizedSpaceAndExternalMetadata(t *testing.T) {
 	service := newReminderService(repo, spaces, audit)
 	actor := actor(personalSpaceID, domainspace.TypePersonal, creatorID, "space_owner", "reminders:create")
 
-	if _, err := service.Create(context.Background(), actor, CreateInput{
+	if _, err := service.Create(context.Background(), actor, dto.ReminderCreateInput{
 		Title:       "Pay electricity bill",
 		ScheduledAt: time.Date(2026, 9, 20, 8, 0, 0, 0, time.UTC),
 	}); err != nil {
@@ -291,7 +296,7 @@ func TestCreateAuditPreservesImpersonatorAndSubject(t *testing.T) {
 	actor.InitiatorUserID = "operator-user"
 	actor.InitiatorRoleName = "space_admin"
 
-	if _, err := service.Create(context.Background(), actor, CreateInput{
+	if _, err := service.Create(context.Background(), actor, dto.ReminderCreateInput{
 		Title:       "Pay electricity bill",
 		ScheduledAt: time.Date(2026, 9, 20, 8, 0, 0, 0, time.UTC),
 	}); err != nil {
@@ -318,7 +323,7 @@ func TestCreateValidationFailureAuditsSanitizedFailureMetadata(t *testing.T) {
 	service := newReminderService(repo, spaces, audit)
 	actor := actor(personalSpaceID, domainspace.TypePersonal, creatorID, "space_owner", "reminders:create")
 
-	if _, err := service.Create(context.Background(), actor, CreateInput{ScheduledAt: time.Now().UTC()}); err == nil {
+	if _, err := service.Create(context.Background(), actor, dto.ReminderCreateInput{ScheduledAt: time.Now().UTC()}); err == nil {
 		t.Fatal("create with empty title unexpectedly succeeded")
 	}
 	if len(audit.events) != 1 {
@@ -383,7 +388,7 @@ func TestCompleteMemberCanCompleteOwnReminder(t *testing.T) {
 func TestCompleteRejectsUnrelatedMemberAndViewer(t *testing.T) {
 	tests := []struct {
 		name  string
-		actor serviceidentity.ActorContext
+		actor domainidentity.ActorContext
 	}{
 		{
 			name:  "unrelated member",
@@ -425,7 +430,7 @@ func TestCompleteRejectsInactiveActorAndCrossSpaceResourceAsNotFound(t *testing.
 	}}
 	tests := []struct {
 		name  string
-		actor serviceidentity.ActorContext
+		actor domainidentity.ActorContext
 		space string
 	}{
 		{name: "inactive actor", actor: actor(sharedSpaceID, domainspace.TypeShared, "member-inactive", "space_member", "reminders:update"), space: sharedSpaceID},

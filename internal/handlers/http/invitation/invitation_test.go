@@ -16,6 +16,7 @@ import (
 	domainspace "family-assistant/internal/domain/space"
 	domainuser "family-assistant/internal/domain/user"
 	"family-assistant/internal/dto"
+	interfaceinvitation "family-assistant/internal/interfaces/invitation"
 	serviceinvitation "family-assistant/internal/services/invitation"
 	"family-assistant/pkg/filter"
 
@@ -30,13 +31,13 @@ type invitationServiceStub struct {
 	accepted    *domainspace.Member
 	acceptErr   error
 	createUser  string
-	createInput serviceinvitation.CreateInput
+	createInput dto.InvitationCreateInput
 	acceptToken string
 	acceptUser  domainuser.Users
 	acceptErrs  map[string]error
 }
 
-func (s *invitationServiceStub) Create(_ context.Context, userID string, input serviceinvitation.CreateInput) (*domaininvitation.Invitation, string, error) {
+func (s *invitationServiceStub) Create(_ context.Context, userID string, input dto.InvitationCreateInput) (*domaininvitation.Invitation, string, error) {
 	s.createUser, s.createInput = userID, input
 	return s.created, s.rawToken, s.createErr
 }
@@ -248,6 +249,6 @@ func TestInvitationHandlerAuditsEarlyFailureWithHTTPProvenanceAndNoBody(t *testi
 }
 
 func TestInvitationServiceStubSatisfiesService(t *testing.T) {
-	var _ serviceinvitation.Service = (*invitationServiceStub)(nil)
+	var _ interfaceinvitation.ServiceInvitationInterface = (*invitationServiceStub)(nil)
 	_ = errors.New
 }

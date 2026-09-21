@@ -13,6 +13,7 @@ import (
 	"family-assistant/internal/authscope"
 	domainaudit "family-assistant/internal/domain/audit"
 	domainidentity "family-assistant/internal/domain/identity"
+	interfaceidentity "family-assistant/internal/interfaces/identity"
 	"family-assistant/pkg/config"
 	"family-assistant/utils"
 	"gorm.io/gorm"
@@ -25,12 +26,6 @@ var (
 	ErrIdentityConflict        = domainidentity.ErrIdentityConflict
 	ErrIdentityNotFound        = domainidentity.ErrIdentityNotFound
 )
-
-type LinkService interface {
-	Issue(context.Context, string, string) (string, error)
-	Link(context.Context, string, string, string) (*domainidentity.ExternalIdentity, error)
-	Revoke(context.Context, string, string, string) error
-}
 
 type auditStore interface {
 	Store(context.Context, domainaudit.AuditEvent) error
@@ -51,13 +46,13 @@ func WithAuditProvenance(ctx context.Context, provenance AuditProvenance) contex
 }
 
 type service struct {
-	repository domainidentity.Repository
+	repository interfaceidentity.RepoIdentityInterface
 	audit      auditStore
 	config     config.IdentityConfig
 	now        func() time.Time
 }
 
-func NewLinkService(repository domainidentity.Repository, audit auditStore, configs ...config.IdentityConfig) LinkService {
+func NewLinkService(repository interfaceidentity.RepoIdentityInterface, audit auditStore, configs ...config.IdentityConfig) interfaceidentity.LinkService {
 	cfg := config.LoadIdentityConfig()
 	if len(configs) > 0 {
 		cfg = configs[0]
@@ -73,11 +68,11 @@ func NewLinkService(repository domainidentity.Repository, audit auditStore, conf
 	}
 }
 
-func NewLinkingService(repository domainidentity.Repository, audit auditStore, configs ...config.IdentityConfig) LinkService {
+func NewLinkingService(repository interfaceidentity.RepoIdentityInterface, audit auditStore, configs ...config.IdentityConfig) interfaceidentity.LinkService {
 	return NewLinkService(repository, audit, configs...)
 }
 
-func NewService(repository domainidentity.Repository, audit auditStore, configs ...config.IdentityConfig) LinkService {
+func NewService(repository interfaceidentity.RepoIdentityInterface, audit auditStore, configs ...config.IdentityConfig) interfaceidentity.LinkService {
 	return NewLinkService(repository, audit, configs...)
 }
 
@@ -314,4 +309,4 @@ func (s *service) writeAudit(ctx context.Context, event domainaudit.AuditEvent) 
 	}
 }
 
-var _ LinkService = (*service)(nil)
+var _ interfaceidentity.LinkService = (*service)(nil)

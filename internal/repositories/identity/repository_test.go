@@ -7,6 +7,7 @@ import (
 	"time"
 
 	domainidentity "family-assistant/internal/domain/identity"
+	interfaceidentity "family-assistant/internal/interfaces/identity"
 
 	"github.com/DATA-DOG/go-sqlmock"
 	"gorm.io/driver/postgres"
@@ -310,6 +311,6 @@ func TestRevokedIdentityCanBeRelinked(t *testing.T) {
 	}
 }
 
-func TestRepositorySatisfiesDomainInterface(t *testing.T) {
-	var _ domainidentity.Repository = (*Repository)(nil)
+func TestRepositorySatisfiesInterface(t *testing.T) {
+	var _ interfaceidentity.RepoIdentityInterface = (*Repository)(nil)
 }

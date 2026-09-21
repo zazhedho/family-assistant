@@ -5,25 +5,11 @@ import (
 
 	domainaudit "family-assistant/internal/domain/audit"
 	domainrole "family-assistant/internal/domain/role"
+	"family-assistant/internal/dto"
 )
 
-type Input struct {
-	Name       string
-	BirthDate  string
-	Consent    bool
-	Provider   string
-	ExternalID string
-	Channel    string
-}
-
-type Result struct {
-	Status  string
-	UserID  string
-	SpaceID string
-}
-
 type ServiceOnboardingInterface interface {
-	Register(context.Context, Input) (Result, error)
+	Register(context.Context, dto.AccountRegistrationInput) (dto.AccountRegistrationResult, error)
 }
 
 type RoleFinder interface {

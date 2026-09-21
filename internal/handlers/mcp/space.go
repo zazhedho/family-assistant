@@ -5,8 +5,9 @@ import (
 	"errors"
 
 	domainspace "family-assistant/internal/domain/space"
+	interfaceidentity "family-assistant/internal/interfaces/identity"
+	interfacespace "family-assistant/internal/interfaces/space"
 	serviceidentity "family-assistant/internal/services/identity"
-	servicespace "family-assistant/internal/services/space"
 
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -23,7 +24,7 @@ type SpaceMembersOutput struct {
 	Members []domainspace.ResolvedMembership `json:"members"`
 }
 
-func SpaceList(ctx context.Context, resolver serviceidentity.Resolver, service servicespace.Service) ([]domainspace.ResolvedMembership, error) {
+func SpaceList(ctx context.Context, resolver interfaceidentity.Resolver, service interfacespace.ServiceSpaceInterface) ([]domainspace.ResolvedMembership, error) {
 	actor, err := RequireActor(ctx, resolver)
 	if err != nil {
 		return nil, MapToolError(err)
@@ -41,7 +42,7 @@ func SpaceList(ctx context.Context, resolver serviceidentity.Resolver, service s
 	return memberships, nil
 }
 
-func SpaceGetMembers(ctx context.Context, resolver serviceidentity.Resolver, service servicespace.Service, input SpaceGetMembersInput) ([]domainspace.ResolvedMembership, error) {
+func SpaceGetMembers(ctx context.Context, resolver interfaceidentity.Resolver, service interfacespace.ServiceSpaceInterface, input SpaceGetMembersInput) ([]domainspace.ResolvedMembership, error) {
 	actor, err := RequireActor(ctx, resolver)
 	if err != nil {
 		return nil, MapToolError(err)
@@ -63,17 +64,17 @@ func SpaceGetMembers(ctx context.Context, resolver serviceidentity.Resolver, ser
 	return members, nil
 }
 
-func selectorPermissions(resolver serviceidentity.Resolver) serviceidentity.PermissionLoader {
+func selectorPermissions(resolver interfaceidentity.Resolver) interfaceidentity.PermissionLoader {
 	if resolver, ok := resolver.(*serviceidentity.ResolverService); ok && resolver != nil {
 		return resolver.PermissionService
 	}
-	if permissions, ok := resolver.(serviceidentity.PermissionLoader); ok {
+	if permissions, ok := resolver.(interfaceidentity.PermissionLoader); ok {
 		return permissions
 	}
 	return nil
 }
 
-func registerSpaceTools(server *mcpsdk.Server, resolver serviceidentity.Resolver, service servicespace.Service) {
+func registerSpaceTools(server *mcpsdk.Server, resolver interfaceidentity.Resolver, service interfacespace.ServiceSpaceInterface) {
 	mcpsdk.AddTool(server, &mcpsdk.Tool{
 		Name: "space_list", Description: "List the authenticated user's active Spaces.",
 	}, func(ctx context.Context, _ *mcpsdk.CallToolRequest, _ struct{}) (*mcpsdk.CallToolResult, SpaceListOutput, error) {

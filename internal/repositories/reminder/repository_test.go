@@ -8,6 +8,7 @@ import (
 	"time"
 
 	domainreminder "family-assistant/internal/domain/reminder"
+	interfacereminder "family-assistant/internal/interfaces/reminder"
 
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/google/uuid"
@@ -244,4 +245,8 @@ func TestCompletePendingRejectsBlankScopeOrReminderIDBeforeQuery(t *testing.T) {
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("unexpected database query: %v", err)
 	}
+}
+
+func TestRepositorySatisfiesInterface(t *testing.T) {
+	var _ interfacereminder.RepoReminderInterface = (*Repository)(nil)
 }

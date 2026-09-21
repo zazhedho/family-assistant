@@ -4,11 +4,11 @@ import (
 	"context"
 	"strings"
 
-	serviceidentity "family-assistant/internal/services/identity"
+	domainidentity "family-assistant/internal/domain/identity"
 )
 
 type Authorizer interface {
-	Authorize(ctx context.Context, actor serviceidentity.ActorContext, permission string, resource Resource) error
+	Authorize(ctx context.Context, actor domainidentity.ActorContext, permission string, resource Resource) error
 }
 
 type authorizer struct{}
@@ -17,7 +17,7 @@ func NewAuthorizer() Authorizer {
 	return authorizer{}
 }
 
-func (authorizer) Authorize(_ context.Context, actor serviceidentity.ActorContext, permission string, resource Resource) error {
+func (authorizer) Authorize(_ context.Context, actor domainidentity.ActorContext, permission string, resource Resource) error {
 	if err := ValidateResource(resource); err != nil {
 		return err
 	}

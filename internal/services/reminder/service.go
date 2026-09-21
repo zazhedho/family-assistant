@@ -7,10 +7,13 @@ import (
 	"time"
 
 	domainaudit "family-assistant/internal/domain/audit"
+	domainidentity "family-assistant/internal/domain/identity"
 	domainreminder "family-assistant/internal/domain/reminder"
 	domainspace "family-assistant/internal/domain/space"
+	"family-assistant/internal/dto"
+	interfacereminder "family-assistant/internal/interfaces/reminder"
+	interfacespace "family-assistant/internal/interfaces/space"
 	"family-assistant/internal/services/authorization"
-	serviceidentity "family-assistant/internal/services/identity"
 	"gorm.io/gorm"
 )
 
@@ -22,43 +25,22 @@ const (
 
 var ErrConflict = errors.New("conflict")
 
-type CreateInput struct {
-	Space            string
-	Title            string
-	Description      string
-	ScheduledAt      time.Time
-	AssigneeMemberID *string
-}
-
-type ListInput struct {
-	Space  string
-	Status *domainreminder.Status
-	From   *time.Time
-	To     *time.Time
-}
-
-type Service interface {
-	Create(context.Context, serviceidentity.ActorContext, CreateInput) (*domainreminder.Reminder, error)
-	List(context.Context, serviceidentity.ActorContext, ListInput) ([]domainreminder.Reminder, error)
-	Complete(context.Context, serviceidentity.ActorContext, string, string) (*domainreminder.Reminder, error)
-}
-
 type auditStore interface {
 	Store(context.Context, domainaudit.AuditEvent) error
 }
 
 type service struct {
-	reminders domainreminder.Repository
-	spaces    domainspace.Repository
+	reminders interfacereminder.RepoReminderInterface
+	spaces    interfacespace.RepoSpaceInterface
 	authorize authorization.Authorizer
 	audit     auditStore
 }
 
-func NewReminderService(reminders domainreminder.Repository, spaces domainspace.Repository, authorize authorization.Authorizer, audit auditStore) Service {
+func NewReminderService(reminders interfacereminder.RepoReminderInterface, spaces interfacespace.RepoSpaceInterface, authorize authorization.Authorizer, audit auditStore) interfacereminder.ServiceReminderInterface {
 	return &service{reminders: reminders, spaces: spaces, authorize: authorize, audit: audit}
 }
 
-func (s *service) Create(ctx context.Context, actor serviceidentity.ActorContext, input CreateInput) (created *domainreminder.Reminder, err error) {
+func (s *service) Create(ctx context.Context, actor domainidentity.ActorContext, input dto.ReminderCreateInput) (created *domainreminder.Reminder, err error) {
 	spaceID := strings.TrimSpace(input.Space)
 	if spaceID == "" {
 		spaceID = strings.TrimSpace(actor.SpaceID)
@@ -120,7 +102,7 @@ func (s *service) Create(ctx context.Context, actor serviceidentity.ActorContext
 	return created, nil
 }
 
-func (s *service) List(ctx context.Context, actor serviceidentity.ActorContext, input ListInput) (result []domainreminder.Reminder, err error) {
+func (s *service) List(ctx context.Context, actor domainidentity.ActorContext, input dto.ReminderListInput) (result []domainreminder.Reminder, err error) {
 	spaceID := strings.TrimSpace(input.Space)
 	if spaceID == "" {
 		spaceID = strings.TrimSpace(actor.SpaceID)
@@ -151,7 +133,7 @@ func (s *service) List(ctx context.Context, actor serviceidentity.ActorContext, 
 	return result, nil
 }
 
-func (s *service) Complete(ctx context.Context, actor serviceidentity.ActorContext, spaceID, reminderID string) (result *domainreminder.Reminder, err error) {
+func (s *service) Complete(ctx context.Context, actor domainidentity.ActorContext, spaceID, reminderID string) (result *domainreminder.Reminder, err error) {
 	spaceID = strings.TrimSpace(spaceID)
 	if spaceID == "" {
 		spaceID = strings.TrimSpace(actor.SpaceID)
@@ -260,7 +242,7 @@ func canComplete(role, memberID string, reminder *domainreminder.Reminder) bool 
 	}
 }
 
-func auditEvent(actor serviceidentity.ActorContext, action, spaceID, resourceID, ownerID, status string, metadata map[string]any) domainaudit.AuditEvent {
+func auditEvent(actor domainidentity.ActorContext, action, spaceID, resourceID, ownerID, status string, metadata map[string]any) domainaudit.AuditEvent {
 	if metadata == nil {
 		metadata = make(map[string]any, 2)
 	}

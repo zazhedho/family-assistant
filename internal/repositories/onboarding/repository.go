@@ -7,6 +7,7 @@ import (
 
 	domainidentity "family-assistant/internal/domain/identity"
 	domainonboarding "family-assistant/internal/domain/onboarding"
+	interfaceonboarding "family-assistant/internal/interfaces/onboarding"
 
 	"github.com/jackc/pgx/v5/pgconn"
 	"gorm.io/gorm"
@@ -16,11 +17,11 @@ type Repository struct {
 	DB *gorm.DB
 }
 
-func NewRepository(db *gorm.DB) *Repository {
+func NewRepository(db *gorm.DB) interfaceonboarding.RepoOnboardingInterface {
 	return &Repository{DB: db}
 }
 
-var _ domainonboarding.Repository = (*Repository)(nil)
+var _ interfaceonboarding.RepoOnboardingInterface = (*Repository)(nil)
 
 func (r *Repository) FindByExternalIdentity(ctx context.Context, provider, externalID string) (domainonboarding.AccountRef, error) {
 	provider = domainidentity.NormalizeProvider(provider)

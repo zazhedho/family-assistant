@@ -18,6 +18,9 @@ import (
 	domainrole "family-assistant/internal/domain/role"
 	domainspace "family-assistant/internal/domain/space"
 	domainuser "family-assistant/internal/domain/user"
+	"family-assistant/internal/dto"
+	interfaceinvitation "family-assistant/internal/interfaces/invitation"
+	serviceauthorization "family-assistant/internal/services/authorization"
 	"family-assistant/pkg/config"
 )
 
@@ -30,6 +33,8 @@ type invitationRepositoryStub struct {
 	userID    string
 	email     string
 }
+
+var _ interfaceinvitation.ServiceInvitationInterface = (*service)(nil)
 
 func (s *invitationRepositoryStub) Create(_ context.Context, invitation *domaininvitation.Invitation) error {
 	if s.createErr != nil {
@@ -101,7 +106,7 @@ func (s *invitationAuditStub) Store(_ context.Context, event domainaudit.AuditEv
 	return nil
 }
 
-func invitationService(repo *invitationRepositoryStub, audit *invitationAuditStub) Service {
+func invitationService(repo *invitationRepositoryStub, audit *invitationAuditStub) interfaceinvitation.ServiceInvitationInterface {
 	return NewService(
 		repo,
 		&invitationSpaceRepositoryStub{membership: &domainspace.ResolvedMembership{ID: "member-owner", SpaceID: "space-1", SpaceType: domainspace.TypeShared, RoleID: "role-owner", Status: domainspace.StatusActive}},
@@ -123,7 +128,7 @@ func TestCreateInvitationHashesRandomTokenAndNormalizesEmail(t *testing.T) {
 	audit := &invitationAuditStub{}
 	service := invitationService(repo, audit)
 
-	created, rawToken, err := service.Create(authscope.WithContext(context.Background(), authscope.New("user-1", "Owner", "space_owner", nil)), "user-1", CreateInput{
+	created, rawToken, err := service.Create(authscope.WithContext(context.Background(), authscope.New("user-1", "Owner", "space_owner", nil)), "user-1", dto.InvitationCreateInput{
 		SpaceID: "space-1", InvitedEmail: " Jane@Example.COM ", RoleName: "space_member",
 	})
 	if err != nil {
@@ -160,12 +165,12 @@ func TestCreateInvitationTokensAreDistinct(t *testing.T) {
 	firstRepo := &invitationRepositoryStub{}
 	secondRepo := &invitationRepositoryStub{}
 	service := invitationService(firstRepo, &invitationAuditStub{})
-	_, first, err := service.Create(context.Background(), "user-1", CreateInput{SpaceID: "space-1", RoleName: "space_member"})
+	_, first, err := service.Create(context.Background(), "user-1", dto.InvitationCreateInput{SpaceID: "space-1", RoleName: "space_member"})
 	if err != nil {
 		t.Fatalf("first create: %v", err)
 	}
 	service = invitationService(secondRepo, &invitationAuditStub{})
-	_, second, err := service.Create(context.Background(), "user-1", CreateInput{SpaceID: "space-1", RoleName: "space_member"})
+	_, second, err := service.Create(context.Background(), "user-1", dto.InvitationCreateInput{SpaceID: "space-1", RoleName: "space_member"})
 	if err != nil {
 		t.Fatalf("second create: %v", err)
 	}
@@ -188,7 +193,7 @@ func TestCreateInvitationRejectsPersonalSpace(t *testing.T) {
 		config.InvitationConfig{TTL: time.Hour},
 	)
 
-	_, _, err := service.Create(context.Background(), "user-1", CreateInput{SpaceID: "space-personal", RoleName: "space_member"})
+	_, _, err := service.Create(context.Background(), "user-1", dto.InvitationCreateInput{SpaceID: "space-personal", RoleName: "space_member"})
 	if !errors.Is(err, ErrForbidden) {
 		t.Fatalf("error = %v, want forbidden for Personal Space", err)
 	}
@@ -211,7 +216,7 @@ func TestCreateInvitationScopesMembershipLookupToAuthenticatedUserAndSpace(t *te
 		config.InvitationConfig{TTL: time.Hour},
 	)
 
-	_, _, err := service.Create(context.Background(), "authenticated-user", CreateInput{SpaceID: "space-1", RoleName: "space_member"})
+	_, _, err := service.Create(context.Background(), "authenticated-user", dto.InvitationCreateInput{SpaceID: "space-1", RoleName: "space_member"})
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -225,7 +230,7 @@ func TestCreateInvitationAllowsOnlyNonOwnerTargetRoles(t *testing.T) {
 		t.Run(role, func(t *testing.T) {
 			repo := &invitationRepositoryStub{}
 			service := invitationService(repo, &invitationAuditStub{})
-			_, _, err := service.Create(context.Background(), "user-1", CreateInput{SpaceID: "space-1", RoleName: role})
+			_, _, err := service.Create(context.Background(), "user-1", dto.InvitationCreateInput{SpaceID: "space-1", RoleName: role})
 			if err != nil {
 				t.Fatalf("role %s rejected: %v", role, err)
 			}
@@ -235,8 +240,8 @@ func TestCreateInvitationAllowsOnlyNonOwnerTargetRoles(t *testing.T) {
 		t.Run("reject-"+role, func(t *testing.T) {
 			repo := &invitationRepositoryStub{}
 			service := invitationService(repo, &invitationAuditStub{})
-			_, _, err := service.Create(context.Background(), "user-1", CreateInput{SpaceID: "space-1", RoleName: role})
-			var validationErr *ValidationError
+			_, _, err := service.Create(context.Background(), "user-1", dto.InvitationCreateInput{SpaceID: "space-1", RoleName: role})
+			var validationErr *serviceauthorization.ValidationError
 			if !errors.As(err, &validationErr) || validationErr.Field != "role_name" {
 				t.Fatalf("error = %v, want role_name validation", err)
 			}
@@ -255,7 +260,7 @@ func TestCreateInvitationRequiresInvitationPermission(t *testing.T) {
 		config.InvitationConfig{TTL: time.Hour},
 	)
 
-	_, _, err := service.Create(context.Background(), "user-1", CreateInput{SpaceID: "space-1", RoleName: "space_member"})
+	_, _, err := service.Create(context.Background(), "user-1", dto.InvitationCreateInput{SpaceID: "space-1", RoleName: "space_member"})
 	if !errors.Is(err, ErrForbidden) {
 		t.Fatalf("error = %v, want forbidden", err)
 	}
@@ -339,4 +344,4 @@ func TestAcceptInvitationInvalidTokensShareSafeError(t *testing.T) {
 	}
 }
 
-var _ domaininvitation.Repository = (*invitationRepositoryStub)(nil)
+var _ interfaceinvitation.RepoInvitationInterface = (*invitationRepositoryStub)(nil)

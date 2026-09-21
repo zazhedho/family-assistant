@@ -12,8 +12,10 @@ import (
 	domainaudit "family-assistant/internal/domain/audit"
 	domaininvitation "family-assistant/internal/domain/invitation"
 	domainuser "family-assistant/internal/domain/user"
+	"family-assistant/internal/dto"
 	handlercommon "family-assistant/internal/handlers/http/common"
 	interfaceaudit "family-assistant/internal/interfaces/audit"
+	interfaceinvitation "family-assistant/internal/interfaces/invitation"
 	serviceauthorization "family-assistant/internal/services/authorization"
 	serviceinvitation "family-assistant/internal/services/invitation"
 	"family-assistant/pkg/messages"
@@ -32,7 +34,7 @@ type userRepository interface {
 }
 
 type InvitationHandler struct {
-	Service serviceinvitation.Service
+	Service interfaceinvitation.ServiceInvitationInterface
 	Users   userRepository
 	handlercommon.AuditWriter
 }
@@ -54,7 +56,7 @@ type createResponse struct {
 
 // NewInvitationHandler accepts the service and optional user/audit dependencies.
 // Variadic dependencies keep construction small for tests and route wiring.
-func NewInvitationHandler(service serviceinvitation.Service, dependencies ...any) *InvitationHandler {
+func NewInvitationHandler(service interfaceinvitation.ServiceInvitationInterface, dependencies ...any) *InvitationHandler {
 	h := &InvitationHandler{Service: service}
 	for _, dependency := range dependencies {
 		switch value := dependency.(type) {
@@ -104,7 +106,7 @@ func (h *InvitationHandler) Create(ctx *gin.Context) {
 		writeInvitationError(ctx, err)
 		return
 	}
-	invitation, rawToken, err := h.Service.Create(withAuditProvenance(ctx), userID, serviceinvitation.CreateInput{
+	invitation, rawToken, err := h.Service.Create(withAuditProvenance(ctx), userID, dto.InvitationCreateInput{
 		SpaceID: spaceID, InvitedEmail: request.InvitedEmail, RoleName: roleName,
 	})
 	if err != nil {

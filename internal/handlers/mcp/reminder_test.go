@@ -6,10 +6,12 @@ import (
 	"testing"
 	"time"
 
+	domainidentity "family-assistant/internal/domain/identity"
 	domainpermission "family-assistant/internal/domain/permission"
 	domainreminder "family-assistant/internal/domain/reminder"
 	domainspace "family-assistant/internal/domain/space"
-	serviceidentity "family-assistant/internal/services/identity"
+	"family-assistant/internal/dto"
+	interfacereminder "family-assistant/internal/interfaces/reminder"
 	servicereminder "family-assistant/internal/services/reminder"
 )
 
@@ -20,11 +22,11 @@ const (
 )
 
 type reminderToolServiceStub struct {
-	createActor   serviceidentity.ActorContext
-	createInput   servicereminder.CreateInput
-	listActor     serviceidentity.ActorContext
-	listInput     servicereminder.ListInput
-	completeActor serviceidentity.ActorContext
+	createActor   domainidentity.ActorContext
+	createInput   dto.ReminderCreateInput
+	listActor     domainidentity.ActorContext
+	listInput     dto.ReminderListInput
+	completeActor domainidentity.ActorContext
 	completeSpace string
 	completeID    string
 	createCalls   int
@@ -35,7 +37,7 @@ type reminderToolServiceStub struct {
 	completeErr   error
 }
 
-func (s *reminderToolServiceStub) Create(_ context.Context, actor serviceidentity.ActorContext, input servicereminder.CreateInput) (*domainreminder.Reminder, error) {
+func (s *reminderToolServiceStub) Create(_ context.Context, actor domainidentity.ActorContext, input dto.ReminderCreateInput) (*domainreminder.Reminder, error) {
 	s.createCalls++
 	s.createActor, s.createInput = actor, input
 	if s.createErr != nil {
@@ -47,7 +49,7 @@ func (s *reminderToolServiceStub) Create(_ context.Context, actor serviceidentit
 	}, nil
 }
 
-func (s *reminderToolServiceStub) List(_ context.Context, actor serviceidentity.ActorContext, input servicereminder.ListInput) ([]domainreminder.Reminder, error) {
+func (s *reminderToolServiceStub) List(_ context.Context, actor domainidentity.ActorContext, input dto.ReminderListInput) ([]domainreminder.Reminder, error) {
 	s.listCalls++
 	s.listActor, s.listInput = actor, input
 	if s.listErr != nil {
@@ -56,7 +58,7 @@ func (s *reminderToolServiceStub) List(_ context.Context, actor serviceidentity.
 	return []domainreminder.Reminder{{ID: mcpReminderID, SpaceID: input.Space, Title: "Pay bill", Status: domainreminder.StatusPending, ScheduledAt: time.Date(2026, 9, 20, 1, 0, 0, 0, time.UTC)}}, nil
 }
 
-func (s *reminderToolServiceStub) Complete(_ context.Context, actor serviceidentity.ActorContext, spaceID, reminderID string) (*domainreminder.Reminder, error) {
+func (s *reminderToolServiceStub) Complete(_ context.Context, actor domainidentity.ActorContext, spaceID, reminderID string) (*domainreminder.Reminder, error) {
 	s.completeCalls++
 	s.completeActor, s.completeSpace, s.completeID = actor, spaceID, reminderID
 	if s.completeErr != nil {
@@ -67,7 +69,7 @@ func (s *reminderToolServiceStub) Complete(_ context.Context, actor serviceident
 
 func mcpReminderResolver() *mcpExternalResolverStub {
 	return &mcpExternalResolverStub{
-		actor: serviceidentity.ActorContext{
+		actor: domainidentity.ActorContext{
 			UserID: "user-1",
 			Memberships: []domainspace.ResolvedMembership{
 				{ID: mcpMemberID, SpaceID: mcpSpaceID, SpaceName: "Jane", SpaceType: domainspace.TypePersonal, UserID: "user-1", RoleID: "role-personal", RoleName: "space_owner", Status: domainspace.StatusActive},
@@ -148,4 +150,4 @@ func TestReminderToolsMapServiceErrorsSafely(t *testing.T) {
 	}
 }
 
-var _ servicereminder.Service = (*reminderToolServiceStub)(nil)
+var _ interfacereminder.ServiceReminderInterface = (*reminderToolServiceStub)(nil)

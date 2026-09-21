@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 
+	"family-assistant/internal/dto"
 	interfaceonboarding "family-assistant/internal/interfaces/onboarding"
 	serviceidentity "family-assistant/internal/services/identity"
 
@@ -31,7 +32,7 @@ func AccountRegister(ctx context.Context, registrar interfaceonboarding.ServiceO
 	if registrar == nil {
 		return AccountRegisterOutput{}, MapToolError(errors.New("account registration service is not configured"))
 	}
-	result, err := registrar.Register(ctx, interfaceonboarding.Input{
+	result, err := registrar.Register(ctx, dto.AccountRegistrationInput{
 		Name: input.Name, BirthDate: input.BirthDate, Consent: input.Consent,
 		Provider: request.Provider, ExternalID: request.ExternalID, Channel: request.Channel,
 	})

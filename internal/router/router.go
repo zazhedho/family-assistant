@@ -27,8 +27,12 @@ import (
 	spaceHandler "family-assistant/internal/handlers/http/space"
 	userHandler "family-assistant/internal/handlers/http/user"
 	interfaceaudit "family-assistant/internal/interfaces/audit"
+	interfaceidentity "family-assistant/internal/interfaces/identity"
+	interfaceinvitation "family-assistant/internal/interfaces/invitation"
 	interfacepermission "family-assistant/internal/interfaces/permission"
+	interfacereminder "family-assistant/internal/interfaces/reminder"
 	interfacesession "family-assistant/internal/interfaces/session"
+	interfacespace "family-assistant/internal/interfaces/space"
 	appConfigRepo "family-assistant/internal/repositories/appconfig"
 	auditRepo "family-assistant/internal/repositories/audit"
 	authRepo "family-assistant/internal/repositories/auth"
@@ -53,7 +57,6 @@ import (
 	menuSvc "family-assistant/internal/services/menu"
 	otpSvc "family-assistant/internal/services/otp"
 	permissionSvc "family-assistant/internal/services/permission"
-	servicereminder "family-assistant/internal/services/reminder"
 	resetSvc "family-assistant/internal/services/reset"
 	roleSvc "family-assistant/internal/services/role"
 	sessionSvc "family-assistant/internal/services/session"
@@ -297,7 +300,7 @@ func (r *Routes) AuditRoutes() {
 	}
 }
 
-func (r *Routes) ReminderRoutes(service servicereminder.Service, resolver serviceidentity.UserResolver, permissions serviceidentity.PermissionLoader) {
+func (r *Routes) ReminderRoutes(service interfacereminder.ServiceReminderInterface, resolver interfaceidentity.UserResolver, permissions interfaceidentity.PermissionLoader) {
 	h := reminderHandler.NewReminderHandler(service, resolver, permissions)
 	mdw := r.middleware(r.permissionRepo())
 
@@ -367,7 +370,7 @@ func (r *Routes) SpaceRoutes() {
 	r.IdentityRoutes()
 }
 
-func (r *Routes) SpaceRoutesWithDependencies(spaceService spaceSvc.Service, invitationService invitationSvc.Service, users invitationUserRepository, identityService serviceidentity.LinkService) {
+func (r *Routes) SpaceRoutesWithDependencies(spaceService interfacespace.ServiceSpaceInterface, invitationService interfaceinvitation.ServiceInvitationInterface, users invitationUserRepository, identityService interfaceidentity.LinkService) {
 	auditService := r.auditService()
 	h := spaceHandler.NewSpaceHandler(spaceService, auditService)
 	invitationH := invitationHandler.NewInvitationHandler(invitationService, users, auditService)
@@ -399,7 +402,7 @@ func (r *Routes) IdentityRoutes() {
 	r.IdentityRoutesWithService(service)
 }
 
-func (r *Routes) IdentityRoutesWithService(service serviceidentity.LinkService) {
+func (r *Routes) IdentityRoutesWithService(service interfaceidentity.LinkService) {
 	permissions := r.permissionRepo()
 	mdw := r.middleware(permissions)
 	auditService := r.auditService()

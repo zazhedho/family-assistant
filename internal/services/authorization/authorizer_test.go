@@ -5,21 +5,20 @@ import (
 	"errors"
 	"testing"
 
-	identity "family-assistant/internal/services/identity"
+	domainidentity "family-assistant/internal/domain/identity"
 )
 
 func TestAuthorizerChecksValidationBeforePermission(t *testing.T) {
-	actor := identity.ActorContext{Permissions: map[string]struct{}{}}
+	actor := domainidentity.ActorContext{Permissions: map[string]struct{}{}}
 	err := NewAuthorizer().Authorize(context.Background(), actor, "reminders:view", Resource{})
 
-	var validationErr *ValidationError
-	if !errors.As(err, &validationErr) {
+	if _, ok := errors.AsType[*ValidationError](err); !ok {
 		t.Fatalf("Authorize() error = %T %v, want *ValidationError", err, err)
 	}
 }
 
 func TestAuthorizerDoesNotAuthorizeLegacyFamilyResource(t *testing.T) {
-	actor := identity.ActorContext{
+	actor := domainidentity.ActorContext{
 		Permissions: map[string]struct{}{"reminders:view": {}},
 	}
 	err := NewAuthorizer().Authorize(context.Background(), actor, "reminders:view", Resource{})
@@ -68,12 +67,12 @@ func TestAuthorizerRejectsBlankPermission(t *testing.T) {
 	}
 }
 
-func spaceActor(spaceID, permission string) identity.ActorContext {
+func spaceActor(spaceID, permission string) domainidentity.ActorContext {
 	permissions := map[string]struct{}{}
 	if permission != "" {
 		permissions[permission] = struct{}{}
 	}
-	return identity.ActorContext{SpaceID: spaceID, Permissions: permissions}
+	return domainidentity.ActorContext{SpaceID: spaceID, Permissions: permissions}
 }
 
 func TestAuthorizerImplementsInterface(t *testing.T) {

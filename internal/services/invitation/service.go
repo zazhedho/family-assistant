@@ -17,6 +17,9 @@ import (
 	domainrole "family-assistant/internal/domain/role"
 	domainspace "family-assistant/internal/domain/space"
 	domainuser "family-assistant/internal/domain/user"
+	"family-assistant/internal/dto"
+	interfaceinvitation "family-assistant/internal/interfaces/invitation"
+	interfacespace "family-assistant/internal/interfaces/space"
 	serviceauthorization "family-assistant/internal/services/authorization"
 	"family-assistant/pkg/config"
 	"family-assistant/utils"
@@ -32,19 +35,6 @@ var (
 	ErrMembershipConflict              = domaininvitation.ErrMembershipConflict
 	ErrPermissionRepositoryUnavailable = errors.New("membership permission repository is not configured")
 )
-
-type ValidationError = serviceauthorization.ValidationError
-
-type CreateInput struct {
-	SpaceID      string
-	InvitedEmail string
-	RoleName     string
-}
-
-type Service interface {
-	Create(context.Context, string, CreateInput) (*domaininvitation.Invitation, string, error)
-	Accept(context.Context, string, domainuser.Users) (*domainspace.Member, error)
-}
 
 type roleRepository interface {
 	GetByName(context.Context, string) (domainrole.Role, error)
@@ -72,8 +62,8 @@ func WithAuditProvenance(ctx context.Context, provenance AuditProvenance) contex
 }
 
 type service struct {
-	invitations domaininvitation.Repository
-	spaces      domainspace.Repository
+	invitations interfaceinvitation.RepoInvitationInterface
+	spaces      interfacespace.RepoSpaceInterface
 	roles       roleRepository
 	permissions permissionRepository
 	audit       auditStore
@@ -81,7 +71,7 @@ type service struct {
 	now         func() time.Time
 }
 
-func NewService(invitations domaininvitation.Repository, spaces domainspace.Repository, roles roleRepository, permissions permissionRepository, audit auditStore, configs ...config.InvitationConfig) Service {
+func NewService(invitations interfaceinvitation.RepoInvitationInterface, spaces interfacespace.RepoSpaceInterface, roles roleRepository, permissions permissionRepository, audit auditStore, configs ...config.InvitationConfig) interfaceinvitation.ServiceInvitationInterface {
 	cfg := config.LoadInvitationConfig()
 	if len(configs) > 0 {
 		cfg = configs[0]
@@ -100,22 +90,22 @@ func NewService(invitations domaininvitation.Repository, spaces domainspace.Repo
 	}
 }
 
-func (s *service) Create(ctx context.Context, userID string, input CreateInput) (created *domaininvitation.Invitation, rawToken string, err error) {
+func (s *service) Create(ctx context.Context, userID string, input dto.InvitationCreateInput) (created *domaininvitation.Invitation, rawToken string, err error) {
 	userID = strings.TrimSpace(userID)
 	spaceID := strings.TrimSpace(input.SpaceID)
 	roleName := utils.NormalizeKey(input.RoleName)
 	if userID == "" {
-		err = &ValidationError{Field: "user_id", Reason: "is required"}
+		err = &serviceauthorization.ValidationError{Field: "user_id", Reason: "is required"}
 		s.writeFailure(ctx, "", "", userID, err)
 		return nil, "", err
 	}
 	if spaceID == "" {
-		err = &ValidationError{Field: "space_id", Reason: "is required"}
+		err = &serviceauthorization.ValidationError{Field: "space_id", Reason: "is required"}
 		s.writeFailure(ctx, spaceID, "", userID, err)
 		return nil, "", err
 	}
 	if !validTargetRole(roleName) {
-		err = &ValidationError{Field: "role_name", Reason: "must be one of space_admin, space_member, space_viewer"}
+		err = &serviceauthorization.ValidationError{Field: "role_name", Reason: "must be one of space_admin, space_member, space_viewer"}
 		s.writeFailure(ctx, spaceID, roleName, userID, err)
 		return nil, "", err
 	}
@@ -124,7 +114,7 @@ func (s *service) Create(ctx context.Context, userID string, input CreateInput) 
 	if strings.TrimSpace(input.InvitedEmail) != "" {
 		normalizedEmail = utils.SanitizeEmail(input.InvitedEmail)
 		if normalizedEmail == "" {
-			err = &ValidationError{Field: "invited_email", Reason: "must be a valid email"}
+			err = &serviceauthorization.ValidationError{Field: "invited_email", Reason: "must be a valid email"}
 			s.writeFailure(ctx, spaceID, roleName, userID, err)
 			return nil, "", err
 		}
@@ -279,7 +269,7 @@ func (s *service) hasPermission(ctx context.Context, roleID, permission string) 
 	}
 	parts := strings.SplitN(permission, ":", 2)
 	if len(parts) != 2 {
-		return false, &ValidationError{Field: "permission", Reason: "is invalid"}
+		return false, &serviceauthorization.ValidationError{Field: "permission", Reason: "is invalid"}
 	}
 	want := authscope.PermissionKey(parts[0], parts[1])
 	for _, candidate := range permissions {
@@ -330,7 +320,7 @@ func (s *service) writeFailure(ctx context.Context, spaceID, roleName, userID st
 }
 
 func FailureCategory(err error) string {
-	var validationErr *ValidationError
+	var validationErr *serviceauthorization.ValidationError
 	switch {
 	case errors.As(err, &validationErr), errors.Is(err, ErrInvalidInvitation), errors.Is(err, serviceauthorization.ErrInvalidResource):
 		return "validation"
@@ -349,4 +339,4 @@ func (s *service) writeAudit(ctx context.Context, event domainaudit.AuditEvent) 
 	}
 }
 
-var _ Service = (*service)(nil)
+var _ interfaceinvitation.ServiceInvitationInterface = (*service)(nil)

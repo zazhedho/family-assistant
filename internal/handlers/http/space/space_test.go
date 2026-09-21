@@ -12,6 +12,7 @@ import (
 	domainaudit "family-assistant/internal/domain/audit"
 	domainspace "family-assistant/internal/domain/space"
 	"family-assistant/internal/dto"
+	interfacespace "family-assistant/internal/interfaces/space"
 	serviceauthorization "family-assistant/internal/services/authorization"
 	servicespace "family-assistant/internal/services/space"
 	"family-assistant/pkg/filter"
@@ -27,7 +28,7 @@ type spaceServiceStub struct {
 	createErr    error
 	membersErr   error
 	createUserID string
-	createInput  servicespace.CreateInput
+	createInput  dto.SpaceCreateInput
 	listUserID   string
 	membersUser  string
 	membersSpace string
@@ -59,7 +60,7 @@ func (s *spaceServiceStub) List(_ context.Context, userID string) ([]domainspace
 	return s.spaces, s.listErr
 }
 
-func (s *spaceServiceStub) Create(_ context.Context, userID string, input servicespace.CreateInput) (*domainspace.Space, error) {
+func (s *spaceServiceStub) Create(_ context.Context, userID string, input dto.SpaceCreateInput) (*domainspace.Space, error) {
 	s.createCalls++
 	s.createUserID = userID
 	s.createInput = input
@@ -222,7 +223,7 @@ func TestSpaceHandlersRequireAuthentication(t *testing.T) {
 }
 
 func TestSpaceServiceStubSatisfiesService(t *testing.T) {
-	var _ servicespace.Service = (*spaceServiceStub)(nil)
+	var _ interfacespace.ServiceSpaceInterface = (*spaceServiceStub)(nil)
 }
 
 func TestSpaceHandlerAuditsEarlyFailuresWithHTTPProvenance(t *testing.T) {

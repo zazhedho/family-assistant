@@ -13,6 +13,7 @@ import (
 	domainidentity "family-assistant/internal/domain/identity"
 	handlercommon "family-assistant/internal/handlers/http/common"
 	interfaceaudit "family-assistant/internal/interfaces/audit"
+	interfaceidentity "family-assistant/internal/interfaces/identity"
 	serviceidentity "family-assistant/internal/services/identity"
 	"family-assistant/pkg/messages"
 	"family-assistant/pkg/response"
@@ -27,7 +28,7 @@ var (
 )
 
 type IdentityHandler struct {
-	Service serviceidentity.LinkService
+	Service interfaceidentity.LinkService
 	handlercommon.AuditWriter
 }
 
@@ -39,7 +40,7 @@ type revokeRequest struct {
 	ExternalID string `json:"external_id" binding:"required"`
 }
 
-func NewIdentityHandler(service serviceidentity.LinkService, audits ...interfaceaudit.ServiceAuditInterface) *IdentityHandler {
+func NewIdentityHandler(service interfaceidentity.LinkService, audits ...interfaceaudit.ServiceAuditInterface) *IdentityHandler {
 	h := &IdentityHandler{Service: service}
 	if len(audits) > 0 && audits[0] != nil {
 		h.AuditWriter = handlercommon.NewAuditWriter(audits[0], "IdentityHandler")

@@ -12,6 +12,8 @@ import (
 	domainpermission "family-assistant/internal/domain/permission"
 	domainrole "family-assistant/internal/domain/role"
 	domainspace "family-assistant/internal/domain/space"
+	"family-assistant/internal/dto"
+	interfacespace "family-assistant/internal/interfaces/space"
 	serviceauthorization "family-assistant/internal/services/authorization"
 	"family-assistant/utils"
 	"gorm.io/gorm"
@@ -29,19 +31,6 @@ var (
 	ErrNotFound                        = serviceauthorization.ErrNotFound
 	ErrPermissionRepositoryUnavailable = errors.New("membership permission repository is not configured")
 )
-
-type ValidationError = serviceauthorization.ValidationError
-
-type CreateInput struct {
-	Name     string
-	Category string
-}
-
-type Service interface {
-	List(context.Context, string) ([]domainspace.ResolvedMembership, error)
-	Create(context.Context, string, CreateInput) (*domainspace.Space, error)
-	Members(context.Context, string, string) ([]domainspace.ResolvedMembership, error)
-}
 
 type AuditProvenance struct {
 	RequestID string
@@ -69,20 +58,20 @@ type auditStore interface {
 }
 
 type service struct {
-	spaces      domainspace.Repository
+	spaces      interfacespace.RepoSpaceInterface
 	roles       roleRepository
 	permissions permissionRepository
 	audit       auditStore
 }
 
-func NewService(spaces domainspace.Repository, roles roleRepository, permissions permissionRepository, audit auditStore) Service {
+func NewService(spaces interfacespace.RepoSpaceInterface, roles roleRepository, permissions permissionRepository, audit auditStore) interfacespace.ServiceSpaceInterface {
 	return &service{spaces: spaces, roles: roles, permissions: permissions, audit: audit}
 }
 
 func (s *service) List(ctx context.Context, userID string) ([]domainspace.ResolvedMembership, error) {
 	userID = strings.TrimSpace(userID)
 	if userID == "" {
-		return nil, &ValidationError{Field: "user_id", Reason: "is required"}
+		return nil, &serviceauthorization.ValidationError{Field: "user_id", Reason: "is required"}
 	}
 
 	memberships, err := s.spaces.ListActiveByUserID(ctx, userID)
@@ -129,22 +118,22 @@ func (s *service) List(ctx context.Context, userID string) ([]domainspace.Resolv
 	return allowed, nil
 }
 
-func (s *service) Create(ctx context.Context, userID string, input CreateInput) (created *domainspace.Space, err error) {
+func (s *service) Create(ctx context.Context, userID string, input dto.SpaceCreateInput) (created *domainspace.Space, err error) {
 	userID = strings.TrimSpace(userID)
 	if userID == "" {
-		err = &ValidationError{Field: "user_id", Reason: "is required"}
+		err = &serviceauthorization.ValidationError{Field: "user_id", Reason: "is required"}
 		s.writeFailure(ctx, domainaudit.ActionCreate, "", "", userID, err)
 		return nil, err
 	}
 	name := strings.TrimSpace(input.Name)
 	if name == "" {
-		err = &ValidationError{Field: "name", Reason: "is required"}
+		err = &serviceauthorization.ValidationError{Field: "name", Reason: "is required"}
 		s.writeFailure(ctx, domainaudit.ActionCreate, "", "", userID, err)
 		return nil, err
 	}
 	category := strings.TrimSpace(input.Category)
 	if !validSharedCategory(category) {
-		err = &ValidationError{Field: "category", Reason: "must be one of family, friends, community, work, finance, custom"}
+		err = &serviceauthorization.ValidationError{Field: "category", Reason: "must be one of family, friends, community, work, finance, custom"}
 		s.writeFailure(ctx, domainaudit.ActionCreate, "", "", userID, err)
 		return nil, err
 	}
@@ -227,12 +216,12 @@ func (s *service) Members(ctx context.Context, userID, spaceID string) ([]domain
 	userID = strings.TrimSpace(userID)
 	spaceID = strings.TrimSpace(spaceID)
 	if userID == "" {
-		err := &ValidationError{Field: "user_id", Reason: "is required"}
+		err := &serviceauthorization.ValidationError{Field: "user_id", Reason: "is required"}
 		s.writeFailure(ctx, "list", spaceID, "", userID, err)
 		return nil, err
 	}
 	if spaceID == "" {
-		err := &ValidationError{Field: "space_id", Reason: "is required"}
+		err := &serviceauthorization.ValidationError{Field: "space_id", Reason: "is required"}
 		s.writeFailure(ctx, "list", spaceID, "", userID, err)
 		return nil, err
 	}
@@ -281,7 +270,7 @@ func (s *service) hasPermission(ctx context.Context, roleID, permission string) 
 	}
 	parts := strings.SplitN(permission, ":", 2)
 	if len(parts) != 2 {
-		return false, &ValidationError{Field: "permission", Reason: "is invalid"}
+		return false, &serviceauthorization.ValidationError{Field: "permission", Reason: "is invalid"}
 	}
 	want := authscope.PermissionKey(parts[0], parts[1])
 	for _, permission := range permissions {
@@ -370,7 +359,7 @@ func (s *service) newAuditEvent(ctx context.Context, action, spaceID, memberID, 
 }
 
 func FailureCategory(err error) string {
-	var validationErr *ValidationError
+	var validationErr *serviceauthorization.ValidationError
 	switch {
 	case errors.As(err, &validationErr), errors.Is(err, serviceauthorization.ErrInvalidResource):
 		return "validation"
@@ -389,4 +378,4 @@ func (s *service) writeAudit(ctx context.Context, event domainaudit.AuditEvent) 
 	}
 }
 
-var _ Service = (*service)(nil)
+var _ interfacespace.ServiceSpaceInterface = (*service)(nil)

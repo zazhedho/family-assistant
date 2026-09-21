@@ -5,10 +5,12 @@ import (
 	"errors"
 	"testing"
 
+	domainidentity "family-assistant/internal/domain/identity"
 	domainpermission "family-assistant/internal/domain/permission"
 	domainspace "family-assistant/internal/domain/space"
+	"family-assistant/internal/dto"
+	interfacespace "family-assistant/internal/interfaces/space"
 	serviceidentity "family-assistant/internal/services/identity"
-	servicespace "family-assistant/internal/services/space"
 )
 
 type mcpSpaceServiceStub struct {
@@ -29,7 +31,7 @@ func (s *mcpSpaceServiceStub) List(_ context.Context, userID string) ([]domainsp
 	return s.spaces, s.listErr
 }
 
-func (*mcpSpaceServiceStub) Create(context.Context, string, servicespace.CreateInput) (*domainspace.Space, error) {
+func (*mcpSpaceServiceStub) Create(context.Context, string, dto.SpaceCreateInput) (*domainspace.Space, error) {
 	return nil, errors.New("not implemented")
 }
 
@@ -40,13 +42,13 @@ func (s *mcpSpaceServiceStub) Members(_ context.Context, userID, spaceID string)
 }
 
 type mcpExternalResolverStub struct {
-	actor       serviceidentity.ActorContext
+	actor       domainidentity.ActorContext
 	permissions []domainpermission.Permission
 	err         error
 	roleID      string
 }
 
-func (s *mcpExternalResolverStub) ResolveExternal(context.Context, string, string, string) (serviceidentity.ActorContext, error) {
+func (s *mcpExternalResolverStub) ResolveExternal(context.Context, string, string, string) (domainidentity.ActorContext, error) {
 	return s.actor, s.err
 }
 
@@ -70,7 +72,7 @@ func TestSpaceListUsesResolvedActorUserID(t *testing.T) {
 	service := &mcpSpaceServiceStub{spaces: []domainspace.ResolvedMembership{{
 		SpaceID: "00000000-0000-0000-0000-000000000001", SpaceName: "Personal", UserID: "user-1",
 	}}}
-	resolver := &mcpExternalResolverStub{actor: serviceidentity.ActorContext{UserID: "user-1"}}
+	resolver := &mcpExternalResolverStub{actor: domainidentity.ActorContext{UserID: "user-1"}}
 
 	got, err := SpaceList(mcpExternalContext(), resolver, service)
 	if err != nil {
@@ -84,7 +86,7 @@ func TestSpaceListUsesResolvedActorUserID(t *testing.T) {
 func TestSpaceGetMembersSelectsUUIDOrNameFromActorMemberships(t *testing.T) {
 	spaceID := "00000000-0000-0000-0000-000000000001"
 	resolver := &mcpExternalResolverStub{
-		actor: serviceidentity.ActorContext{UserID: "user-1", Memberships: []domainspace.ResolvedMembership{
+		actor: domainidentity.ActorContext{UserID: "user-1", Memberships: []domainspace.ResolvedMembership{
 			mcpMembership("member-personal", "00000000-0000-0000-0000-000000000002", "Jane", domainspace.TypePersonal, "role-owner"),
 			mcpMembership("member-shared", spaceID, "Trading", domainspace.TypeShared, "role-member"),
 		}},
@@ -103,7 +105,7 @@ func TestSpaceGetMembersSelectsUUIDOrNameFromActorMemberships(t *testing.T) {
 
 func TestSpaceGetMembersMapsAmbiguousNameToInvalidInput(t *testing.T) {
 	resolver := &mcpExternalResolverStub{
-		actor: serviceidentity.ActorContext{UserID: "user-1", Memberships: []domainspace.ResolvedMembership{
+		actor: domainidentity.ActorContext{UserID: "user-1", Memberships: []domainspace.ResolvedMembership{
 			mcpMembership("member-1", "space-1", "Trading", domainspace.TypeShared, "role-1"),
 			mcpMembership("member-2", "space-2", " trading ", domainspace.TypeShared, "role-2"),
 		}},
@@ -142,4 +144,4 @@ func TestSpaceToolsRequireLinkedActor(t *testing.T) {
 	}
 }
 
-var _ servicespace.Service = (*mcpSpaceServiceStub)(nil)
+var _ interfacespace.ServiceSpaceInterface = (*mcpSpaceServiceStub)(nil)

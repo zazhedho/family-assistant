@@ -5,12 +5,13 @@ import (
 	"errors"
 	"testing"
 
+	domainidentity "family-assistant/internal/domain/identity"
 	domainpermission "family-assistant/internal/domain/permission"
 	domainspace "family-assistant/internal/domain/space"
 )
 
-func selectorActor(memberships ...domainspace.ResolvedMembership) ActorContext {
-	return ActorContext{UserID: "user-1", Memberships: memberships}
+func selectorActor(memberships ...domainspace.ResolvedMembership) domainidentity.ActorContext {
+	return domainidentity.ActorContext{UserID: "user-1", Memberships: memberships}
 }
 
 func selectorPermissions() *permissionServiceStub {
