@@ -40,13 +40,17 @@ import (
 )
 
 func TestPersonalGroupSpaceArchitecture(t *testing.T) {
-	dsn := strings.TrimSpace(os.Getenv("FAMILY_ASSISTANT_TEST_DATABASE_URL"))
-	if dsn == "" {
+	rawDSN, dsnSet := os.LookupEnv("FAMILY_ASSISTANT_TEST_DATABASE_URL")
+	dsn := strings.TrimSpace(rawDSN)
+	if !dsnSet {
 		t.Skip("FAMILY_ASSISTANT_TEST_DATABASE_URL is not set")
+	}
+	if dsn == "" {
+		t.Fatal("FAMILY_ASSISTANT_TEST_DATABASE_URL must not be empty when set")
 	}
 	assertSafeTestDSN(t, dsn)
 	if err := loadIntegrationEnv("../../.env"); err != nil {
-		t.Skipf("worktree .env is not available: %v", err)
+		t.Fatalf("worktree .env is required when FAMILY_ASSISTANT_TEST_DATABASE_URL is set: %v", err)
 	}
 	t.Setenv("CONFIG_PUBLIC_REGISTRATION", "auth.public_registration_enabled")
 	t.Setenv("CONFIG_REGISTER_OTP", "auth.register_otp_enabled")
@@ -124,10 +128,18 @@ func TestPersonalGroupSpaceArchitecture(t *testing.T) {
 	}
 
 	spacesResult := callMCPTool(t, mcpServer.URL, profile, "integration-only-server-key", "space_list", map[string]any{})
-	var linkedSpaces []domainspace.ResolvedMembership
-	decodeStructured(t, spacesResult.StructuredOutput, &linkedSpaces)
-	if spacesResult.IsError || !hasSpace(linkedSpaces, personalOne.SpaceID) || !hasSpace(linkedSpaces, sharedOne.ID) || !hasSpace(linkedSpaces, sharedTwo.ID) {
+	var linkedSpacesOutput mcpSpaceListOutput
+	decodeStructured(t, spacesResult.StructuredOutput, &linkedSpacesOutput)
+	if spacesResult.IsError || !hasSpace(linkedSpacesOutput.Spaces, personalOne.SpaceID) || !hasSpace(linkedSpacesOutput.Spaces, sharedOne.ID) || !hasSpace(linkedSpacesOutput.Spaces, sharedTwo.ID) {
 		t.Fatalf("space_list = %+v", spacesResult)
+	}
+	memberResult := callMCPTool(t, mcpServer.URL, profile, "integration-only-server-key", "space_get_members", map[string]any{
+		"space": sharedOne.ID,
+	})
+	var memberOutput mcpSpaceMembersOutput
+	decodeStructured(t, memberResult.StructuredOutput, &memberOutput)
+	if memberResult.IsError || len(memberOutput.Members) != 2 || !hasUser(memberOutput.Members, adultOne.UserID) || !hasUser(memberOutput.Members, adultTwo.UserID) {
+		t.Fatalf("space_get_members = %+v", memberResult)
 	}
 
 	personalReminder := decodeReminder(t, callMCPTool(t, mcpServer.URL, profile, "integration-only-server-key", "reminder_create", map[string]any{
@@ -135,9 +147,9 @@ func TestPersonalGroupSpaceArchitecture(t *testing.T) {
 		"scheduled_at": "2026-09-21T08:00:00Z",
 	}))
 	personalList := callMCPTool(t, mcpServer.URL, profile, "integration-only-server-key", "reminder_list", map[string]any{})
-	var personalReminders []mcpReminderOutput
-	decodeStructured(t, personalList.StructuredOutput, &personalReminders)
-	if personalList.IsError || !hasReminder(personalReminders, personalReminder.ID) {
+	var personalReminderOutput mcpReminderListOutput
+	decodeStructured(t, personalList.StructuredOutput, &personalReminderOutput)
+	if personalList.IsError || !hasReminder(personalReminderOutput.Reminders, personalReminder.ID) {
 		t.Fatalf("personal reminder list = %+v", personalList)
 	}
 	completedPersonal := decodeReminder(t, callMCPTool(t, mcpServer.URL, profile, "integration-only-server-key", "reminder_complete", map[string]any{
@@ -155,9 +167,9 @@ func TestPersonalGroupSpaceArchitecture(t *testing.T) {
 	sharedList := callMCPTool(t, mcpServer.URL, profile, "integration-only-server-key", "reminder_list", map[string]any{
 		"space": sharedOne.ID,
 	})
-	var sharedReminders []mcpReminderOutput
-	decodeStructured(t, sharedList.StructuredOutput, &sharedReminders)
-	if sharedList.IsError || !hasReminder(sharedReminders, sharedReminder.ID) {
+	var sharedReminderOutput mcpReminderListOutput
+	decodeStructured(t, sharedList.StructuredOutput, &sharedReminderOutput)
+	if sharedList.IsError || !hasReminder(sharedReminderOutput.Reminders, sharedReminder.ID) {
 		t.Fatalf("shared reminder list = %+v", sharedList)
 	}
 
@@ -298,6 +310,18 @@ type mcpReminderOutput struct {
 	Title     string `json:"title"`
 	Status    string `json:"status"`
 	Scheduled string `json:"scheduled_at"`
+}
+
+type mcpSpaceListOutput struct {
+	Spaces []domainspace.ResolvedMembership `json:"spaces"`
+}
+
+type mcpSpaceMembersOutput struct {
+	Members []domainspace.ResolvedMembership `json:"members"`
+}
+
+type mcpReminderListOutput struct {
+	Reminders []mcpReminderOutput `json:"reminders"`
 }
 
 func registerAndLogin(t *testing.T, baseURL, name, email, phone string) registeredUser {
@@ -535,6 +559,15 @@ func mcpText(result mcpWireResult) string {
 func hasSpace(memberships []domainspace.ResolvedMembership, id string) bool {
 	for _, membership := range memberships {
 		if membership.SpaceID == id {
+			return true
+		}
+	}
+	return false
+}
+
+func hasUser(memberships []domainspace.ResolvedMembership, id string) bool {
+	for _, membership := range memberships {
+		if membership.UserID == id {
 			return true
 		}
 	}
