@@ -103,12 +103,6 @@ func (m *AuthMiddleware) Handler(next http.Handler) http.Handler {
 	})
 }
 
-func resolveActor(ctx context.Context, resolver serviceidentity.Resolver, externalID, channel string) (serviceidentity.ActorContext, error) {
-	return resolveExternalActor(ctx, resolver, ExternalRequest{
-		Provider: domainidentity.ProviderHermes, ExternalID: externalID, Channel: channel,
-	})
-}
-
 func resolveExternalActor(ctx context.Context, resolver serviceidentity.Resolver, request ExternalRequest) (serviceidentity.ActorContext, error) {
 	provider := strings.TrimSpace(request.Provider)
 	if provider == "" {

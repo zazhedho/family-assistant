@@ -22,8 +22,7 @@ func TestAuthorizerDoesNotAuthorizeLegacyFamilyResource(t *testing.T) {
 	actor := identity.ActorContext{
 		Permissions: map[string]struct{}{"reminders:view": {}},
 	}
-	err := NewAuthorizer().Authorize(context.Background(), actor, "reminders:view", Resource{
-	})
+	err := NewAuthorizer().Authorize(context.Background(), actor, "reminders:view", Resource{})
 
 	var validationErr *ValidationError
 	if !errors.As(err, &validationErr) || validationErr.Field != "space_id" {

@@ -76,7 +76,20 @@ func TestReminderMigrationIsSpaceScoped(t *testing.T) {
 
 func readMigration(t *testing.T, name string) string {
 	t.Helper()
-	content, err := os.ReadFile(name)
+	var (
+		content []byte
+		err     error
+	)
+	switch name {
+	case "000007_create_space_foundation.up.sql":
+		content, err = os.ReadFile("000007_create_space_foundation.up.sql")
+	case "000008_seed_space_rbac.down.sql":
+		content, err = os.ReadFile("000008_seed_space_rbac.down.sql")
+	case "000009_create_reminders_table.up.sql":
+		content, err = os.ReadFile("000009_create_reminders_table.up.sql")
+	default:
+		t.Fatalf("unsupported migration %q", name)
+	}
 	if err != nil {
 		t.Fatal(err)
 	}
