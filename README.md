@@ -148,8 +148,8 @@ Optional but recommended:
 
 Personal and Shared Space settings:
 - `MIN_INDEPENDENT_ACCOUNT_AGE` sets the minimum registration age (default `18`).
-- `SPACE_INVITATION_TTL_SECONDS` controls pending invitation expiry (default `86400`).
-- `IDENTITY_LINK_TTL_SECONDS` controls one-time Hermes identity-link expiry (default `900`).
+- `SPACE_INVITATION_TTL_SECONDS` controls pending invitation expiry (default `259200`).
+- `IDENTITY_LINK_TTL_SECONDS` controls one-time Hermes identity-link expiry (default `600`).
 
 ### Local PostgreSQL databases
 
