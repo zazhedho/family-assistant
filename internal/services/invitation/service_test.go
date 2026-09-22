@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -35,6 +36,12 @@ type invitationRepositoryStub struct {
 }
 
 var _ interfaceinvitation.ServiceInvitationInterface = (*service)(nil)
+
+func TestNewAuditEventKeepsParameterListWithinLimit(t *testing.T) {
+	if got := reflect.TypeOf((&service{}).newAuditEvent).NumIn(); got > 7 {
+		t.Fatalf("newAuditEvent parameters = %d, want <= 7", got)
+	}
+}
 
 func (s *invitationRepositoryStub) Create(_ context.Context, invitation *domaininvitation.Invitation) error {
 	if s.createErr != nil {
@@ -328,6 +335,22 @@ func TestAcceptInvitationAuditsUnboundEmailAsFalse(t *testing.T) {
 	}
 	if got := audit.events[0].Metadata["email_bound"]; got != false {
 		t.Fatalf("email_bound = %v, want false", got)
+	}
+}
+
+func TestAcceptUnboundInvitationAllowsEmaillessWhatsAppUser(t *testing.T) {
+	repo := &invitationRepositoryStub{accepted: &domaininvitation.Acceptance{
+		InvitationID: "invitation-whatsapp", SpaceID: "space-1", RoleID: "role-member", RoleName: "space_member",
+		Member: &domainspace.Member{ID: "member-whatsapp", SpaceID: "space-1", UserID: "user-whatsapp", RoleID: "role-member", Status: domainspace.StatusActive},
+	}}
+	service := invitationService(repo, &invitationAuditStub{})
+
+	member, err := service.Accept(context.Background(), "raw-token", domainuser.Users{Id: "user-whatsapp"})
+	if err != nil {
+		t.Fatalf("accept unbound WhatsApp invitation: %v", err)
+	}
+	if member == nil || repo.userID != "user-whatsapp" || repo.email != "" {
+		t.Fatalf("unexpected accept args: member=%#v user=%q email=%q", member, repo.userID, repo.email)
 	}
 }
 

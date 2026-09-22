@@ -7,6 +7,7 @@ import (
 	"family-assistant/infrastructure/database"
 	mcpHandler "family-assistant/internal/handlers/mcp"
 	interfaceonboarding "family-assistant/internal/interfaces/onboarding"
+	activityRepo "family-assistant/internal/repositories/activity"
 	identityRepo "family-assistant/internal/repositories/identity"
 	invitationRepo "family-assistant/internal/repositories/invitation"
 	onboardingRepo "family-assistant/internal/repositories/onboarding"
@@ -16,6 +17,7 @@ import (
 	spaceRepo "family-assistant/internal/repositories/space"
 	userRepo "family-assistant/internal/repositories/user"
 	"family-assistant/internal/router"
+	activityService "family-assistant/internal/services/activity"
 	authorizationService "family-assistant/internal/services/authorization"
 	identityService "family-assistant/internal/services/identity"
 	invitationService "family-assistant/internal/services/invitation"
@@ -38,8 +40,8 @@ import (
 	"time"
 
 	"github.com/golang-migrate/migrate/v4"
-	_ "github.com/golang-migrate/migrate/v4/database/postgres"
-	_ "github.com/golang-migrate/migrate/v4/source/file"
+	_ "github.com/golang-migrate/migrate/v4/database/postgres" // Register the PostgreSQL driver for migrations.
+	_ "github.com/golang-migrate/migrate/v4/source/file"       // Register the file-based migration source.
 	"github.com/joho/godotenv"
 )
 
@@ -56,35 +58,13 @@ func main() {
 }
 
 func run() error {
+	configureRuntime()
+
 	var (
 		err        error
 		sqlDb      *sql.DB
 		runMigrate bool
 	)
-	if timeZone, err := time.LoadLocation("Asia/Jakarta"); err != nil {
-		logger.WriteLog(logger.LogLevelError, "time.LoadLocation - Error: "+err.Error())
-	} else {
-		time.Local = timeZone
-	}
-
-	if err = godotenv.Load(".env"); err != nil && os.Getenv("APP_ENV") == "" {
-		log.Fatalf("Error app environment")
-	}
-
-	myAddr := "unknown"
-	addrs, _ := net.InterfaceAddrs()
-	for _, address := range addrs {
-		if ipNet, ok := address.(*net.IPNet); ok && !ipNet.IP.IsLoopback() {
-			if ipNet.IP.To4() != nil {
-				myAddr = ipNet.IP.String()
-				break
-			}
-		}
-	}
-
-	myAddr += strings.Repeat(" ", 15-len(myAddr))
-	FailOnError(os.Setenv("ServerIP", myAddr), "Failed to set server IP")
-	logger.WriteLog(logger.LogLevelInfo, "Server IP: "+myAddr)
 
 	var port, appName string
 	flag.StringVar(&port, "port", os.Getenv("PORT"), "port of the service")
@@ -102,28 +82,14 @@ func run() error {
 		runMigration()
 	}
 
-	// Initialize Redis for session management (optional)
-	redisClient, err := database.InitRedis()
-	if err != nil {
-		logger.WriteLog(logger.LogLevelDebug, "Redis not available, session management will be disabled")
-	} else {
-		defer func() {
-			if closeErr := database.CloseRedis(); closeErr != nil {
-				logger.WriteLog(logger.LogLevelError, "Failed to close redis connection: "+closeErr.Error())
-			}
-		}()
-		logger.WriteLog(logger.LogLevelInfo, "Redis initialized, session management enabled")
-	}
+	redisEnabled, closeRedis := initializeRedis()
+	defer closeRedis()
 
 	routes := router.NewRoutes()
 
 	routes.DB, sqlDb, err = database.ConnDb()
 	FailOnError(err, "Failed to open db")
-	defer func() {
-		if closeErr := sqlDb.Close(); closeErr != nil {
-			logger.WriteLog(logger.LogLevelError, "Failed to close database connection: "+closeErr.Error())
-		}
-	}()
+	defer closeDatabase(sqlDb)
 
 	routes.UserRoutes()
 	routes.RoleRoutes()
@@ -150,11 +116,14 @@ func run() error {
 	reminders := reminderService.NewReminderService(
 		reminderRepo.NewRepository(routes.DB), spaceRepository, authorizationService.NewAuthorizer(), audit,
 	)
+	activities := activityService.NewService(
+		activityRepo.NewRepository(routes.DB), spaceRepository, authorizationService.NewAuthorizer(), audit,
+	)
 	routes.SpaceRoutesWithDependencies(spaces, invitations, userRepo.NewUserRepo(routes.DB), identityLink)
 	routes.ReminderRoutes(reminders, identityResolver, permissions)
 
 	// Register session routes if Redis is available
-	if redisClient != nil {
+	if redisEnabled {
 		routes.SessionRoutes()
 	}
 
@@ -163,25 +132,13 @@ func run() error {
 	serverContext, stopSignals := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stopSignals()
 
-	var mcpServer *http.Server
-	var mcpListener net.Listener
-	if mcpConfig.Enabled {
-		mcpServer, mcpListener, err = mcpHandler.Listen(mcpConfig, identityResolver, identityLink, accountRegistrar, spaces, reminders)
-		FailOnError(err, "Failed to bind MCP server")
-	}
-
-	httpServer := &http.Server{
-		Addr:              fmt.Sprintf(":%s", port),
-		Handler:           routes.App,
-		ReadHeaderTimeout: 10 * time.Second,
-	}
-	httpListener, err := (&net.ListenConfig{}).Listen(serverContext, "tcp", httpServer.Addr)
-	if err != nil {
-		if mcpListener != nil {
-			_ = mcpListener.Close()
-		}
-		FailOnError(err, "Failed to bind HTTP server")
-	}
+	mcpServer, mcpListener := startMCPServer(mcpConfig.Enabled, func() (*http.Server, net.Listener, error) {
+		return mcpHandler.Listen(mcpConfig, identityResolver, identityLink, accountRegistrar, spaces, reminders, mcpHandler.ToolServices{
+			Invitation: invitations,
+			Activity:   activities,
+		})
+	})
+	httpServer, httpListener := bindHTTPServer(serverContext, fmt.Sprintf(":%s", port), routes.App, mcpListener)
 
 	if mcpServer != nil {
 		logger.WriteLog(logger.LogLevelInfo, "MCP server listening on "+mcpServer.Addr)
@@ -192,6 +149,79 @@ func run() error {
 		return fmt.Errorf("server stopped unexpectedly: %w", err)
 	}
 	return nil
+}
+
+func configureRuntime() {
+	if timeZone, err := time.LoadLocation("Asia/Jakarta"); err != nil {
+		logger.WriteLog(logger.LogLevelError, "time.LoadLocation - Error: "+err.Error())
+	} else {
+		time.Local = timeZone
+	}
+
+	if err := godotenv.Load(".env"); err != nil && os.Getenv("APP_ENV") == "" {
+		log.Fatalf("Error app environment")
+	}
+
+	addrs, _ := net.InterfaceAddrs()
+	myAddr := findIPv4Address(addrs)
+	myAddr += strings.Repeat(" ", 15-len(myAddr))
+	FailOnError(os.Setenv("ServerIP", myAddr), "Failed to set server IP")
+	logger.WriteLog(logger.LogLevelInfo, "Server IP: "+myAddr)
+}
+
+func findIPv4Address(addrs []net.Addr) string {
+	for _, address := range addrs {
+		ipNet, ok := address.(*net.IPNet)
+		if !ok || ipNet.IP.IsLoopback() || ipNet.IP.To4() == nil {
+			continue
+		}
+		return ipNet.IP.String()
+	}
+	return "unknown"
+}
+
+func initializeRedis() (bool, func()) {
+	if _, err := database.InitRedis(); err != nil {
+		logger.WriteLog(logger.LogLevelDebug, "Redis not available, session management will be disabled")
+		return false, func() {
+			// No Redis client was created, so there is nothing to close.
+		}
+	}
+	logger.WriteLog(logger.LogLevelInfo, "Redis initialized, session management enabled")
+	return true, closeRedis
+}
+
+func closeRedis() {
+	if err := database.CloseRedis(); err != nil {
+		logger.WriteLog(logger.LogLevelError, "Failed to close redis connection: "+err.Error())
+	}
+}
+
+func closeDatabase(db *sql.DB) {
+	if err := db.Close(); err != nil {
+		logger.WriteLog(logger.LogLevelError, "Failed to close database connection: "+err.Error())
+	}
+}
+
+func startMCPServer(enabled bool, listen func() (*http.Server, net.Listener, error)) (*http.Server, net.Listener) {
+	if !enabled {
+		return nil, nil
+	}
+	server, listener, err := listen()
+	FailOnError(err, "Failed to bind MCP server")
+	return server, listener
+}
+
+func bindHTTPServer(ctx context.Context, addr string, handler http.Handler, mcpListener net.Listener) (*http.Server, net.Listener) {
+	server := &http.Server{Addr: addr, Handler: handler, ReadHeaderTimeout: 10 * time.Second}
+	listener, err := (&net.ListenConfig{}).Listen(ctx, "tcp", server.Addr)
+	if err != nil {
+		if mcpListener != nil {
+			_ = mcpListener.Close()
+		}
+		FailOnError(err, "Failed to bind HTTP server")
+	}
+	return server, listener
 }
 
 const serverShutdownTimeout = 5 * time.Second

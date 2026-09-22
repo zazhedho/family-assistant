@@ -102,6 +102,28 @@ ON CONFLICT (name) DO UPDATE SET
     deleted_at = NULL,
     updated_at = CURRENT_TIMESTAMP;
 
+INSERT INTO menu_items (id, name, display_name, path, icon, order_index, is_active)
+VALUES
+    ('22222222-2222-4222-8222-000000000005', 'activities', 'Activities', '/activities', 'bi-journal-text', 909, TRUE)
+ON CONFLICT (name) DO UPDATE SET
+    display_name = EXCLUDED.display_name,
+    path = EXCLUDED.path,
+    icon = EXCLUDED.icon,
+    order_index = EXCLUDED.order_index,
+    is_active = EXCLUDED.is_active,
+    deleted_at = NULL,
+    updated_at = CURRENT_TIMESTAMP;
+
+INSERT INTO permissions (id, name, display_name, resource, action) VALUES
+    ('33333333-3333-4333-8333-000000000011', 'list_activities', 'List Activities', 'activities', 'list'),
+    ('33333333-3333-4333-8333-000000000012', 'create_activities', 'Create Activities', 'activities', 'create')
+ON CONFLICT (name) DO UPDATE SET
+    display_name = EXCLUDED.display_name,
+    resource = EXCLUDED.resource,
+    action = EXCLUDED.action,
+    deleted_at = NULL,
+    updated_at = CURRENT_TIMESTAMP;
+
 INSERT INTO role_permissions (id, role_id, permission_id)
 SELECT md5('space-rbac:' || r.name || ':' || p.name)::uuid, r.id, p.id
 FROM roles r
@@ -133,6 +155,13 @@ ON CONFLICT DO NOTHING;
 INSERT INTO role_permissions (id, role_id, permission_id)
 SELECT md5('space-rbac:' || r.name || ':' || p.name)::uuid, r.id, p.id
 FROM roles r
+JOIN permissions p ON p.resource = 'activities' AND p.name IN ('list_activities', 'create_activities') AND p.deleted_at IS NULL
+WHERE r.name IN ('space_owner') AND r.deleted_at IS NULL
+ON CONFLICT DO NOTHING;
+
+INSERT INTO role_permissions (id, role_id, permission_id)
+SELECT md5('space-rbac:' || r.name || ':' || p.name)::uuid, r.id, p.id
+FROM roles r
 JOIN permissions p ON p.resource = 'spaces' AND p.name IN ('list_spaces', 'view_spaces') AND p.deleted_at IS NULL
 WHERE r.name IN ('space_admin') AND r.deleted_at IS NULL
 ON CONFLICT DO NOTHING;
@@ -161,6 +190,13 @@ ON CONFLICT DO NOTHING;
 INSERT INTO role_permissions (id, role_id, permission_id)
 SELECT md5('space-rbac:' || r.name || ':' || p.name)::uuid, r.id, p.id
 FROM roles r
+JOIN permissions p ON p.resource = 'activities' AND p.name IN ('list_activities', 'create_activities') AND p.deleted_at IS NULL
+WHERE r.name IN ('space_admin') AND r.deleted_at IS NULL
+ON CONFLICT DO NOTHING;
+
+INSERT INTO role_permissions (id, role_id, permission_id)
+SELECT md5('space-rbac:' || r.name || ':' || p.name)::uuid, r.id, p.id
+FROM roles r
 JOIN permissions p ON p.resource = 'spaces' AND p.name IN ('list_spaces', 'view_spaces') AND p.deleted_at IS NULL
 WHERE r.name IN ('space_member') AND r.deleted_at IS NULL
 ON CONFLICT DO NOTHING;
@@ -182,6 +218,13 @@ ON CONFLICT DO NOTHING;
 INSERT INTO role_permissions (id, role_id, permission_id)
 SELECT md5('space-rbac:' || r.name || ':' || p.name)::uuid, r.id, p.id
 FROM roles r
+JOIN permissions p ON p.resource = 'activities' AND p.name IN ('list_activities', 'create_activities') AND p.deleted_at IS NULL
+WHERE r.name IN ('space_member') AND r.deleted_at IS NULL
+ON CONFLICT DO NOTHING;
+
+INSERT INTO role_permissions (id, role_id, permission_id)
+SELECT md5('space-rbac:' || r.name || ':' || p.name)::uuid, r.id, p.id
+FROM roles r
 JOIN permissions p ON p.resource = 'spaces' AND p.name IN ('list_spaces', 'view_spaces') AND p.deleted_at IS NULL
 WHERE r.name IN ('space_viewer') AND r.deleted_at IS NULL
 ON CONFLICT DO NOTHING;
@@ -197,5 +240,12 @@ INSERT INTO role_permissions (id, role_id, permission_id)
 SELECT md5('space-rbac:' || r.name || ':' || p.name)::uuid, r.id, p.id
 FROM roles r
 JOIN permissions p ON p.resource = 'reminders' AND p.name IN ('list_reminders', 'view_reminders') AND p.deleted_at IS NULL
+WHERE r.name IN ('space_viewer') AND r.deleted_at IS NULL
+ON CONFLICT DO NOTHING;
+
+INSERT INTO role_permissions (id, role_id, permission_id)
+SELECT md5('space-rbac:' || r.name || ':' || p.name)::uuid, r.id, p.id
+FROM roles r
+JOIN permissions p ON p.resource = 'activities' AND p.name IN ('list_activities') AND p.deleted_at IS NULL
 WHERE r.name IN ('space_viewer') AND r.deleted_at IS NULL
 ON CONFLICT DO NOTHING;

@@ -204,8 +204,13 @@ is:
 
 - `account_register`
 - `identity_link`
+- `space_create`
 - `space_list`
 - `space_get_members`
+- `invitation_create`
+- `invitation_accept`
+- `activity_create`
+- `activity_list`
 - `reminder_create`
 - `reminder_list`
 - `reminder_complete`

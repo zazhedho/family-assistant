@@ -11,27 +11,31 @@ var spaceGrants = map[string]map[string][]string{
 		"members":     {"list", "view"},
 		"invitations": {"create"},
 		"reminders":   {"list", "view", "create", "update"},
+		"activities":  {"list", "create"},
 	},
 	"space_admin": {
 		"spaces":      {"list", "view"},
 		"members":     {"list", "view"},
 		"invitations": {"create"},
 		"reminders":   {"list", "view", "create", "update"},
+		"activities":  {"list", "create"},
 	},
 	"space_member": {
-		"spaces":    {"list", "view"},
-		"members":   {"list", "view"},
-		"reminders": {"list", "view", "create", "update"},
+		"spaces":     {"list", "view"},
+		"members":    {"list", "view"},
+		"reminders":  {"list", "view", "create", "update"},
+		"activities": {"list", "create"},
 	},
 	"space_viewer": {
-		"spaces":    {"list", "view"},
-		"members":   {"list", "view"},
-		"reminders": {"list", "view"},
+		"spaces":     {"list", "view"},
+		"members":    {"list", "view"},
+		"reminders":  {"list", "view"},
+		"activities": {"list"},
 	},
 }
 
 var spaceRoleOrder = []string{"space_owner", "space_admin", "space_member", "space_viewer"}
-var spaceResourceOrder = []string{"spaces", "members", "invitations", "reminders"}
+var spaceResourceOrder = []string{"spaces", "members", "invitations", "reminders", "activities"}
 
 type spaceRole struct {
 	ID, Name, DisplayName, Description string
@@ -84,6 +88,14 @@ var spaceModules = []spaceModule{
 			"view":   "33333333-3333-4333-8333-000000000008",
 			"create": "33333333-3333-4333-8333-000000000009",
 			"update": "33333333-3333-4333-8333-000000000010",
+		},
+	},
+	{
+		ID: "22222222-2222-4222-8222-000000000005", Name: "activities", DisplayName: "Activities", Path: "/activities", Icon: "bi-journal-text", OrderIndex: 909,
+		Actions: []string{"list", "create"},
+		PermissionIDs: map[string]string{
+			"list":   "33333333-3333-4333-8333-000000000011",
+			"create": "33333333-3333-4333-8333-000000000012",
 		},
 	},
 }

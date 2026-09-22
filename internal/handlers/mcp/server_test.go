@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"sort"
 	"strings"
 	"testing"
@@ -28,7 +29,7 @@ func TestListenPropagatesBindErrorSynchronously(t *testing.T) {
 	server, bound, err := listenMCP(config.MCPConfig{
 		Addr:      "127.0.0.1:8081",
 		ServerKey: "secret",
-	}, nil, nil, nil, nil, nil, func(string, string) (net.Listener, error) {
+	}, mcpDependencies{}, func(string, string) (net.Listener, error) {
 		return nil, errAddressInUse
 	})
 	if !errors.Is(err, errAddressInUse) {
@@ -39,8 +40,22 @@ func TestListenPropagatesBindErrorSynchronously(t *testing.T) {
 	}
 }
 
+func TestMCPConstructorsDoNotExposeLongParameterLists(t *testing.T) {
+	functions := map[string]int{
+		"NewHTTPHandler": reflect.TypeOf(NewHTTPHandler).NumIn(),
+		"NewHTTPServer":  reflect.TypeOf(NewHTTPServer).NumIn(),
+		"Listen":         reflect.TypeOf(Listen).NumIn(),
+		"listenMCP":      reflect.TypeOf(listenMCP).NumIn(),
+	}
+	for name, parameterCount := range functions {
+		if parameterCount > 7 {
+			t.Errorf("%s has %d parameters; expected at most 7", name, parameterCount)
+		}
+	}
+}
+
 func TestHTTPServerUsesSafeTimeoutsWithoutWriteTimeout(t *testing.T) {
-	server := NewHTTPServer(config.MCPConfig{Addr: "127.0.0.1:0"}, nil, nil, nil, nil, nil)
+	server := NewHTTPServer(config.MCPConfig{Addr: "127.0.0.1:0"}, nil, nil, nil, nil, nil, ToolServices{})
 	if server.ReadHeaderTimeout <= 0 {
 		t.Fatal("expected MCP ReadHeaderTimeout")
 	}
@@ -60,7 +75,7 @@ func TestHTTPHandlerMountsMCPOnlyAtExactPath(t *testing.T) {
 			Source:   "mcp",
 			RoleName: "parent",
 		},
-	}, nil, nil, nil, nil)
+	}, nil, nil, nil, nil, ToolServices{})
 
 	for _, path := range []string{"/", "/other", "/mcp/"} {
 		req := httptest.NewRequest(http.MethodPost, path, nil)
@@ -172,7 +187,7 @@ func TestHTTPHandlerIdentityLinkNeedsOnlyServerAuthentication(t *testing.T) {
 		ID: "identity-1", UserID: "user-1", Provider: domainidentity.ProviderHermes,
 		ExternalID: "new-profile", Status: domainidentity.StatusActive,
 	}}
-	handler := NewHTTPHandler(config.MCPConfig{ServerKey: "secret"}, &resolverStub{err: serviceidentity.ErrUnauthenticated}, linkService, nil, nil, nil)
+	handler := NewHTTPHandler(config.MCPConfig{ServerKey: "secret"}, &resolverStub{err: serviceidentity.ErrUnauthenticated}, linkService, nil, nil, nil, ToolServices{})
 	server := httptest.NewServer(handler)
 	t.Cleanup(server.Close)
 
@@ -190,7 +205,7 @@ func TestHTTPHandlerIdentityLinkNeedsOnlyServerAuthentication(t *testing.T) {
 
 func TestHTTPHandlerProtectedToolRejectsUnlinkedProfile(t *testing.T) {
 	resolver := &resolverStub{err: serviceidentity.ErrUnauthenticated}
-	handler := NewHTTPHandler(config.MCPConfig{ServerKey: "secret"}, resolver, nil, nil, nil, nil)
+	handler := NewHTTPHandler(config.MCPConfig{ServerKey: "secret"}, resolver, nil, nil, nil, nil, ToolServices{})
 	server := httptest.NewServer(handler)
 	t.Cleanup(server.Close)
 
@@ -210,7 +225,7 @@ func TestHTTPHandlerProtectedToolRejectsUnlinkedProfile(t *testing.T) {
 }
 
 func TestHTTPHandlerExposesOnlyCurrentMCPToolsWhenRemindersAreAbsent(t *testing.T) {
-	handler := NewHTTPHandler(config.MCPConfig{ServerKey: "secret"}, &resolverStub{}, nil, nil, nil, nil)
+	handler := NewHTTPHandler(config.MCPConfig{ServerKey: "secret"}, &resolverStub{}, nil, nil, nil, nil, ToolServices{})
 	server := httptest.NewServer(handler)
 	t.Cleanup(server.Close)
 
@@ -224,14 +239,14 @@ func TestHTTPHandlerExposesOnlyCurrentMCPToolsWhenRemindersAreAbsent(t *testing.
 		got = append(got, tool.Name)
 	}
 	sort.Strings(got)
-	want := []string{"account_register", "identity_link", "reminder_complete", "reminder_create", "reminder_list", "space_get_members", "space_list"}
+	want := []string{"account_register", "activity_create", "activity_list", "identity_link", "invitation_accept", "invitation_create", "reminder_complete", "reminder_create", "reminder_list", "space_create", "space_get_members", "space_list"}
 	if strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Fatalf("tools = %v, want %v", got, want)
 	}
 }
 
 func TestHTTPHandlerToolOutputSchemasUseHermesObjectRoot(t *testing.T) {
-	handler := NewHTTPHandler(config.MCPConfig{ServerKey: "secret"}, &resolverStub{}, nil, nil, nil, nil)
+	handler := NewHTTPHandler(config.MCPConfig{ServerKey: "secret"}, &resolverStub{}, nil, nil, nil, nil, ToolServices{})
 	server := httptest.NewServer(handler)
 	t.Cleanup(server.Close)
 
@@ -255,7 +270,7 @@ func TestHTTPHandlerToolOutputSchemasUseHermesObjectRoot(t *testing.T) {
 
 func TestHTTPHandlerAccountRegisterNeedsServerAuthenticationAndUsesTrustedProfileWhenProvided(t *testing.T) {
 	registrar := &registrarStub{result: dto.AccountRegistrationResult{Status: "created", UserID: "user-1", SpaceID: "space-1"}}
-	handler := NewHTTPHandler(config.MCPConfig{ServerKey: "secret"}, &resolverStub{err: serviceidentity.ErrUnauthenticated}, nil, registrar, nil, nil)
+	handler := NewHTTPHandler(config.MCPConfig{ServerKey: "secret"}, &resolverStub{err: serviceidentity.ErrUnauthenticated}, nil, registrar, nil, nil, ToolServices{})
 	server := httptest.NewServer(handler)
 	t.Cleanup(server.Close)
 
@@ -288,7 +303,7 @@ func TestHTTPHandlerUsesSignedIdentityEnvelopeForToolCalls(t *testing.T) {
 	handler := NewHTTPHandler(config.MCPConfig{
 		ServerKey:      "server-secret",
 		IdentitySecret: "identity-secret",
-	}, &resolverStub{err: serviceidentity.ErrUnauthenticated}, nil, registrar, nil, nil)
+	}, &resolverStub{err: serviceidentity.ErrUnauthenticated}, nil, registrar, nil, nil, ToolServices{})
 	server := httptest.NewServer(handler)
 	t.Cleanup(server.Close)
 
@@ -329,7 +344,7 @@ func TestHTTPHandlerRejectsUnsignedToolCallWhenIdentitySecretConfigured(t *testi
 	handler := NewHTTPHandler(config.MCPConfig{
 		ServerKey:      "server-secret",
 		IdentitySecret: "identity-secret",
-	}, &resolverStub{err: serviceidentity.ErrUnauthenticated}, nil, registrar, nil, nil)
+	}, &resolverStub{err: serviceidentity.ErrUnauthenticated}, nil, registrar, nil, nil, ToolServices{})
 	server := httptest.NewServer(handler)
 	t.Cleanup(server.Close)
 
@@ -379,7 +394,7 @@ func TestHTTPHandlerProtectedSpaceToolMapsSuccessForbiddenAndNotFound(t *testing
 		t.Run(tt.name, func(t *testing.T) {
 			resolver.resolveCall = 0
 			service := &mcpSpaceServiceStub{members: tt.members, membersErr: tt.err}
-			handler := NewHTTPHandler(config.MCPConfig{ServerKey: "secret"}, resolver, nil, nil, service, nil)
+			handler := NewHTTPHandler(config.MCPConfig{ServerKey: "secret"}, resolver, nil, nil, service, nil, ToolServices{})
 			server := httptest.NewServer(handler)
 			t.Cleanup(server.Close)
 			initializeMCPServer(t, server.URL)

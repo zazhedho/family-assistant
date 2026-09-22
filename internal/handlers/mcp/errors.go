@@ -5,6 +5,7 @@ import (
 	"log/slog"
 
 	domainidentity "family-assistant/internal/domain/identity"
+	domaininvitation "family-assistant/internal/domain/invitation"
 	serviceauthorization "family-assistant/internal/services/authorization"
 	serviceidentity "family-assistant/internal/services/identity"
 	servicereminder "family-assistant/internal/services/reminder"
@@ -62,9 +63,10 @@ func MapToolError(err error, logger ...*slog.Logger) error {
 		errors.Is(err, serviceidentity.ErrInvalidResource),
 		errors.Is(err, serviceidentity.ErrInvalidIdentityProvider),
 		errors.Is(err, serviceidentity.ErrInvalidExternalIdentity),
-		errors.Is(err, domainidentity.ErrInvalidLinkToken):
+		errors.Is(err, domainidentity.ErrInvalidLinkToken),
+		errors.Is(err, domaininvitation.ErrInvalidInvitation):
 		return &MCPError{Code: "invalid_input", Message: ErrMCPInvalidInput.Error(), cause: err}
-	case errors.Is(err, servicereminder.ErrConflict), errors.Is(err, domainidentity.ErrIdentityConflict):
+	case errors.Is(err, servicereminder.ErrConflict), errors.Is(err, domainidentity.ErrIdentityConflict), errors.Is(err, domaininvitation.ErrMembershipConflict):
 		return &MCPError{Code: "conflict", Message: ErrMCPConflict.Error(), cause: err}
 	case errors.Is(err, domainidentity.ErrIdentityNotFound):
 		return &MCPError{Code: "not_found", Message: ErrMCPNotFound.Error(), cause: err}

@@ -19,7 +19,7 @@ func TestRenderSpaceSQLSeedsSpaceRBAC(t *testing.T) {
 			t.Errorf("role %q missing", role)
 		}
 	}
-	for _, resource := range []string{"spaces", "members", "invitations", "reminders"} {
+	for _, resource := range []string{"spaces", "members", "invitations", "reminders", "activities"} {
 		if !strings.Contains(sql, "'"+resource+"'") {
 			t.Errorf("resource %q missing", resource)
 		}
@@ -41,6 +41,8 @@ func TestRenderSpaceSQLSeedsSpaceRBAC(t *testing.T) {
 		"'view_reminders'",
 		"'create_reminders'",
 		"'update_reminders'",
+		"'list_activities'",
+		"'create_activities'",
 		"ON CONFLICT (name) DO UPDATE",
 		"ON CONFLICT DO NOTHING;",
 	} {
@@ -62,26 +64,30 @@ func TestRenderSpaceSQLUsesExactGrantMatrix(t *testing.T) {
 			"members":     {"list", "view"},
 			"invitations": {"create"},
 			"reminders":   {"list", "view", "create", "update"},
+			"activities":  {"list", "create"},
 		},
 		"space_admin": {
 			"spaces":      {"list", "view"},
 			"members":     {"list", "view"},
 			"invitations": {"create"},
 			"reminders":   {"list", "view", "create", "update"},
+			"activities":  {"list", "create"},
 		},
 		"space_member": {
-			"spaces":    {"list", "view"},
-			"members":   {"list", "view"},
-			"reminders": {"list", "view", "create", "update"},
+			"spaces":     {"list", "view"},
+			"members":    {"list", "view"},
+			"reminders":  {"list", "view", "create", "update"},
+			"activities": {"list", "create"},
 		},
 		"space_viewer": {
-			"spaces":    {"list", "view"},
-			"members":   {"list", "view"},
-			"reminders": {"list", "view"},
+			"spaces":     {"list", "view"},
+			"members":    {"list", "view"},
+			"reminders":  {"list", "view"},
+			"activities": {"list"},
 		},
 	}
-	if got := strings.Count(sql, "INSERT INTO role_permissions"); got != 14 {
-		t.Fatalf("grant statements: got %d, want 14", got)
+	if got := strings.Count(sql, "INSERT INTO role_permissions"); got != 18 {
+		t.Fatalf("grant statements: got %d, want 18", got)
 	}
 
 	for role, resources := range want {

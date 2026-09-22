@@ -16,6 +16,11 @@ import (
 type mcpSpaceServiceStub struct {
 	spaces       []domainspace.ResolvedMembership
 	members      []domainspace.ResolvedMembership
+	created      *domainspace.Space
+	createErr    error
+	createUserID string
+	createInput  dto.SpaceCreateInput
+	createCalls  int
 	listErr      error
 	membersErr   error
 	listUserID   string
@@ -31,8 +36,11 @@ func (s *mcpSpaceServiceStub) List(_ context.Context, userID string) ([]domainsp
 	return s.spaces, s.listErr
 }
 
-func (*mcpSpaceServiceStub) Create(context.Context, string, dto.SpaceCreateInput) (*domainspace.Space, error) {
-	return nil, errors.New("not implemented")
+func (s *mcpSpaceServiceStub) Create(_ context.Context, userID string, input dto.SpaceCreateInput) (*domainspace.Space, error) {
+	s.createCalls++
+	s.createUserID = userID
+	s.createInput = input
+	return s.created, s.createErr
 }
 
 func (s *mcpSpaceServiceStub) Members(_ context.Context, userID, spaceID string) ([]domainspace.ResolvedMembership, error) {
@@ -80,6 +88,33 @@ func TestSpaceListUsesResolvedActorUserID(t *testing.T) {
 	}
 	if len(got) != 1 || got[0].SpaceID != "00000000-0000-0000-0000-000000000001" || service.listCalls != 1 || service.listUserID != "user-1" {
 		t.Fatalf("unexpected space_list: got=%+v calls=%d user=%q", got, service.listCalls, service.listUserID)
+	}
+}
+
+func TestSpaceCreateUsesResolvedActorUserIDAndInput(t *testing.T) {
+	service := &mcpSpaceServiceStub{created: &domainspace.Space{ID: "space-1", Name: "Family", Category: domainspace.CategoryFamily}}
+	resolver := &mcpExternalResolverStub{actor: domainidentity.ActorContext{UserID: "user-1"}}
+
+	got, err := SpaceCreate(mcpExternalContext(), resolver, service, SpaceCreateInput{Name: " Family ", Category: "family"})
+	if err != nil {
+		t.Fatalf("space_create: %v", err)
+	}
+	if got == nil || got.ID != "space-1" || service.createCalls != 1 || service.createUserID != "user-1" || service.createInput.Name != " Family " || service.createInput.Category != "family" {
+		t.Fatalf("unexpected space_create: got=%+v service=%+v", got, service)
+	}
+}
+
+func TestSpaceCreateRequiresLinkedActor(t *testing.T) {
+	service := &mcpSpaceServiceStub{}
+	resolver := &mcpExternalResolverStub{err: serviceidentity.ErrUnauthenticated}
+
+	_, err := SpaceCreate(mcpExternalContext(), resolver, service, SpaceCreateInput{Name: "Family", Category: "family"})
+	var mapped *MCPError
+	if !errors.As(err, &mapped) || mapped.Code != "unauthenticated" {
+		t.Fatalf("error = %T %v, want unauthenticated MCP error", err, err)
+	}
+	if service.createCalls != 0 {
+		t.Fatal("unlinked actor reached space service")
 	}
 }
 

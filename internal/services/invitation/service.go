@@ -55,6 +55,16 @@ type AuditProvenance struct {
 	Metadata  map[string]any
 }
 
+type auditEventInput struct {
+	action     string
+	resourceID string
+	spaceID    string
+	memberID   string
+	userID     string
+	roleName   string
+	emailBound bool
+}
+
 type auditProvenanceKey struct{}
 
 func WithAuditProvenance(ctx context.Context, provenance AuditProvenance) context.Context {
@@ -201,7 +211,15 @@ func (s *service) Create(ctx context.Context, userID string, input dto.Invitatio
 		s.writeFailure(ctx, spaceID, roleName, userID, err)
 		return nil, "", err
 	}
-	event := s.newAuditEvent(ctx, domainaudit.ActionCreate, created.ID, spaceID, actorMembership.ID, userID, roleName, normalizedEmail != "")
+	event := s.newAuditEvent(ctx, auditEventInput{
+		action:     domainaudit.ActionCreate,
+		resourceID: created.ID,
+		spaceID:    spaceID,
+		memberID:   actorMembership.ID,
+		userID:     userID,
+		roleName:   roleName,
+		emailBound: normalizedEmail != "",
+	})
 	event.Status = domainaudit.StatusSuccess
 	event.Message = "Created space invitation"
 	s.writeAudit(ctx, event)
@@ -212,7 +230,7 @@ func (s *service) Accept(ctx context.Context, rawToken string, user domainuser.U
 	rawToken = strings.TrimSpace(rawToken)
 	userID := strings.TrimSpace(user.Id)
 	normalizedEmail := utils.SanitizeEmail(user.Email)
-	if rawToken == "" || userID == "" || normalizedEmail == "" {
+	if rawToken == "" || userID == "" {
 		s.writeFailure(ctx, "", "", userID, ErrInvalidInvitation)
 		return nil, ErrInvalidInvitation
 	}
@@ -235,7 +253,15 @@ func (s *service) Accept(ctx context.Context, rawToken string, user domainuser.U
 	if roleName == "" {
 		roleName = acceptance.RoleID
 	}
-	event := s.newAuditEvent(ctx, domainaudit.ActionAccept, acceptance.InvitationID, acceptance.SpaceID, acceptance.Member.ID, userID, roleName, acceptance.EmailBound)
+	event := s.newAuditEvent(ctx, auditEventInput{
+		action:     domainaudit.ActionAccept,
+		resourceID: acceptance.InvitationID,
+		spaceID:    acceptance.SpaceID,
+		memberID:   acceptance.Member.ID,
+		userID:     userID,
+		roleName:   roleName,
+		emailBound: acceptance.EmailBound,
+	})
 	event.Status = domainaudit.StatusSuccess
 	event.Message = "Accepted space invitation"
 	s.writeAudit(ctx, event)
@@ -280,29 +306,29 @@ func (s *service) hasPermission(ctx context.Context, roleID, permission string) 
 	return false, nil
 }
 
-func (s *service) newAuditEvent(ctx context.Context, action, resourceID, spaceID, memberID, userID, roleName string, emailBound bool) domainaudit.AuditEvent {
+func (s *service) newAuditEvent(ctx context.Context, input auditEventInput) domainaudit.AuditEvent {
 	scope := authscope.FromContext(ctx)
 	actorUserID := scope.ActorUserID()
 	if actorUserID == "" {
-		actorUserID = userID
+		actorUserID = input.userID
 	}
 	provenance, _ := ctx.Value(auditProvenanceKey{}).(AuditProvenance)
 	metadata := utils.MergeMetadata(provenance.Metadata, map[string]any{
-		"space_id":    spaceID,
-		"email_bound": emailBound,
+		"space_id":    input.spaceID,
+		"email_bound": input.emailBound,
 	})
-	if roleName != "" {
-		metadata["role"] = roleName
+	if input.roleName != "" {
+		metadata["role"] = input.roleName
 	}
 	if scope.IsImpersonated && strings.TrimSpace(scope.UserID) != actorUserID {
-		metadata = utils.MergeMetadata(metadata, map[string]any{"subject_user_id": userID})
+		metadata = utils.MergeMetadata(metadata, map[string]any{"subject_user_id": input.userID})
 	}
 	return domainaudit.AuditEvent{
-		Action:        action,
+		Action:        input.action,
 		Resource:      "space_invitation",
-		ResourceID:    resourceID,
+		ResourceID:    input.resourceID,
 		ActorUserID:   actorUserID,
-		ActorMemberID: memberID,
+		ActorMemberID: input.memberID,
 		ActorRole:     scope.ActorRole(),
 		Source:        "http",
 		RequestID:     provenance.RequestID,
@@ -313,7 +339,12 @@ func (s *service) newAuditEvent(ctx context.Context, action, resourceID, spaceID
 }
 
 func (s *service) writeFailure(ctx context.Context, spaceID, roleName, userID string, err error) {
-	event := s.newAuditEvent(ctx, domainaudit.ActionCreate, "", spaceID, "", userID, roleName, false)
+	event := s.newAuditEvent(ctx, auditEventInput{
+		action:   domainaudit.ActionCreate,
+		spaceID:  spaceID,
+		userID:   userID,
+		roleName: roleName,
+	})
 	event.Status = domainaudit.StatusFailed
 	event.ErrorMessage = FailureCategory(err)
 	s.writeAudit(ctx, event)

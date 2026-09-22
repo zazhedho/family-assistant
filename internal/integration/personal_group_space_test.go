@@ -17,17 +17,21 @@ import (
 
 	domainspace "family-assistant/internal/domain/space"
 	mcpHandler "family-assistant/internal/handlers/mcp"
+	activityRepo "family-assistant/internal/repositories/activity"
 	auditRepo "family-assistant/internal/repositories/audit"
 	identityRepo "family-assistant/internal/repositories/identity"
+	invitationRepo "family-assistant/internal/repositories/invitation"
 	onboardingRepo "family-assistant/internal/repositories/onboarding"
 	permissionRepo "family-assistant/internal/repositories/permission"
 	reminderRepo "family-assistant/internal/repositories/reminder"
 	roleRepo "family-assistant/internal/repositories/role"
 	spaceRepo "family-assistant/internal/repositories/space"
 	"family-assistant/internal/router"
+	activityService "family-assistant/internal/services/activity"
 	auditService "family-assistant/internal/services/audit"
 	"family-assistant/internal/services/authorization"
 	identityService "family-assistant/internal/services/identity"
+	invitationService "family-assistant/internal/services/invitation"
 	onboardingService "family-assistant/internal/services/onboarding"
 	permissionService "family-assistant/internal/services/permission"
 	reminderService "family-assistant/internal/services/reminder"
@@ -74,10 +78,14 @@ func TestPersonalGroupSpaceArchitecture(t *testing.T) {
 	rolesRepo := roleRepo.NewRoleRepo(db)
 	accountRegistrar := onboardingService.NewService(onboardingRepo.NewRepository(db), rolesRepo, audits)
 	spaces := spaceService.NewService(spacesRepo, rolesRepo, permissionsRepo, audits)
+	invitations := invitationService.NewService(invitationRepo.NewRepository(db), spacesRepo, rolesRepo, permissionsRepo, audits, config.InvitationConfig{TTL: time.Hour})
 	identities := identityService.NewResolver(identityRepo.NewRepository(db), spacesRepo, permissions)
 	links := identityService.NewLinkService(identityRepo.NewRepository(db), audits, config.IdentityConfig{TTL: 10 * time.Minute})
 	reminders := reminderService.NewReminderService(
 		reminderRepo.NewRepository(db), spacesRepo, authorization.NewAuthorizer(), audits,
+	)
+	activities := activityService.NewService(
+		activityRepo.NewRepository(db), spacesRepo, authorization.NewAuthorizer(), audits,
 	)
 
 	routes := router.NewRoutes()
@@ -97,105 +105,32 @@ func TestPersonalGroupSpaceArchitecture(t *testing.T) {
 	mcpServer := httptest.NewServer(mcpHandler.NewHTTPHandler(config.MCPConfig{
 		ServerKey:     "integration-only-server-key",
 		ProfileHeader: "X-Hermes-Profile",
-	}, identities, links, accountRegistrar, spaces, reminders))
+	}, identities, links, accountRegistrar, spaces, reminders, mcpHandler.ToolServices{
+		Invitation: invitations,
+		Activity:   activities,
+	}))
 	t.Cleanup(mcpServer.Close)
 
 	newAccountProfile := "hermes-profile-new-account"
-	created := callMCPTool(t, mcpServer.URL, newAccountProfile, "integration-only-server-key", "account_register", map[string]any{
-		"name": "WhatsApp User", "birth_date": "1990-05-20", "consent": true,
-	})
-	var createdAccount struct {
-		Status  string `json:"status"`
-		UserID  string `json:"user_id"`
-		SpaceID string `json:"space_id"`
-	}
-	decodeStructured(t, created.StructuredOutput, &createdAccount)
-	if created.IsError || createdAccount.Status != "created" || createdAccount.UserID == "" || createdAccount.SpaceID == "" {
-		t.Fatalf("account_register = %+v/%+v", created, createdAccount)
-	}
-
-	replayed := callMCPTool(t, mcpServer.URL, newAccountProfile, "integration-only-server-key", "account_register", map[string]any{
-		"name": "WhatsApp User", "birth_date": "1990-05-20", "consent": true,
-	})
-	var replayedAccount struct {
-		Status  string `json:"status"`
-		UserID  string `json:"user_id"`
-		SpaceID string `json:"space_id"`
-	}
-	decodeStructured(t, replayed.StructuredOutput, &replayedAccount)
-	if replayed.IsError || replayedAccount.Status != "existing" || replayedAccount.UserID != createdAccount.UserID || replayedAccount.SpaceID != createdAccount.SpaceID {
-		t.Fatalf("account_register replay = %+v/%+v, want existing original IDs", replayed, replayedAccount)
+	createdAccount := registerExternalAccount(t, mcpServer.URL, "integration-only-server-key", newAccountProfile, "WhatsApp User", "1990-05-20", "created")
+	replayedAccount := registerExternalAccount(t, mcpServer.URL, "integration-only-server-key", newAccountProfile, "WhatsApp User", "1990-05-20", "existing")
+	if replayedAccount.UserID != createdAccount.UserID || replayedAccount.SpaceID != createdAccount.SpaceID {
+		t.Fatalf("account_register replay = %+v, want existing original IDs", replayedAccount)
 	}
 
 	secondProfile := "hermes-profile-second-account"
-	secondCreated := callMCPTool(t, mcpServer.URL, secondProfile, "integration-only-server-key", "account_register", map[string]any{
-		"name": "Second WhatsApp User", "birth_date": "1989-04-12", "consent": true,
-	})
-	var secondAccount struct {
-		Status  string `json:"status"`
-		UserID  string `json:"user_id"`
-		SpaceID string `json:"space_id"`
-	}
-	decodeStructured(t, secondCreated.StructuredOutput, &secondAccount)
-	if secondCreated.IsError || secondAccount.Status != "created" || secondAccount.UserID == "" || secondAccount.SpaceID == "" || secondAccount.UserID == createdAccount.UserID || secondAccount.SpaceID == createdAccount.SpaceID {
-		t.Fatalf("second account_register = %+v/%+v, want distinct created IDs", secondCreated, secondAccount)
+	secondAccount := registerExternalAccount(t, mcpServer.URL, "integration-only-server-key", secondProfile, "Second WhatsApp User", "1989-04-12", "created")
+	if secondAccount.UserID == createdAccount.UserID || secondAccount.SpaceID == createdAccount.SpaceID {
+		t.Fatalf("second account_register = %+v, want distinct created IDs", secondAccount)
 	}
 
-	newProfileSpaces := callMCPTool(t, mcpServer.URL, newAccountProfile, "integration-only-server-key", "space_list", map[string]any{})
-	var newProfileSpacesOutput mcpSpaceListOutput
-	decodeStructured(t, newProfileSpaces.StructuredOutput, &newProfileSpacesOutput)
-	if newProfileSpaces.IsError || !hasSpace(newProfileSpacesOutput.Spaces, createdAccount.SpaceID) {
-		t.Fatalf("new profile space_list = %+v", newProfileSpaces)
-	}
+	assertProfileSpaceList(t, mcpServer.URL, "integration-only-server-key", newAccountProfile, createdAccount.SpaceID)
 
-	for _, account := range []struct {
-		name      string
-		userID    string
-		spaceID   string
-		profileID string
-		birthDate string
-	}{
+	for _, account := range []onboardingAccount{
 		{name: "first", userID: createdAccount.UserID, spaceID: createdAccount.SpaceID, profileID: newAccountProfile, birthDate: "1990-05-20"},
 		{name: "second", userID: secondAccount.UserID, spaceID: secondAccount.SpaceID, profileID: secondProfile, birthDate: "1989-04-12"},
 	} {
-		t.Run("persisted "+account.name+" onboarding rows", func(t *testing.T) {
-			var user struct {
-				LoginProvider         string
-				BirthDate             time.Time
-				AgeVerificationMethod string
-				AgeVerifiedAt         *time.Time
-			}
-			if err := db.Raw(`SELECT login_provider, birth_date, age_verification_method, age_verified_at FROM users WHERE id = ?`, account.userID).Scan(&user).Error; err != nil {
-				t.Fatal(err)
-			}
-			birthDate, err := time.Parse("2006-01-02", account.birthDate)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if user.LoginProvider != "hermes" || !user.BirthDate.Equal(birthDate) || user.AgeVerificationMethod != "self_declared" || user.AgeVerifiedAt == nil {
-				t.Fatalf("user row = %+v, want hermes/%s/self_declared/verified", user, account.birthDate)
-			}
-
-			var count int64
-			if err := db.Raw(`SELECT COUNT(*) FROM spaces WHERE created_by_user_id = ? AND type = 'PERSONAL' AND status = 'ACTIVE' AND deleted_at IS NULL`, account.userID).Scan(&count).Error; err != nil {
-				t.Fatal(err)
-			}
-			if count != 1 {
-				t.Fatalf("personal spaces for %s = %d, want 1", account.userID, count)
-			}
-			if err := db.Raw(`SELECT COUNT(*) FROM space_members sm JOIN roles r ON r.id = sm.role_id WHERE sm.space_id = ? AND sm.user_id = ? AND r.name = 'space_owner' AND sm.status = 'ACTIVE' AND sm.deleted_at IS NULL`, account.spaceID, account.userID).Scan(&count).Error; err != nil {
-				t.Fatal(err)
-			}
-			if count != 1 {
-				t.Fatalf("space_owner membership for %s = %d, want 1", account.userID, count)
-			}
-			if err := db.Raw(`SELECT COUNT(*) FROM external_identities WHERE user_id = ? AND provider = 'hermes' AND external_id = ? AND status = 'ACTIVE' AND deleted_at IS NULL`, account.userID, account.profileID).Scan(&count).Error; err != nil {
-				t.Fatal(err)
-			}
-			if count != 1 {
-				t.Fatalf("active Hermes identity for %s = %d, want 1", account.profileID, count)
-			}
-		})
+		assertOnboardingRow(t, db, account)
 	}
 
 	var nullCredentialCount int64
@@ -206,25 +141,7 @@ func TestPersonalGroupSpaceArchitecture(t *testing.T) {
 		t.Fatalf("external-only users with NULL credentials and password_changed_at = %d, want 2", nullCredentialCount)
 	}
 
-	var beforeUnderage struct {
-		Users      int64
-		Spaces     int64
-		Members    int64
-		Identities int64
-	}
-	for _, query := range []struct {
-		name string
-		out  *int64
-	}{
-		{name: "users", out: &beforeUnderage.Users},
-		{name: "spaces", out: &beforeUnderage.Spaces},
-		{name: "space_members", out: &beforeUnderage.Members},
-		{name: "external_identities", out: &beforeUnderage.Identities},
-	} {
-		if err := db.Raw("SELECT COUNT(*) FROM " + query.name).Scan(query.out).Error; err != nil {
-			t.Fatal(err)
-		}
-	}
+	beforeUnderage := accountTableCounts(t, db)
 
 	underageProfile := "hermes-profile-underage"
 	underage := callMCPTool(t, mcpServer.URL, underageProfile, "integration-only-server-key", "account_register", map[string]any{
@@ -234,136 +151,181 @@ func TestPersonalGroupSpaceArchitecture(t *testing.T) {
 		t.Fatalf("underage account_register = %+v, want invalid input", underage)
 	}
 
-	var afterUnderage struct {
-		Users      int64
-		Spaces     int64
-		Members    int64
-		Identities int64
-	}
-	for _, query := range []struct {
-		name string
-		out  *int64
-	}{
-		{name: "users", out: &afterUnderage.Users},
-		{name: "spaces", out: &afterUnderage.Spaces},
-		{name: "space_members", out: &afterUnderage.Members},
-		{name: "external_identities", out: &afterUnderage.Identities},
-	} {
-		if err := db.Raw("SELECT COUNT(*) FROM " + query.name).Scan(query.out).Error; err != nil {
-			t.Fatal(err)
-		}
-	}
+	afterUnderage := accountTableCounts(t, db)
 	if afterUnderage != beforeUnderage {
 		t.Fatalf("underage account changed account tables: before=%+v after=%+v", beforeUnderage, afterUnderage)
 	}
 
-	var onboardingAudits []struct {
-		Metadata     string
-		Message      string
-		ErrorMessage string
-	}
-	if err := db.Raw(`SELECT COALESCE(metadata, ''), COALESCE(message, ''), COALESCE(error_message, '') FROM audit_trails WHERE resource = 'external_account'`).Scan(&onboardingAudits).Error; err != nil {
-		t.Fatal(err)
-	}
-	for _, audit := range onboardingAudits {
-		encoded := audit.Metadata + audit.Message + audit.ErrorMessage
-		for _, privateValue := range []string{"1990-05-20", "1989-04-12", "2010-09-21", newAccountProfile, secondProfile, underageProfile} {
-			if strings.Contains(encoded, privateValue) {
-				t.Fatalf("private onboarding value %q leaked in audit %+v", privateValue, audit)
-			}
-		}
-	}
+	assertOnboardingAuditPrivacy(t, db, "1990-05-20", "1989-04-12", "2010-09-21", newAccountProfile, secondProfile, underageProfile)
 
-	adultOne := registerAndLogin(t, httpServer.URL, "Adult One", "adult-one@example.test", "081234567890")
-	adultTwo := registerAndLogin(t, httpServer.URL, "Adult Two", "adult-two@example.test", "081234567891")
+	adult := setupAdultArchitecture(t, httpServer.URL, mcpServer.URL, "integration-only-server-key")
+	adultOne := adult.adultOne
+	adultTwo := adult.adultTwo
+	adultTwoSpaces := adult.adultTwoSpaces
+	personalOne := adult.personalOne
+	sharedOne := adult.sharedOne
+	sharedTwo := adult.sharedTwo
+	profile := adult.profile
 
-	adultOneSpaces := listSpaces(t, httpServer.URL, adultOne.Token)
-	adultTwoSpaces := listSpaces(t, httpServer.URL, adultTwo.Token)
+	assertReminderAndActivityFlow(t, db, httpServer.URL, mcpServer.URL, "integration-only-server-key", adultArchitectureState{
+		adultOne: adultOne, adultTwo: adultTwo, adultTwoSpaces: adultTwoSpaces,
+		personalOne: personalOne, sharedOne: sharedOne, sharedTwo: sharedTwo, profile: profile,
+	})
+}
+
+type onboardingAccount struct {
+	name      string
+	userID    string
+	spaceID   string
+	profileID string
+	birthDate string
+}
+
+type registeredAccount struct {
+	Status  string `json:"status"`
+	UserID  string `json:"user_id"`
+	SpaceID string `json:"space_id"`
+}
+
+type adultArchitectureState struct {
+	adultOne       registeredUser
+	adultTwo       registeredUser
+	adultTwoSpaces []domainspace.ResolvedMembership
+	personalOne    domainspace.ResolvedMembership
+	sharedOne      domainspace.Space
+	sharedTwo      domainspace.Space
+	profile        string
+}
+
+type accountTableCount struct {
+	Users      int64
+	Spaces     int64
+	Members    int64
+	Identities int64
+}
+
+func registerExternalAccount(t *testing.T, serverURL, key, profile, name, birthDate, expectedStatus string) registeredAccount {
+	t.Helper()
+	result := callMCPTool(t, serverURL, profile, key, "account_register", map[string]any{
+		"name": name, "birth_date": birthDate, "consent": true,
+	})
+	var account registeredAccount
+	decodeStructured(t, result.StructuredOutput, &account)
+	if result.IsError || account.Status != expectedStatus || account.UserID == "" || account.SpaceID == "" {
+		t.Fatalf("account_register = %+v/%+v, want %s", result, account, expectedStatus)
+	}
+	return account
+}
+
+func setupAdultArchitecture(t *testing.T, httpURL, mcpURL, key string) adultArchitectureState {
+	t.Helper()
+	adultOne := registerAndLogin(t, httpURL, "Adult One", "adult-one@example.test", "081234567890")
+	adultTwo := registerAndLogin(t, httpURL, "Adult Two", "adult-two@example.test", "081234567891")
+
+	adultOneSpaces := listSpaces(t, httpURL, adultOne.Token)
+	adultTwoSpaces := listSpaces(t, httpURL, adultTwo.Token)
 	personalOne := requirePersonalSpace(t, adultOneSpaces)
 	personalTwo := requirePersonalSpace(t, adultTwoSpaces)
 	if personalOne.UserID != adultOne.UserID || personalTwo.UserID != adultTwo.UserID {
 		t.Fatalf("personal ownership mismatch: one=%+v two=%+v", personalOne, personalTwo)
 	}
 
-	sharedOne := createSharedSpace(t, httpServer.URL, adultOne.Token, "Shared Room")
-	sharedTwo := createSharedSpace(t, httpServer.URL, adultOne.Token, "Shared Room")
-	invitation := createInvitation(t, httpServer.URL, adultOne.Token, sharedOne.ID, adultTwo.Email)
-	acceptInvitation(t, httpServer.URL, adultTwo.Token, invitation.Token)
+	sharedOne := createSharedSpace(t, httpURL, adultOne.Token, "Shared Room")
+	sharedTwo := createSharedSpace(t, httpURL, adultOne.Token, "Shared Room")
+	invitation := createInvitation(t, httpURL, adultOne.Token, sharedOne.ID, adultTwo.Email)
+	acceptInvitation(t, httpURL, adultTwo.Token, invitation.Token)
 
-	linkCode := issueHermesLinkCode(t, httpServer.URL, adultOne.Token)
+	linkCode := issueHermesLinkCode(t, httpURL, adultOne.Token)
 	profile := "hermes-profile-adult-one"
-	identityLink := callMCPTool(t, mcpServer.URL, profile, "integration-only-server-key", "identity_link", map[string]any{
-		"code": linkCode,
-	})
+	identityLink := callMCPTool(t, mcpURL, profile, key, "identity_link", map[string]any{"code": linkCode})
 	if identityLink.IsError {
 		t.Fatalf("identity_link failed: %+v", identityLink)
 	}
-	if repeat := callMCPTool(t, mcpServer.URL, "hermes-profile-repeat", "integration-only-server-key", "identity_link", map[string]any{
-		"code": linkCode,
-	}); !repeat.IsError || mcpText(repeat) != "invalid input" {
+	if repeat := callMCPTool(t, mcpURL, "hermes-profile-repeat", key, "identity_link", map[string]any{"code": linkCode}); !repeat.IsError || mcpText(repeat) != "invalid input" {
 		t.Fatalf("repeated identity link = %+v, want safe invalid input", repeat)
 	}
 
-	spacesResult := callMCPTool(t, mcpServer.URL, profile, "integration-only-server-key", "space_list", map[string]any{})
+	spacesResult := callMCPTool(t, mcpURL, profile, key, "space_list", map[string]any{})
 	var linkedSpacesOutput mcpSpaceListOutput
 	decodeStructured(t, spacesResult.StructuredOutput, &linkedSpacesOutput)
 	if spacesResult.IsError || !hasSpace(linkedSpacesOutput.Spaces, personalOne.SpaceID) || !hasSpace(linkedSpacesOutput.Spaces, sharedOne.ID) || !hasSpace(linkedSpacesOutput.Spaces, sharedTwo.ID) {
 		t.Fatalf("space_list = %+v", spacesResult)
 	}
-	memberResult := callMCPTool(t, mcpServer.URL, profile, "integration-only-server-key", "space_get_members", map[string]any{
-		"space": sharedOne.ID,
-	})
+	memberResult := callMCPTool(t, mcpURL, profile, key, "space_get_members", map[string]any{"space": sharedOne.ID})
 	var memberOutput mcpSpaceMembersOutput
 	decodeStructured(t, memberResult.StructuredOutput, &memberOutput)
 	if memberResult.IsError || len(memberOutput.Members) != 2 || !hasUser(memberOutput.Members, adultOne.UserID) || !hasUser(memberOutput.Members, adultTwo.UserID) {
 		t.Fatalf("space_get_members = %+v", memberResult)
 	}
 
-	personalReminder := decodeReminder(t, callMCPTool(t, mcpServer.URL, profile, "integration-only-server-key", "reminder_create", map[string]any{
-		"title":        "Personal note",
-		"scheduled_at": "2026-09-21T08:00:00Z",
+	return adultArchitectureState{
+		adultOne: adultOne, adultTwo: adultTwo, adultTwoSpaces: adultTwoSpaces,
+		personalOne: personalOne, sharedOne: sharedOne, sharedTwo: sharedTwo, profile: profile,
+	}
+}
+
+func assertReminderAndActivityFlow(t *testing.T, db *gorm.DB, httpURL, mcpURL, key string, adult adultArchitectureState) {
+	t.Helper()
+	personalReminder := decodeReminder(t, callMCPTool(t, mcpURL, adult.profile, key, "reminder_create", map[string]any{
+		"title": "Personal note", "scheduled_at": "2026-09-21T08:00:00Z",
 	}))
-	personalList := callMCPTool(t, mcpServer.URL, profile, "integration-only-server-key", "reminder_list", map[string]any{})
+	personalList := callMCPTool(t, mcpURL, adult.profile, key, "reminder_list", map[string]any{})
 	var personalReminderOutput mcpReminderListOutput
 	decodeStructured(t, personalList.StructuredOutput, &personalReminderOutput)
 	if personalList.IsError || !hasReminder(personalReminderOutput.Reminders, personalReminder.ID) {
 		t.Fatalf("personal reminder list = %+v", personalList)
 	}
-	completedPersonal := decodeReminder(t, callMCPTool(t, mcpServer.URL, profile, "integration-only-server-key", "reminder_complete", map[string]any{
+	completedPersonal := decodeReminder(t, callMCPTool(t, mcpURL, adult.profile, key, "reminder_complete", map[string]any{
 		"reminder_id": personalReminder.ID,
 	}))
 	if completedPersonal.Status != "COMPLETED" {
 		t.Fatalf("completed personal reminder = %+v", completedPersonal)
 	}
 
-	sharedReminder := decodeReminder(t, callMCPTool(t, mcpServer.URL, profile, "integration-only-server-key", "reminder_create", map[string]any{
-		"space":        sharedOne.ID,
-		"title":        "Shared task",
-		"scheduled_at": "2026-09-22T08:00:00Z",
+	sharedReminder := decodeReminder(t, callMCPTool(t, mcpURL, adult.profile, key, "reminder_create", map[string]any{
+		"space": adult.sharedOne.ID, "title": "Shared task", "scheduled_at": "2026-09-22T08:00:00Z",
 	}))
-	sharedList := callMCPTool(t, mcpServer.URL, profile, "integration-only-server-key", "reminder_list", map[string]any{
-		"space": sharedOne.ID,
-	})
+	sharedList := callMCPTool(t, mcpURL, adult.profile, key, "reminder_list", map[string]any{"space": adult.sharedOne.ID})
 	var sharedReminderOutput mcpReminderListOutput
 	decodeStructured(t, sharedList.StructuredOutput, &sharedReminderOutput)
 	if sharedList.IsError || !hasReminder(sharedReminderOutput.Reminders, sharedReminder.ID) {
 		t.Fatalf("shared reminder list = %+v", sharedList)
 	}
 
-	if status, _ := requestJSON(t, httpServer.URL, http.MethodPost, "/api/reminders", adultTwo.Token, map[string]any{
-		"space_id":     sharedOne.ID,
-		"title":        "Viewer must not create",
-		"scheduled_at": "2026-09-23T08:00:00Z",
+	activityCreated := callMCPTool(t, mcpURL, adult.profile, key, "activity_create", map[string]any{
+		"space": adult.sharedOne.ID, "kind": "breastfeeding", "note": "10 minutes left side", "occurred_at": "2026-09-22T08:30:00Z",
+	})
+	var activity struct {
+		ID      string `json:"id"`
+		SpaceID string `json:"space_id"`
+		Kind    string `json:"kind"`
+	}
+	decodeStructured(t, activityCreated.StructuredOutput, &activity)
+	if activityCreated.IsError || activity.ID == "" || activity.SpaceID != adult.sharedOne.ID || activity.Kind != "breastfeeding" {
+		t.Fatalf("activity_create = %+v/%+v", activityCreated, activity)
+	}
+	activityList := callMCPTool(t, mcpURL, adult.profile, key, "activity_list", map[string]any{
+		"space": adult.sharedOne.ID, "kind": "breastfeeding",
+	})
+	var activityListOutput struct {
+		Activities []struct {
+			ID string `json:"id"`
+		} `json:"activities"`
+	}
+	decodeStructured(t, activityList.StructuredOutput, &activityListOutput)
+	if activityList.IsError || !hasActivity(activityListOutput.Activities, activity.ID) {
+		t.Fatalf("activity_list = %+v/%+v", activityList, activityListOutput)
+	}
+
+	if status, _ := requestJSON(t, httpURL, http.MethodPost, "/api/reminders", adult.adultTwo.Token, map[string]any{
+		"space_id": adult.sharedOne.ID, "title": "Viewer must not create", "scheduled_at": "2026-09-23T08:00:00Z",
 	}); status != http.StatusForbidden {
 		t.Fatalf("viewer reminder create status = %d, want %d", status, http.StatusForbidden)
 	}
-
-	if ambiguous := callMCPTool(t, mcpServer.URL, profile, "integration-only-server-key", "reminder_list", map[string]any{
-		"space": "Shared Room",
-	}); !ambiguous.IsError || mcpText(ambiguous) != "invalid input" {
+	if ambiguous := callMCPTool(t, mcpURL, adult.profile, key, "reminder_list", map[string]any{"space": "Shared Room"}); !ambiguous.IsError || mcpText(ambiguous) != "invalid input" {
 		t.Fatalf("ambiguous Space selection = %+v, want safe invalid input", ambiguous)
 	}
-	if status, _ := requestJSON(t, httpServer.URL, http.MethodGet, "/api/reminders?space_id="+personalOne.SpaceID, adultTwo.Token, nil); status != http.StatusNotFound {
+	if status, _ := requestJSON(t, httpURL, http.MethodGet, "/api/reminders?space_id="+adult.personalOne.SpaceID, adult.adultTwo.Token, nil); status != http.StatusNotFound {
 		t.Fatalf("cross-Space list status = %d, want %d", status, http.StatusNotFound)
 	}
 
@@ -382,18 +344,14 @@ func TestPersonalGroupSpaceArchitecture(t *testing.T) {
 		LIMIT 1`, sharedReminder.ID).Scan(&auditRow).Error; err != nil {
 		t.Fatal(err)
 	}
-	if auditRow.ActorUserID != adultOne.UserID || auditRow.ResourceID != sharedReminder.ID || auditRow.Status != "success" {
+	if auditRow.ActorUserID != adult.adultOne.UserID || auditRow.ResourceID != sharedReminder.ID || auditRow.Status != "success" {
 		t.Fatalf("trusted audit row = %+v", auditRow)
 	}
 	var metadata map[string]any
 	if err := json.Unmarshal([]byte(auditRow.Metadata), &metadata); err != nil {
 		t.Fatalf("decode audit metadata: %v", err)
 	}
-	for key, want := range map[string]string{
-		"source":        "mcp",
-		"channel":       "whatsapp",
-		"agent_profile": profile,
-	} {
+	for key, want := range map[string]string{"source": "mcp", "channel": "whatsapp", "agent_profile": adult.profile} {
 		if got, _ := metadata[key].(string); got != want {
 			t.Errorf("audit metadata[%q] = %v, want %q", key, metadata[key], want)
 		}
@@ -406,15 +364,106 @@ func TestPersonalGroupSpaceArchitecture(t *testing.T) {
 	if err := db.Raw(`SELECT space_id, status FROM reminders WHERE id = ?`, sharedReminder.ID).Scan(&persisted).Error; err != nil {
 		t.Fatal(err)
 	}
-	if persisted.SpaceID != sharedOne.ID || persisted.Status != "PENDING" {
+	if persisted.SpaceID != adult.sharedOne.ID || persisted.Status != "PENDING" {
 		t.Fatalf("persisted shared reminder = %+v", persisted)
 	}
-	if len(adultTwoSpaces) != 1 {
-		t.Fatalf("Space isolation before invitation = %+v", adultTwoSpaces)
+	if len(adult.adultTwoSpaces) != 1 {
+		t.Fatalf("Space isolation before invitation = %+v", adult.adultTwoSpaces)
 	}
-	adultTwoSpaces = listSpaces(t, httpServer.URL, adultTwo.Token)
-	if !hasSpace(adultTwoSpaces, sharedOne.ID) || hasSpace(adultTwoSpaces, sharedTwo.ID) {
-		t.Fatalf("Space isolation after invitation = %+v", adultTwoSpaces)
+	updatedSpaces := listSpaces(t, httpURL, adult.adultTwo.Token)
+	if !hasSpace(updatedSpaces, adult.sharedOne.ID) || hasSpace(updatedSpaces, adult.sharedTwo.ID) {
+		t.Fatalf("Space isolation after invitation = %+v", updatedSpaces)
+	}
+}
+
+func assertProfileSpaceList(t *testing.T, serverURL, key, profile, spaceID string) {
+	t.Helper()
+	result := callMCPTool(t, serverURL, profile, key, "space_list", map[string]any{})
+	var spaces mcpSpaceListOutput
+	decodeStructured(t, result.StructuredOutput, &spaces)
+	if result.IsError || !hasSpace(spaces.Spaces, spaceID) {
+		t.Fatalf("new profile space_list = %+v", result)
+	}
+}
+
+func assertOnboardingRow(t *testing.T, db *gorm.DB, account onboardingAccount) {
+	t.Helper()
+	t.Run("persisted "+account.name+" onboarding rows", func(t *testing.T) {
+		var user struct {
+			LoginProvider         string
+			BirthDate             time.Time
+			AgeVerificationMethod string
+			AgeVerifiedAt         *time.Time
+		}
+		if err := db.Raw(`SELECT login_provider, birth_date, age_verification_method, age_verified_at FROM users WHERE id = ?`, account.userID).Scan(&user).Error; err != nil {
+			t.Fatal(err)
+		}
+		birthDate, err := time.Parse("2006-01-02", account.birthDate)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if user.LoginProvider != "hermes" || !user.BirthDate.Equal(birthDate) || user.AgeVerificationMethod != "self_declared" || user.AgeVerifiedAt == nil {
+			t.Fatalf("user row = %+v, want hermes/%s/self_declared/verified", user, account.birthDate)
+		}
+
+		var count int64
+		if err := db.Raw(`SELECT COUNT(*) FROM spaces WHERE created_by_user_id = ? AND type = 'PERSONAL' AND status = 'ACTIVE' AND deleted_at IS NULL`, account.userID).Scan(&count).Error; err != nil {
+			t.Fatal(err)
+		}
+		if count != 1 {
+			t.Fatalf("personal spaces for %s = %d, want 1", account.userID, count)
+		}
+		if err := db.Raw(`SELECT COUNT(*) FROM space_members sm JOIN roles r ON r.id = sm.role_id WHERE sm.space_id = ? AND sm.user_id = ? AND r.name = 'space_owner' AND sm.status = 'ACTIVE' AND sm.deleted_at IS NULL`, account.spaceID, account.userID).Scan(&count).Error; err != nil {
+			t.Fatal(err)
+		}
+		if count != 1 {
+			t.Fatalf("space_owner membership for %s = %d, want 1", account.userID, count)
+		}
+		if err := db.Raw(`SELECT COUNT(*) FROM external_identities WHERE user_id = ? AND provider = 'hermes' AND external_id = ? AND status = 'ACTIVE' AND deleted_at IS NULL`, account.userID, account.profileID).Scan(&count).Error; err != nil {
+			t.Fatal(err)
+		}
+		if count != 1 {
+			t.Fatalf("active Hermes identity for %s = %d", account.profileID, count)
+		}
+	})
+}
+
+func accountTableCounts(t *testing.T, db *gorm.DB) accountTableCount {
+	t.Helper()
+	var counts accountTableCount
+	for _, query := range []struct {
+		name string
+		out  *int64
+	}{
+		{name: "users", out: &counts.Users},
+		{name: "spaces", out: &counts.Spaces},
+		{name: "space_members", out: &counts.Members},
+		{name: "external_identities", out: &counts.Identities},
+	} {
+		if err := db.Raw("SELECT COUNT(*) FROM " + query.name).Scan(query.out).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	return counts
+}
+
+func assertOnboardingAuditPrivacy(t *testing.T, db *gorm.DB, privateValues ...string) {
+	t.Helper()
+	var audits []struct {
+		Metadata     string
+		Message      string
+		ErrorMessage string
+	}
+	if err := db.Raw(`SELECT COALESCE(metadata, ''), COALESCE(message, ''), COALESCE(error_message, '') FROM audit_trails WHERE resource = 'external_account'`).Scan(&audits).Error; err != nil {
+		t.Fatal(err)
+	}
+	for _, audit := range audits {
+		encoded := audit.Metadata + audit.Message + audit.ErrorMessage
+		for _, privateValue := range privateValues {
+			if strings.Contains(encoded, privateValue) {
+				t.Fatalf("private onboarding value %q leaked in audit %+v", privateValue, audit)
+			}
+		}
 	}
 }
 
@@ -754,6 +803,17 @@ func hasUser(memberships []domainspace.ResolvedMembership, id string) bool {
 func hasReminder(reminders []mcpReminderOutput, id string) bool {
 	for _, reminder := range reminders {
 		if reminder.ID == id {
+			return true
+		}
+	}
+	return false
+}
+
+func hasActivity(activities []struct {
+	ID string `json:"id"`
+}, id string) bool {
+	for _, activity := range activities {
+		if activity.ID == id {
 			return true
 		}
 	}
