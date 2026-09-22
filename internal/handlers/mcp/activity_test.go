@@ -26,6 +26,17 @@ type mcpActivityServiceStub struct {
 	listActor   domainidentity.ActorContext
 	listInput   dto.ActivityListInput
 	listCalls   int
+	updateActor domainidentity.ActorContext
+	updateInput dto.ActivityUpdateInput
+	updateSpace string
+	updateID    string
+	updateCalls int
+	updateErr   error
+	deleteActor domainidentity.ActorContext
+	deleteSpace string
+	deleteID    string
+	deleteCalls int
+	deleteErr   error
 }
 
 func (s *mcpActivityServiceStub) Create(_ context.Context, actor domainidentity.ActorContext, input dto.ActivityCreateInput) (*domainactivity.Activity, error) {
@@ -38,6 +49,24 @@ func (s *mcpActivityServiceStub) List(_ context.Context, actor domainidentity.Ac
 	s.listCalls++
 	s.listActor, s.listInput = actor, input
 	return s.listed, s.listErr
+}
+
+func (s *mcpActivityServiceStub) Update(_ context.Context, actor domainidentity.ActorContext, spaceID, activityID string, input dto.ActivityUpdateInput) (*domainactivity.Activity, error) {
+	s.updateCalls++
+	s.updateActor, s.updateInput, s.updateSpace, s.updateID = actor, input, spaceID, activityID
+	if s.updateErr != nil {
+		return nil, s.updateErr
+	}
+	return &domainactivity.Activity{ID: activityID, SpaceID: spaceID, Kind: "note", Note: "updated"}, nil
+}
+
+func (s *mcpActivityServiceStub) Delete(_ context.Context, actor domainidentity.ActorContext, spaceID, activityID string) (*domainactivity.Activity, error) {
+	s.deleteCalls++
+	s.deleteActor, s.deleteSpace, s.deleteID = actor, spaceID, activityID
+	if s.deleteErr != nil {
+		return nil, s.deleteErr
+	}
+	return &domainactivity.Activity{ID: activityID, SpaceID: spaceID}, nil
 }
 
 func TestActivityCreateSelectsSpaceAndNormalizesTime(t *testing.T) {
@@ -99,6 +128,63 @@ func TestActivityToolsRequireLinkedActor(t *testing.T) {
 	}
 	if service.createCalls != 0 {
 		t.Fatal("unlinked actor reached activity service")
+	}
+}
+
+func TestActivityUpdateMapsPatchAndSelectedSpace(t *testing.T) {
+	spaceID := "00000000-0000-0000-0000-000000000501"
+	activityID := "00000000-0000-0000-0000-000000000601"
+	resolver := &mcpExternalResolverStub{
+		actor: domainidentity.ActorContext{UserID: "user-1", Memberships: []domainspace.ResolvedMembership{
+			mcpMembership("member-shared", spaceID, "Baby", domainspace.TypeShared, "role-member"),
+		}},
+		permissions: []domainpermission.Permission{{Resource: "activities", Action: "update"}},
+	}
+	service := &mcpActivityServiceStub{}
+	note := "updated note"
+	got, err := ActivityUpdate(mcpExternalContext(), resolver, service, ActivityUpdateInput{Space: "Baby", ActivityID: activityID, Note: &note, OccurredAt: "2026-09-22T09:00:00+07:00"})
+	if err != nil {
+		t.Fatalf("activity_update: %v", err)
+	}
+	if got == nil || got.ID != activityID || service.updateCalls != 1 || service.updateSpace != spaceID || service.updateID != activityID || service.updateInput.Note == nil || *service.updateInput.Note != note || service.updateInput.OccurredAt == nil {
+		t.Fatalf("output/service args = %+v/%+v", got, service)
+	}
+}
+
+func TestActivityUpdateRejectsEmptyPatchBeforeService(t *testing.T) {
+	service := &mcpActivityServiceStub{}
+	resolver := &mcpExternalResolverStub{
+		actor: domainidentity.ActorContext{UserID: "user-1", Memberships: []domainspace.ResolvedMembership{
+			mcpMembership("member-1", "space-1", "Personal", domainspace.TypePersonal, "role-personal"),
+		}},
+		permissions: []domainpermission.Permission{{Resource: "activities", Action: "update"}},
+	}
+	_, err := ActivityUpdate(mcpExternalContext(), resolver, service, ActivityUpdateInput{ActivityID: "00000000-0000-0000-0000-000000000601"})
+	var mapped *MCPError
+	if !errors.As(err, &mapped) || mapped.Code != "invalid_input" {
+		t.Fatalf("error = %T %v, want invalid_input", err, err)
+	}
+	if service.updateCalls != 0 {
+		t.Fatal("empty update reached service")
+	}
+}
+
+func TestActivityDeletePassesSelectedSpaceAndID(t *testing.T) {
+	spaceID := "00000000-0000-0000-0000-000000000501"
+	activityID := "00000000-0000-0000-0000-000000000601"
+	resolver := &mcpExternalResolverStub{
+		actor: domainidentity.ActorContext{UserID: "user-1", Memberships: []domainspace.ResolvedMembership{
+			mcpMembership("member-shared", spaceID, "Baby", domainspace.TypeShared, "role-member"),
+		}},
+		permissions: []domainpermission.Permission{{Resource: "activities", Action: "delete"}},
+	}
+	service := &mcpActivityServiceStub{}
+	got, err := ActivityDelete(mcpExternalContext(), resolver, service, ActivityDeleteInput{Space: spaceID, ActivityID: activityID})
+	if err != nil {
+		t.Fatalf("activity_delete: %v", err)
+	}
+	if got == nil || got.ID != activityID || service.deleteCalls != 1 || service.deleteSpace != spaceID || service.deleteID != activityID {
+		t.Fatalf("output/service args = %+v/%+v", got, service)
 	}
 }
 

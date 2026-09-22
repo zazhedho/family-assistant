@@ -96,4 +96,35 @@ func TestListScopesBySpaceKindAndOccurredAt(t *testing.T) {
 	}
 }
 
+func TestUpdateScopesBySpaceAndActivityID(t *testing.T) {
+	db, mock := newActivityMockDB(t)
+	repo := NewRepository(db)
+	now := time.Date(2026, 9, 22, 9, 0, 0, 0, time.UTC)
+	note := "updated note"
+
+	mock.ExpectExec(`UPDATE "space_activities" SET .* WHERE .*id = .* AND .*space_id = .* AND .*deleted_at.*IS NULL`).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	if err := repo.Update(context.Background(), spaceID, activityID, domainactivity.UpdateFields{Note: &note}, now); err != nil {
+		t.Fatalf("update activity: %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("sql expectations: %v", err)
+	}
+}
+
+func TestSoftDeleteScopesBySpaceAndActivityID(t *testing.T) {
+	db, mock := newActivityMockDB(t)
+	repo := NewRepository(db)
+	now := time.Date(2026, 9, 22, 9, 0, 0, 0, time.UTC)
+
+	mock.ExpectExec(`UPDATE "space_activities" SET .*deleted_at.*updated_at.* WHERE .*id = .* AND .*space_id = .* AND .*deleted_at.*IS NULL`).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	if err := repo.SoftDelete(context.Background(), spaceID, activityID, now); err != nil {
+		t.Fatalf("delete activity: %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("sql expectations: %v", err)
+	}
+}
+
 var _ interfaceactivity.RepoActivityInterface = (*Repository)(nil)

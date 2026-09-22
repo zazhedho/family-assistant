@@ -17,11 +17,14 @@ import (
 	interfacespace "family-assistant/internal/interfaces/space"
 	serviceauthorization "family-assistant/internal/services/authorization"
 	"family-assistant/utils"
+	"gorm.io/gorm"
 )
 
 const (
 	createPermission = "activities:create"
 	listPermission   = "activities:list"
+	updatePermission = "activities:update"
+	deletePermission = "activities:delete"
 	requiredReason   = "is required"
 	defaultLimit     = 50
 	maxLimit         = 100
@@ -132,6 +135,187 @@ func (s *service) List(ctx context.Context, actor domainidentity.ActorContext, i
 	}
 	s.writeAudit(ctx, activityAuditEvent(actor, "list", spaceID, "", domainaudit.StatusSuccess))
 	return activities, nil
+}
+
+func (s *service) Update(ctx context.Context, actor domainidentity.ActorContext, spaceID, activityID string, input dto.ActivityUpdateInput) (result *domainactivity.Activity, err error) {
+	spaceID = strings.TrimSpace(spaceID)
+	if spaceID == "" {
+		spaceID = strings.TrimSpace(actor.SpaceID)
+	}
+	activityID = strings.TrimSpace(activityID)
+	defer func() {
+		if err == nil {
+			return
+		}
+		event := activityAuditEvent(actor, domainaudit.ActionUpdate, spaceID, activityID, domainaudit.StatusFailed)
+		event.ErrorMessage = failureCategory(err)
+		s.writeAudit(ctx, event)
+	}()
+	if s.authorize == nil || s.spaces == nil || s.activities == nil {
+		return nil, errors.New("activity service is not configured")
+	}
+	if err := s.authorize.Authorize(ctx, actor, updatePermission, domainauthorization.Resource{SpaceID: spaceID}); err != nil {
+		return nil, err
+	}
+	members, err := s.spaces.ListActiveMembers(ctx, spaceID)
+	if err != nil {
+		return nil, err
+	}
+	actorMember := activityMember(members, actor.MemberID, actor.UserID)
+	if actorMember == nil {
+		return nil, serviceauthorization.ErrNotFound
+	}
+	activity, err := s.activities.FindByIDInSpace(ctx, spaceID, activityID)
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, serviceauthorization.ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	if activity == nil {
+		return nil, serviceauthorization.ErrNotFound
+	}
+	if !canMutateActivity(actorMember.RoleName, actorMember.ID, activity) {
+		return nil, serviceauthorization.ErrForbidden
+	}
+	fields, err := activityUpdateFields(input)
+	if err != nil {
+		return nil, err
+	}
+	now := time.Now().UTC()
+	if err := s.activities.Update(ctx, spaceID, activityID, fields, now); err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, serviceauthorization.ErrNotFound
+		}
+		return nil, err
+	}
+	applyActivityUpdate(activity, fields, now)
+	result = activity
+	s.writeAudit(ctx, activityAuditEvent(actor, domainaudit.ActionUpdate, spaceID, activity.ID, domainaudit.StatusSuccess))
+	return result, nil
+}
+
+func (s *service) Delete(ctx context.Context, actor domainidentity.ActorContext, spaceID, activityID string) (result *domainactivity.Activity, err error) {
+	spaceID = strings.TrimSpace(spaceID)
+	if spaceID == "" {
+		spaceID = strings.TrimSpace(actor.SpaceID)
+	}
+	activityID = strings.TrimSpace(activityID)
+	defer func() {
+		if err == nil {
+			return
+		}
+		event := activityAuditEvent(actor, domainaudit.ActionDelete, spaceID, activityID, domainaudit.StatusFailed)
+		event.ErrorMessage = failureCategory(err)
+		s.writeAudit(ctx, event)
+	}()
+	if s.authorize == nil || s.spaces == nil || s.activities == nil {
+		return nil, errors.New("activity service is not configured")
+	}
+	if err := s.authorize.Authorize(ctx, actor, deletePermission, domainauthorization.Resource{SpaceID: spaceID}); err != nil {
+		return nil, err
+	}
+	members, err := s.spaces.ListActiveMembers(ctx, spaceID)
+	if err != nil {
+		return nil, err
+	}
+	actorMember := activityMember(members, actor.MemberID, actor.UserID)
+	if actorMember == nil {
+		return nil, serviceauthorization.ErrNotFound
+	}
+	activity, err := s.activities.FindByIDInSpace(ctx, spaceID, activityID)
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, serviceauthorization.ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	if activity == nil {
+		return nil, serviceauthorization.ErrNotFound
+	}
+	if !canMutateActivity(actorMember.RoleName, actorMember.ID, activity) {
+		return nil, serviceauthorization.ErrForbidden
+	}
+	now := time.Now().UTC()
+	if err := s.activities.SoftDelete(ctx, spaceID, activityID, now); err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, serviceauthorization.ErrNotFound
+		}
+		return nil, err
+	}
+	activity.UpdatedAt = now
+	activity.DeletedAt = gorm.DeletedAt{Time: now, Valid: true}
+	result = activity
+	s.writeAudit(ctx, activityAuditEvent(actor, domainaudit.ActionDelete, spaceID, activity.ID, domainaudit.StatusSuccess))
+	return result, nil
+}
+
+func activityUpdateFields(input dto.ActivityUpdateInput) (domainactivity.UpdateFields, error) {
+	fields := domainactivity.UpdateFields{}
+	if input.Kind != nil {
+		kind := strings.TrimSpace(*input.Kind)
+		if kind == "" {
+			return fields, &serviceauthorization.ValidationError{Field: "kind", Reason: requiredReason}
+		}
+		fields.Kind = &kind
+	}
+	if input.Note != nil {
+		note := strings.TrimSpace(*input.Note)
+		if note == "" {
+			return fields, &serviceauthorization.ValidationError{Field: "note", Reason: requiredReason}
+		}
+		fields.Note = &note
+	}
+	if input.OccurredAt != nil {
+		if input.OccurredAt.IsZero() {
+			return fields, &serviceauthorization.ValidationError{Field: "occurred_at", Reason: requiredReason}
+		}
+		occurredAt := input.OccurredAt.UTC()
+		fields.OccurredAt = &occurredAt
+	}
+	if fields.Kind == nil && fields.Note == nil && fields.OccurredAt == nil {
+		return fields, &serviceauthorization.ValidationError{Field: "update", Reason: "at least one field is required"}
+	}
+	return fields, nil
+}
+
+func applyActivityUpdate(activity *domainactivity.Activity, fields domainactivity.UpdateFields, updatedAt time.Time) {
+	if fields.Kind != nil {
+		activity.Kind = *fields.Kind
+	}
+	if fields.Note != nil {
+		activity.Note = *fields.Note
+	}
+	if fields.OccurredAt != nil {
+		activity.OccurredAt = *fields.OccurredAt
+	}
+	activity.UpdatedAt = updatedAt
+}
+
+func activityMember(members []domainspace.ResolvedMembership, memberID, userID string) *domainspace.ResolvedMembership {
+	memberID = strings.TrimSpace(memberID)
+	userID = strings.TrimSpace(userID)
+	for i := range members {
+		member := &members[i]
+		if strings.TrimSpace(member.Status) != domainspace.StatusActive {
+			continue
+		}
+		if (memberID != "" && strings.TrimSpace(member.ID) == memberID) || (memberID == "" && strings.TrimSpace(member.UserID) == userID) {
+			return member
+		}
+	}
+	return nil
+}
+
+func canMutateActivity(role, memberID string, activity *domainactivity.Activity) bool {
+	switch strings.ToLower(strings.TrimSpace(role)) {
+	case "space_owner", "space_admin":
+		return true
+	case "space_member":
+		return strings.TrimSpace(activity.CreatedByMemberID) == strings.TrimSpace(memberID)
+	default:
+		return false
+	}
 }
 
 func (s *service) hasMember(ctx context.Context, spaceID, memberID, userID string) bool {

@@ -8,8 +8,10 @@ import (
 )
 
 var (
-	ErrActivityRequired = errors.New("activity is required")
-	ErrActivitySpaceID  = errors.New("activity space_id is required")
+	ErrActivityRequired       = errors.New("activity is required")
+	ErrActivitySpaceID        = errors.New("activity space_id is required")
+	ErrActivityIDRequired     = errors.New("activity_id is required")
+	ErrActivityUpdateRequired = errors.New("activity update is required")
 )
 
 func (Activity) TableName() string { return "space_activities" }
@@ -32,4 +34,10 @@ type ListFilter struct {
 	From    *time.Time
 	To      *time.Time
 	Limit   int
+}
+
+type UpdateFields struct {
+	Kind       *string
+	Note       *string
+	OccurredAt *time.Time
 }

@@ -3,6 +3,7 @@ package repositoryactivity
 import (
 	"context"
 	"strings"
+	"time"
 
 	domainactivity "family-assistant/internal/domain/activity"
 	interfaceactivity "family-assistant/internal/interfaces/activity"
@@ -57,6 +58,70 @@ func (r *Repository) List(ctx context.Context, filter domainactivity.ListFilter)
 		return nil, err
 	}
 	return activities, nil
+}
+
+func (r *Repository) FindByIDInSpace(ctx context.Context, spaceID, activityID string) (*domainactivity.Activity, error) {
+	if strings.TrimSpace(spaceID) == "" {
+		return nil, domainactivity.ErrActivitySpaceID
+	}
+	if strings.TrimSpace(activityID) == "" {
+		return nil, domainactivity.ErrActivityIDRequired
+	}
+	var activity domainactivity.Activity
+	if err := r.DB.WithContext(ctx).Where("space_id = ? AND id = ?", spaceID, activityID).First(&activity).Error; err != nil {
+		return nil, err
+	}
+	return &activity, nil
+}
+
+func (r *Repository) Update(ctx context.Context, spaceID, activityID string, fields domainactivity.UpdateFields, updatedAt time.Time) error {
+	if strings.TrimSpace(spaceID) == "" {
+		return domainactivity.ErrActivitySpaceID
+	}
+	if strings.TrimSpace(activityID) == "" {
+		return domainactivity.ErrActivityIDRequired
+	}
+	updates := map[string]any{"updated_at": updatedAt}
+	if fields.Kind != nil {
+		updates["kind"] = strings.TrimSpace(*fields.Kind)
+	}
+	if fields.Note != nil {
+		updates["note"] = strings.TrimSpace(*fields.Note)
+	}
+	if fields.OccurredAt != nil {
+		updates["occurred_at"] = *fields.OccurredAt
+	}
+	if len(updates) == 1 {
+		return domainactivity.ErrActivityUpdateRequired
+	}
+	result := r.DB.WithContext(ctx).Model(&domainactivity.Activity{}).
+		Where("id = ? AND space_id = ?", activityID, spaceID).Updates(updates)
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return gorm.ErrRecordNotFound
+	}
+	return nil
+}
+
+func (r *Repository) SoftDelete(ctx context.Context, spaceID, activityID string, deletedAt time.Time) error {
+	if strings.TrimSpace(spaceID) == "" {
+		return domainactivity.ErrActivitySpaceID
+	}
+	if strings.TrimSpace(activityID) == "" {
+		return domainactivity.ErrActivityIDRequired
+	}
+	result := r.DB.WithContext(ctx).Model(&domainactivity.Activity{}).
+		Where("id = ? AND space_id = ?", activityID, spaceID).
+		Updates(map[string]any{"deleted_at": deletedAt, "updated_at": deletedAt})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return gorm.ErrRecordNotFound
+	}
+	return nil
 }
 
 var _ interfaceactivity.RepoActivityInterface = (*Repository)(nil)

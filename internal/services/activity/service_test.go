@@ -2,6 +2,7 @@ package serviceactivity
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -12,12 +13,19 @@ import (
 	"family-assistant/internal/dto"
 	interfaceactivity "family-assistant/internal/interfaces/activity"
 	"family-assistant/internal/services/authorization"
+	"gorm.io/gorm"
 )
 
 type activityRepositoryStub struct {
-	created *domainactivity.Activity
-	listed  []domainactivity.Activity
-	filter  domainactivity.ListFilter
+	created  *domainactivity.Activity
+	listed   []domainactivity.Activity
+	filter   domainactivity.ListFilter
+	found    *domainactivity.Activity
+	updated  bool
+	deleted  bool
+	update   domainactivity.UpdateFields
+	updateID string
+	deleteID string
 }
 
 func (s *activityRepositoryStub) Create(_ context.Context, activity *domainactivity.Activity) error {
@@ -29,6 +37,24 @@ func (s *activityRepositoryStub) Create(_ context.Context, activity *domainactiv
 func (s *activityRepositoryStub) List(_ context.Context, filter domainactivity.ListFilter) ([]domainactivity.Activity, error) {
 	s.filter = filter
 	return append([]domainactivity.Activity(nil), s.listed...), nil
+}
+
+func (s *activityRepositoryStub) FindByIDInSpace(_ context.Context, _, _ string) (*domainactivity.Activity, error) {
+	if s.found == nil {
+		return nil, gorm.ErrRecordNotFound
+	}
+	copy := *s.found
+	return &copy, nil
+}
+
+func (s *activityRepositoryStub) Update(_ context.Context, _, activityID string, fields domainactivity.UpdateFields, _ time.Time) error {
+	s.updated, s.updateID, s.update = true, activityID, fields
+	return nil
+}
+
+func (s *activityRepositoryStub) SoftDelete(_ context.Context, _, activityID string, _ time.Time) error {
+	s.deleted, s.deleteID = true, activityID
+	return nil
 }
 
 type activitySpaceRepositoryStub struct {
@@ -122,6 +148,60 @@ func TestCreateActivityRequiresOccurredAt(t *testing.T) {
 	}
 	if repo.created != nil {
 		t.Fatal("invalid activity was persisted")
+	}
+}
+
+func TestUpdateActivityOwnerCanPatchOwnActivity(t *testing.T) {
+	activity := &domainactivity.Activity{ID: "activity-1", SpaceID: "space-1", CreatedByMemberID: "member-1", Kind: "note", Note: "old"}
+	repo := &activityRepositoryStub{found: activity}
+	spaces := &activitySpaceRepositoryStub{members: []domainspace.ResolvedMembership{{ID: "member-1", SpaceID: "space-1", UserID: "user-1", RoleName: "space_owner", Status: domainspace.StatusActive}}}
+	service := activityService(repo, spaces, &activityAuditStub{})
+	actor := activityActor("space-1", "member-1", "activities:update")
+	actor.RoleName = "space_owner"
+	note := "new"
+
+	got, err := service.Update(context.Background(), actor, "space-1", "activity-1", dto.ActivityUpdateInput{Note: &note})
+	if err != nil {
+		t.Fatalf("update activity: %v", err)
+	}
+	if !repo.updated || repo.updateID != "activity-1" || repo.update.Note == nil || *repo.update.Note != note || got == nil || got.Note != note {
+		t.Fatalf("update=%#v result=%#v", repo, got)
+	}
+}
+
+func TestUpdateActivityMemberCannotMutateAnotherMemberActivity(t *testing.T) {
+	repo := &activityRepositoryStub{found: &domainactivity.Activity{ID: "activity-1", SpaceID: "space-1", CreatedByMemberID: "member-2", Kind: "note", Note: "old"}}
+	spaces := &activitySpaceRepositoryStub{members: []domainspace.ResolvedMembership{
+		{ID: "member-1", SpaceID: "space-1", UserID: "user-1", RoleName: "space_member", Status: domainspace.StatusActive},
+		{ID: "member-2", SpaceID: "space-1", UserID: "user-2", RoleName: "space_member", Status: domainspace.StatusActive},
+	}}
+	service := activityService(repo, spaces, &activityAuditStub{})
+	actor := activityActor("space-1", "member-1", "activities:update")
+	actor.RoleName = "space_member"
+	note := "nope"
+
+	_, err := service.Update(context.Background(), actor, "space-1", "activity-1", dto.ActivityUpdateInput{Note: &note})
+	if !errors.Is(err, authorization.ErrForbidden) {
+		t.Fatalf("error = %v, want forbidden", err)
+	}
+	if repo.updated {
+		t.Fatal("unauthorized member updated activity")
+	}
+}
+
+func TestDeleteActivityOwnerSoftDeletesActivity(t *testing.T) {
+	repo := &activityRepositoryStub{found: &domainactivity.Activity{ID: "activity-1", SpaceID: "space-1", CreatedByMemberID: "member-1", Kind: "note", Note: "old"}}
+	spaces := &activitySpaceRepositoryStub{members: []domainspace.ResolvedMembership{{ID: "member-1", SpaceID: "space-1", UserID: "user-1", RoleName: "space_admin", Status: domainspace.StatusActive}}}
+	service := activityService(repo, spaces, &activityAuditStub{})
+	actor := activityActor("space-1", "member-1", "activities:delete")
+	actor.RoleName = "space_admin"
+
+	got, err := service.Delete(context.Background(), actor, "space-1", "activity-1")
+	if err != nil {
+		t.Fatalf("delete activity: %v", err)
+	}
+	if !repo.deleted || repo.deleteID != "activity-1" || got == nil || !got.DeletedAt.Valid {
+		t.Fatalf("delete=%#v result=%#v", repo, got)
 	}
 }
 

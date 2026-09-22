@@ -16,3 +16,9 @@ type ActivityListInput struct {
 	To    *time.Time
 	Limit int
 }
+
+type ActivityUpdateInput struct {
+	Kind       *string
+	Note       *string
+	OccurredAt *time.Time
+}
