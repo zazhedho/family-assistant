@@ -7,24 +7,24 @@ import (
 
 var spaceGrants = map[string]map[string][]string{
 	"space_owner": {
-		"spaces":      {"list", "view", "create"},
-		"members":     {"list", "view"},
-		"invitations": {"create"},
-		"reminders":   {"list", "view", "create", "update"},
-		"activities":  {"list", "create"},
+		"spaces":      {"list", "view", "create", "update", "delete"},
+		"members":     {"list", "view", "update", "delete"},
+		"invitations": {"create", "list", "delete"},
+		"reminders":   {"list", "view", "create", "update", "delete"},
+		"activities":  {"list", "create", "update", "delete"},
 	},
 	"space_admin": {
-		"spaces":      {"list", "view"},
-		"members":     {"list", "view"},
-		"invitations": {"create"},
-		"reminders":   {"list", "view", "create", "update"},
-		"activities":  {"list", "create"},
+		"spaces":      {"list", "view", "update", "delete"},
+		"members":     {"list", "view", "update", "delete"},
+		"invitations": {"create", "list", "delete"},
+		"reminders":   {"list", "view", "create", "update", "delete"},
+		"activities":  {"list", "create", "update", "delete"},
 	},
 	"space_member": {
 		"spaces":     {"list", "view"},
 		"members":    {"list", "view"},
-		"reminders":  {"list", "view", "create", "update"},
-		"activities": {"list", "create"},
+		"reminders":  {"list", "view", "create", "update", "delete"},
+		"activities": {"list", "create", "update", "delete"},
 	},
 	"space_viewer": {
 		"spaces":     {"list", "view"},
@@ -58,36 +58,43 @@ type spaceModule struct {
 var spaceModules = []spaceModule{
 	{
 		ID: "22222222-2222-4222-8222-000000000001", Name: "spaces", DisplayName: "Spaces", Path: "/spaces", Icon: "bi-grid", OrderIndex: 905,
-		Actions: []string{"list", "view", "create"},
+		Actions: []string{"list", "view", "create", "update", "delete"},
 		PermissionIDs: map[string]string{
 			"list":   "33333333-3333-4333-8333-000000000001",
 			"view":   "33333333-3333-4333-8333-000000000002",
 			"create": "33333333-3333-4333-8333-000000000003",
+			"update": "33333333-3333-4333-8333-000000000013",
+			"delete": "33333333-3333-4333-8333-000000000014",
 		},
 	},
 	{
 		ID: "22222222-2222-4222-8222-000000000002", Name: "members", DisplayName: "Members", Path: "/members", Icon: "bi-person-lines-fill", OrderIndex: 906,
-		Actions: []string{"list", "view"},
+		Actions: []string{"list", "view", "update", "delete"},
 		PermissionIDs: map[string]string{
-			"list": "33333333-3333-4333-8333-000000000004",
-			"view": "33333333-3333-4333-8333-000000000005",
+			"list":   "33333333-3333-4333-8333-000000000004",
+			"view":   "33333333-3333-4333-8333-000000000005",
+			"update": "33333333-3333-4333-8333-000000000015",
+			"delete": "33333333-3333-4333-8333-000000000016",
 		},
 	},
 	{
 		ID: "22222222-2222-4222-8222-000000000003", Name: "invitations", DisplayName: "Invitations", Path: "/invitations", Icon: "bi-envelope", OrderIndex: 907,
-		Actions: []string{"create"},
+		Actions: []string{"create", "list", "delete"},
 		PermissionIDs: map[string]string{
 			"create": "33333333-3333-4333-8333-000000000006",
+			"list":   "33333333-3333-4333-8333-000000000017",
+			"delete": "33333333-3333-4333-8333-000000000018",
 		},
 	},
 	{
 		ID: "22222222-2222-4222-8222-000000000004", Name: "reminders", DisplayName: "Reminders", Path: "/reminders", Icon: "bi-bell", OrderIndex: 908,
-		Actions: []string{"list", "view", "create", "update"},
+		Actions: []string{"list", "view", "create", "update", "delete"},
 		PermissionIDs: map[string]string{
 			"list":   "33333333-3333-4333-8333-000000000007",
 			"view":   "33333333-3333-4333-8333-000000000008",
 			"create": "33333333-3333-4333-8333-000000000009",
 			"update": "33333333-3333-4333-8333-000000000010",
+			"delete": "33333333-3333-4333-8333-000000000019",
 		},
 	},
 	{

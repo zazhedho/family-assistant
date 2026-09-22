@@ -63,6 +63,22 @@ func (s *spaceRepositoryStub) ListActiveMembers(context.Context, string) ([]doma
 	return nil, errors.New("not implemented")
 }
 
+func (s *spaceRepositoryStub) Update(context.Context, string, domainspace.SpaceUpdateFields, time.Time) error {
+	return errors.New("not implemented")
+}
+func (s *spaceRepositoryStub) Archive(context.Context, string, time.Time) error {
+	return errors.New("not implemented")
+}
+func (s *spaceRepositoryStub) UpdateMemberRole(context.Context, string, string, string, time.Time) error {
+	return errors.New("not implemented")
+}
+func (s *spaceRepositoryStub) RemoveMember(context.Context, string, string, time.Time) error {
+	return errors.New("not implemented")
+}
+func (s *spaceRepositoryStub) CountActiveOwners(context.Context, string) (int64, error) {
+	return 0, errors.New("not implemented")
+}
+
 type permissionServiceStub struct {
 	permissions []domainpermission.Permission
 	roleID      string

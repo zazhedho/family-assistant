@@ -73,6 +73,14 @@ func (s *reminderHTTPServiceStub) Complete(_ context.Context, actor domainidenti
 	return &domainreminder.Reminder{ID: reminderID, SpaceID: spaceID, Title: "Pay bill", Status: domainreminder.StatusCompleted, ScheduledAt: time.Date(2026, 9, 20, 1, 0, 0, 0, time.UTC)}, nil
 }
 
+func (s *reminderHTTPServiceStub) Update(context.Context, domainidentity.ActorContext, string, string, dto.ReminderUpdateInput) (*domainreminder.Reminder, error) {
+	return nil, nil
+}
+
+func (s *reminderHTTPServiceStub) Delete(context.Context, domainidentity.ActorContext, string, string) (*domainreminder.Reminder, error) {
+	return nil, nil
+}
+
 type userResolverStub struct {
 	actor   domainidentity.ActorContext
 	err     error

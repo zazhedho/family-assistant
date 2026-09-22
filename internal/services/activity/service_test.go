@@ -80,6 +80,22 @@ func (s *activitySpaceRepositoryStub) ListActiveMembers(_ context.Context, space
 	return result, nil
 }
 
+func (s *activitySpaceRepositoryStub) Update(context.Context, string, domainspace.SpaceUpdateFields, time.Time) error {
+	return nil
+}
+func (s *activitySpaceRepositoryStub) Archive(context.Context, string, time.Time) error {
+	return nil
+}
+func (s *activitySpaceRepositoryStub) UpdateMemberRole(context.Context, string, string, string, time.Time) error {
+	return nil
+}
+func (s *activitySpaceRepositoryStub) RemoveMember(context.Context, string, string, time.Time) error {
+	return nil
+}
+func (s *activitySpaceRepositoryStub) CountActiveOwners(context.Context, string) (int64, error) {
+	return 1, nil
+}
+
 type activityAuditStub struct {
 	events []domainaudit.AuditEvent
 }

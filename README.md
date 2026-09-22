@@ -204,16 +204,35 @@ is:
 
 - `account_register`
 - `identity_link`
+- `identity_revoke`
 - `space_create`
 - `space_list`
 - `space_get_members`
+- `space_update`
+- `space_archive`
+- `member_update_role`
+- `member_remove`
 - `invitation_create`
 - `invitation_accept`
+- `invitation_list`
+- `invitation_revoke`
 - `activity_create`
 - `activity_list`
+- `activity_update`
+- `activity_delete`
 - `reminder_create`
 - `reminder_list`
 - `reminder_complete`
+- `reminder_update`
+- `reminder_delete`
+
+Mutation permissions are enforced against the selected Space membership. Owners
+and admins can manage shared Space membership and invitations; members can only
+update or remove reminders and activities they created. Viewers are read-only.
+Space archive, member removal, invitation revoke, identity revoke, and reminder
+or activity deletion use lifecycle-safe soft-delete/revoke state changes, so
+historical audit records remain available while normal list tools hide removed
+rows.
 
 For a new WhatsApp account, Hermes asks for the user's name and birth date,
 explains that the birth date is used for minimum-age validation, shows a

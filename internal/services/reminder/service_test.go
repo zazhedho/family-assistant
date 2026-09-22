@@ -124,6 +124,22 @@ func (s *spaceRepositoryStub) ListActiveMembers(_ context.Context, spaceID strin
 	return result, nil
 }
 
+func (s *spaceRepositoryStub) Update(context.Context, string, domainspace.SpaceUpdateFields, time.Time) error {
+	return nil
+}
+func (s *spaceRepositoryStub) Archive(context.Context, string, time.Time) error {
+	return nil
+}
+func (s *spaceRepositoryStub) UpdateMemberRole(context.Context, string, string, string, time.Time) error {
+	return nil
+}
+func (s *spaceRepositoryStub) RemoveMember(context.Context, string, string, time.Time) error {
+	return nil
+}
+func (s *spaceRepositoryStub) CountActiveOwners(context.Context, string) (int64, error) {
+	return 1, nil
+}
+
 type auditStoreStub struct {
 	events []domainaudit.AuditEvent
 }
