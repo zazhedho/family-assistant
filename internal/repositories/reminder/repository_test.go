@@ -247,6 +247,41 @@ func TestCompletePendingRejectsBlankScopeOrReminderIDBeforeQuery(t *testing.T) {
 	}
 }
 
+func TestUpdatePendingScopesBySpaceAndPendingStatus(t *testing.T) {
+	db, mock := newReminderMockDB(t)
+	repo := NewRepository(db)
+	now := time.Date(2026, 9, 22, 8, 0, 0, 0, time.UTC)
+	title := "Updated title"
+
+	mock.ExpectExec(`UPDATE "reminders" SET .* WHERE .*id = .* AND .*space_id = .* AND .*status = .* AND .*deleted_at.*IS NULL`).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+
+	err := repo.UpdatePending(context.Background(), spaceID, reminderID, domainreminder.UpdateFields{Title: &title}, now)
+	if err != nil {
+		t.Fatalf("update reminder: %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("sql expectations: %v", err)
+	}
+}
+
+func TestSoftDeleteScopesBySpaceAndHidesReminder(t *testing.T) {
+	db, mock := newReminderMockDB(t)
+	repo := NewRepository(db)
+	now := time.Date(2026, 9, 22, 8, 0, 0, 0, time.UTC)
+
+	mock.ExpectExec(`UPDATE "reminders" SET .*deleted_at.*status.*updated_at.* WHERE .*id = .* AND .*space_id = .* AND .*deleted_at.*IS NULL`).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+
+	err := repo.SoftDelete(context.Background(), spaceID, reminderID, domainreminder.StatusCancelled, now)
+	if err != nil {
+		t.Fatalf("delete reminder: %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("sql expectations: %v", err)
+	}
+}
+
 func TestRepositorySatisfiesInterface(t *testing.T) {
 	var _ interfacereminder.RepoReminderInterface = (*Repository)(nil)
 }

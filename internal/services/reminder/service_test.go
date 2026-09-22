@@ -28,15 +28,25 @@ const (
 )
 
 type reminderRepositoryStub struct {
-	created     *domainreminder.Reminder
-	listed      []domainreminder.Reminder
-	listFilter  domainreminder.ListFilter
-	found       *domainreminder.Reminder
-	findErr     error
-	findSpace   string
-	findID      string
-	completed   bool
-	completeErr error
+	created      *domainreminder.Reminder
+	listed       []domainreminder.Reminder
+	listFilter   domainreminder.ListFilter
+	found        *domainreminder.Reminder
+	findErr      error
+	findSpace    string
+	findID       string
+	completed    bool
+	completeErr  error
+	updated      bool
+	updateSpace  string
+	updateID     string
+	updatePatch  domainreminder.UpdateFields
+	updateErr    error
+	deleted      bool
+	deleteSpace  string
+	deleteID     string
+	deleteStatus domainreminder.Status
+	deleteErr    error
 }
 
 func (s *reminderRepositoryStub) Create(_ context.Context, reminder *domainreminder.Reminder) error {
@@ -67,6 +77,24 @@ func (s *reminderRepositoryStub) CompletePending(_ context.Context, _, _ string,
 		return s.completeErr
 	}
 	s.completed = true
+	return nil
+}
+
+func (s *reminderRepositoryStub) UpdatePending(_ context.Context, spaceID, reminderID string, patch domainreminder.UpdateFields, _ time.Time) error {
+	s.updateSpace, s.updateID, s.updatePatch = spaceID, reminderID, patch
+	if s.updateErr != nil {
+		return s.updateErr
+	}
+	s.updated = true
+	return nil
+}
+
+func (s *reminderRepositoryStub) SoftDelete(_ context.Context, spaceID, reminderID string, status domainreminder.Status, _ time.Time) error {
+	s.deleteSpace, s.deleteID, s.deleteStatus = spaceID, reminderID, status
+	if s.deleteErr != nil {
+		return s.deleteErr
+	}
+	s.deleted = true
 	return nil
 }
 
@@ -463,6 +491,68 @@ func TestCompleteStatusRaceReturnsConflict(t *testing.T) {
 	_, err := service.Complete(context.Background(), actor, sharedSpaceID, reminderID)
 	if !errors.Is(err, ErrConflict) {
 		t.Fatalf("complete error = %v, want conflict", err)
+	}
+}
+
+func TestUpdateOwnerCanPatchPendingReminder(t *testing.T) {
+	reminder := &domainreminder.Reminder{ID: reminderID, SpaceID: sharedSpaceID, CreatedByMemberID: assigneeID, Status: domainreminder.StatusPending, Title: "Old title"}
+	repo := &reminderRepositoryStub{found: reminder}
+	spaces := &spaceRepositoryStub{members: []domainspace.ResolvedMembership{
+		membership(sharedSpaceID, creatorID, "space_owner", "user-1"),
+		membership(sharedSpaceID, assigneeID, "space_member", "user-2"),
+	}}
+	service := newReminderService(repo, spaces, nil)
+	actor := actor(sharedSpaceID, domainspace.TypeShared, creatorID, "space_owner", "reminders:update")
+
+	title := "New title"
+	got, err := service.Update(context.Background(), actor, sharedSpaceID, reminderID, dto.ReminderUpdateInput{Title: &title})
+	if err != nil {
+		t.Fatalf("update reminder: %v", err)
+	}
+	if !repo.updated || repo.updateSpace != sharedSpaceID || repo.updateID != reminderID || repo.updatePatch.Title == nil || *repo.updatePatch.Title != title {
+		t.Fatalf("unexpected update: updated=%v space=%q id=%q patch=%#v", repo.updated, repo.updateSpace, repo.updateID, repo.updatePatch)
+	}
+	if got == nil || got.Title != title {
+		t.Fatalf("updated result = %#v, want title %q", got, title)
+	}
+}
+
+func TestUpdateMemberCannotMutateAnotherMembersReminder(t *testing.T) {
+	reminder := &domainreminder.Reminder{ID: reminderID, SpaceID: sharedSpaceID, CreatedByMemberID: assigneeID, Status: domainreminder.StatusPending}
+	repo := &reminderRepositoryStub{found: reminder}
+	spaces := &spaceRepositoryStub{members: []domainspace.ResolvedMembership{
+		membership(sharedSpaceID, creatorID, "space_member", "user-1"),
+		membership(sharedSpaceID, assigneeID, "space_member", "user-2"),
+	}}
+	service := newReminderService(repo, spaces, nil)
+	actor := actor(sharedSpaceID, domainspace.TypeShared, creatorID, "space_member", "reminders:update")
+	title := "Nope"
+
+	_, err := service.Update(context.Background(), actor, sharedSpaceID, reminderID, dto.ReminderUpdateInput{Title: &title})
+	if !errors.Is(err, authorization.ErrForbidden) {
+		t.Fatalf("update error = %v, want forbidden", err)
+	}
+	if repo.updated {
+		t.Fatal("unauthorized member updated reminder")
+	}
+}
+
+func TestDeleteOwnerSoftDeletesPendingReminder(t *testing.T) {
+	reminder := &domainreminder.Reminder{ID: reminderID, SpaceID: sharedSpaceID, CreatedByMemberID: assigneeID, Status: domainreminder.StatusPending}
+	repo := &reminderRepositoryStub{found: reminder}
+	spaces := &spaceRepositoryStub{members: []domainspace.ResolvedMembership{
+		membership(sharedSpaceID, creatorID, "space_admin", "user-1"),
+		membership(sharedSpaceID, assigneeID, "space_member", "user-2"),
+	}}
+	service := newReminderService(repo, spaces, nil)
+	actor := actor(sharedSpaceID, domainspace.TypeShared, creatorID, "space_admin", "reminders:delete")
+
+	got, err := service.Delete(context.Background(), actor, sharedSpaceID, reminderID)
+	if err != nil {
+		t.Fatalf("delete reminder: %v", err)
+	}
+	if !repo.deleted || repo.deleteStatus != domainreminder.StatusCancelled || got == nil || got.Status != domainreminder.StatusCancelled {
+		t.Fatalf("delete result=%#v repo=%#v", got, repo)
 	}
 }
 

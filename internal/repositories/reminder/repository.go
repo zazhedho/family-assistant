@@ -102,6 +102,65 @@ func (r *Repository) CompletePending(ctx context.Context, spaceID, reminderID st
 	return nil
 }
 
+func (r *Repository) UpdatePending(ctx context.Context, spaceID, reminderID string, fields domainreminder.UpdateFields, updatedAt time.Time) error {
+	if err := validateSpaceID(spaceID); err != nil {
+		return err
+	}
+	if strings.TrimSpace(reminderID) == "" {
+		return domainreminder.ErrReminderIDRequired
+	}
+	updates := map[string]any{"updated_at": updatedAt}
+	if fields.Title != nil {
+		updates["title"] = strings.TrimSpace(*fields.Title)
+	}
+	if fields.Description != nil {
+		updates["description"] = *fields.Description
+	}
+	if fields.ScheduledAt != nil {
+		updates["scheduled_at"] = *fields.ScheduledAt
+	}
+	if fields.ClearAssignee {
+		updates["assignee_member_id"] = nil
+	} else if fields.AssigneeMemberID != nil {
+		updates["assignee_member_id"] = strings.TrimSpace(*fields.AssigneeMemberID)
+	}
+	if len(updates) == 1 {
+		return domainreminder.ErrReminderUpdateRequired
+	}
+
+	result := r.DB.WithContext(ctx).
+		Model(&domainreminder.Reminder{}).
+		Where("id = ? AND space_id = ? AND status = ?", reminderID, spaceID, domainreminder.StatusPending).
+		Updates(updates)
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return domainreminder.ErrStatusConflict
+	}
+	return nil
+}
+
+func (r *Repository) SoftDelete(ctx context.Context, spaceID, reminderID string, status domainreminder.Status, deletedAt time.Time) error {
+	if err := validateSpaceID(spaceID); err != nil {
+		return err
+	}
+	if strings.TrimSpace(reminderID) == "" {
+		return domainreminder.ErrReminderIDRequired
+	}
+	result := r.DB.WithContext(ctx).
+		Model(&domainreminder.Reminder{}).
+		Where("id = ? AND space_id = ?", reminderID, spaceID).
+		Updates(map[string]any{"status": status, "deleted_at": deletedAt, "updated_at": deletedAt})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return gorm.ErrRecordNotFound
+	}
+	return nil
+}
+
 func validateSpaceID(spaceID string) error {
 	if strings.TrimSpace(spaceID) == "" {
 		return domainreminder.ErrSpaceIDRequired

@@ -23,6 +23,7 @@ const (
 	createPermission = "reminders:create"
 	listPermission   = "reminders:list"
 	updatePermission = "reminders:update"
+	deletePermission = "reminders:delete"
 )
 
 var ErrConflict = errors.New("conflict")
@@ -194,6 +195,186 @@ func (s *service) Complete(ctx context.Context, actor domainidentity.ActorContex
 	return result, nil
 }
 
+func (s *service) Update(ctx context.Context, actor domainidentity.ActorContext, spaceID, reminderID string, input dto.ReminderUpdateInput) (result *domainreminder.Reminder, err error) {
+	spaceID = strings.TrimSpace(spaceID)
+	if spaceID == "" {
+		spaceID = strings.TrimSpace(actor.SpaceID)
+	}
+	reminderID = strings.TrimSpace(reminderID)
+	defer func() {
+		if err == nil {
+			return
+		}
+		ownerID := strings.TrimSpace(actor.MemberID)
+		if result != nil {
+			ownerID = strings.TrimSpace(result.CreatedByMemberID)
+		}
+		event := auditEvent(actor, domainaudit.ActionUpdate, spaceID, reminderID, ownerID, domainaudit.StatusFailed, nil)
+		event.ErrorMessage = failureCategory(err)
+		s.writeAudit(ctx, event)
+	}()
+
+	if err := s.authorize.Authorize(ctx, actor, updatePermission, domainauthorization.Resource{SpaceID: spaceID}); err != nil {
+		return nil, err
+	}
+	members, err := s.spaces.ListActiveMembers(ctx, spaceID)
+	if err != nil {
+		return nil, err
+	}
+	actorMember := activeMember(members, actor.MemberID, actor.UserID)
+	if actorMember == nil {
+		return nil, authorization.ErrNotFound
+	}
+	reminder, err := s.reminders.FindByIDInSpace(ctx, spaceID, reminderID)
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, authorization.ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	if reminder == nil {
+		return nil, authorization.ErrNotFound
+	}
+	if !canMutate(actorMember.RoleName, actorMember.ID, reminder) {
+		return nil, authorization.ErrForbidden
+	}
+	if reminder.Status != domainreminder.StatusPending {
+		return nil, ErrConflict
+	}
+	fields, err := reminderUpdateFields(input, members)
+	if err != nil {
+		return nil, err
+	}
+	now := time.Now().UTC()
+	if err := s.reminders.UpdatePending(ctx, spaceID, reminderID, fields, now); err != nil {
+		if errors.Is(err, domainreminder.ErrStatusConflict) {
+			return nil, ErrConflict
+		}
+		return nil, err
+	}
+	applyReminderUpdate(reminder, fields, now)
+	result = reminder
+	s.writeAudit(ctx, auditEvent(actor, domainaudit.ActionUpdate, spaceID, reminder.ID, reminder.CreatedByMemberID, domainaudit.StatusSuccess, nil))
+	return result, nil
+}
+
+func (s *service) Delete(ctx context.Context, actor domainidentity.ActorContext, spaceID, reminderID string) (result *domainreminder.Reminder, err error) {
+	spaceID = strings.TrimSpace(spaceID)
+	if spaceID == "" {
+		spaceID = strings.TrimSpace(actor.SpaceID)
+	}
+	reminderID = strings.TrimSpace(reminderID)
+	defer func() {
+		if err == nil {
+			return
+		}
+		ownerID := strings.TrimSpace(actor.MemberID)
+		if result != nil {
+			ownerID = strings.TrimSpace(result.CreatedByMemberID)
+		}
+		event := auditEvent(actor, domainaudit.ActionDelete, spaceID, reminderID, ownerID, domainaudit.StatusFailed, nil)
+		event.ErrorMessage = failureCategory(err)
+		s.writeAudit(ctx, event)
+	}()
+
+	if err := s.authorize.Authorize(ctx, actor, deletePermission, domainauthorization.Resource{SpaceID: spaceID}); err != nil {
+		return nil, err
+	}
+	members, err := s.spaces.ListActiveMembers(ctx, spaceID)
+	if err != nil {
+		return nil, err
+	}
+	actorMember := activeMember(members, actor.MemberID, actor.UserID)
+	if actorMember == nil {
+		return nil, authorization.ErrNotFound
+	}
+	reminder, err := s.reminders.FindByIDInSpace(ctx, spaceID, reminderID)
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, authorization.ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	if reminder == nil {
+		return nil, authorization.ErrNotFound
+	}
+	if !canMutate(actorMember.RoleName, actorMember.ID, reminder) {
+		return nil, authorization.ErrForbidden
+	}
+	status := reminder.Status
+	if status == domainreminder.StatusPending {
+		status = domainreminder.StatusCancelled
+	}
+	now := time.Now().UTC()
+	if err := s.reminders.SoftDelete(ctx, spaceID, reminderID, status, now); err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, authorization.ErrNotFound
+		}
+		return nil, err
+	}
+	reminder.Status = status
+	reminder.UpdatedAt = now
+	reminder.DeletedAt = gorm.DeletedAt{Time: now, Valid: true}
+	result = reminder
+	s.writeAudit(ctx, auditEvent(actor, domainaudit.ActionDelete, spaceID, reminder.ID, reminder.CreatedByMemberID, domainaudit.StatusSuccess, nil))
+	return result, nil
+}
+
+func reminderUpdateFields(input dto.ReminderUpdateInput, members []domainspace.ResolvedMembership) (domainreminder.UpdateFields, error) {
+	fields := domainreminder.UpdateFields{}
+	if input.Title != nil {
+		title := strings.TrimSpace(*input.Title)
+		if title == "" {
+			return fields, &authorization.ValidationError{Field: "title", Reason: "is required"}
+		}
+		fields.Title = &title
+	}
+	if input.Description != nil {
+		description := strings.TrimSpace(*input.Description)
+		fields.Description = &description
+	}
+	if input.ScheduledAt != nil {
+		if input.ScheduledAt.IsZero() {
+			return fields, &authorization.ValidationError{Field: "scheduled_at", Reason: "is required"}
+		}
+		scheduledAt := input.ScheduledAt.UTC()
+		fields.ScheduledAt = &scheduledAt
+	}
+	if input.ClearAssignee && input.AssigneeMemberID != nil {
+		return fields, &authorization.ValidationError{Field: "assignee_member_id", Reason: "cannot be set while clear_assignee is true"}
+	}
+	if input.AssigneeMemberID != nil {
+		assigneeID := strings.TrimSpace(*input.AssigneeMemberID)
+		if !hasMemberID(members, assigneeID) {
+			return fields, authorization.ErrNotFound
+		}
+		fields.AssigneeMemberID = &assigneeID
+	}
+	fields.ClearAssignee = input.ClearAssignee
+	if fields.Title == nil && fields.Description == nil && fields.ScheduledAt == nil && fields.AssigneeMemberID == nil && !fields.ClearAssignee {
+		return fields, &authorization.ValidationError{Field: "update", Reason: "at least one field is required"}
+	}
+	return fields, nil
+}
+
+func applyReminderUpdate(reminder *domainreminder.Reminder, fields domainreminder.UpdateFields, updatedAt time.Time) {
+	if fields.Title != nil {
+		reminder.Title = *fields.Title
+	}
+	if fields.Description != nil {
+		reminder.Description = *fields.Description
+	}
+	if fields.ScheduledAt != nil {
+		reminder.ScheduledAt = *fields.ScheduledAt
+	}
+	if fields.ClearAssignee {
+		reminder.AssigneeMemberID = nil
+	} else if fields.AssigneeMemberID != nil {
+		reminder.AssigneeMemberID = fields.AssigneeMemberID
+	}
+	reminder.UpdatedAt = updatedAt
+}
+
 func hasMember(members []domainspace.ResolvedMembership, memberID, userID string) bool {
 	memberID = strings.TrimSpace(memberID)
 	if memberID != "" {
@@ -239,6 +420,17 @@ func canComplete(role, memberID string, reminder *domainreminder.Reminder) bool 
 			return true
 		}
 		return reminder.AssigneeMemberID != nil && strings.TrimSpace(*reminder.AssigneeMemberID) == strings.TrimSpace(memberID)
+	default:
+		return false
+	}
+}
+
+func canMutate(role, memberID string, reminder *domainreminder.Reminder) bool {
+	switch strings.ToLower(strings.TrimSpace(role)) {
+	case "space_owner", "space_admin":
+		return true
+	case "space_member":
+		return strings.TrimSpace(reminder.CreatedByMemberID) == strings.TrimSpace(memberID)
 	default:
 		return false
 	}

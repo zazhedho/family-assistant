@@ -8,10 +8,11 @@ import (
 )
 
 var (
-	ErrSpaceIDRequired    = errors.New("space_id is required")
-	ErrReminderRequired   = errors.New("reminder is required")
-	ErrReminderIDRequired = errors.New("reminder_id is required")
-	ErrStatusConflict     = errors.New("reminder status conflict")
+	ErrSpaceIDRequired        = errors.New("space_id is required")
+	ErrReminderRequired       = errors.New("reminder is required")
+	ErrReminderIDRequired     = errors.New("reminder_id is required")
+	ErrReminderUpdateRequired = errors.New("reminder update is required")
+	ErrStatusConflict         = errors.New("reminder status conflict")
 )
 
 type Status string
@@ -27,6 +28,14 @@ type ListFilter struct {
 	Status  *Status
 	From    *time.Time
 	To      *time.Time
+}
+
+type UpdateFields struct {
+	Title            *string
+	Description      *string
+	ScheduledAt      *time.Time
+	AssigneeMemberID *string
+	ClearAssignee    bool
 }
 
 func (Reminder) TableName() string {

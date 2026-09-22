@@ -35,6 +35,17 @@ type reminderToolServiceStub struct {
 	createErr     error
 	listErr       error
 	completeErr   error
+	updateActor   domainidentity.ActorContext
+	updateInput   dto.ReminderUpdateInput
+	updateSpace   string
+	updateID      string
+	updateCalls   int
+	updateErr     error
+	deleteActor   domainidentity.ActorContext
+	deleteSpace   string
+	deleteID      string
+	deleteCalls   int
+	deleteErr     error
 }
 
 func (s *reminderToolServiceStub) Create(_ context.Context, actor domainidentity.ActorContext, input dto.ReminderCreateInput) (*domainreminder.Reminder, error) {
@@ -65,6 +76,28 @@ func (s *reminderToolServiceStub) Complete(_ context.Context, actor domainidenti
 		return nil, s.completeErr
 	}
 	return &domainreminder.Reminder{ID: reminderID, SpaceID: spaceID, Title: "Pay bill", Status: domainreminder.StatusCompleted, ScheduledAt: time.Date(2026, 9, 20, 1, 0, 0, 0, time.UTC)}, nil
+}
+
+func (s *reminderToolServiceStub) Update(_ context.Context, actor domainidentity.ActorContext, spaceID, reminderID string, input dto.ReminderUpdateInput) (*domainreminder.Reminder, error) {
+	s.updateCalls++
+	s.updateActor, s.updateSpace, s.updateID, s.updateInput = actor, spaceID, reminderID, input
+	if s.updateErr != nil {
+		return nil, s.updateErr
+	}
+	title := "Updated title"
+	if input.Title != nil {
+		title = *input.Title
+	}
+	return &domainreminder.Reminder{ID: reminderID, SpaceID: spaceID, Title: title, Status: domainreminder.StatusPending, ScheduledAt: time.Date(2026, 9, 20, 1, 0, 0, 0, time.UTC)}, nil
+}
+
+func (s *reminderToolServiceStub) Delete(_ context.Context, actor domainidentity.ActorContext, spaceID, reminderID string) (*domainreminder.Reminder, error) {
+	s.deleteCalls++
+	s.deleteActor, s.deleteSpace, s.deleteID = actor, spaceID, reminderID
+	if s.deleteErr != nil {
+		return nil, s.deleteErr
+	}
+	return &domainreminder.Reminder{ID: reminderID, SpaceID: spaceID, Status: domainreminder.StatusCancelled, ScheduledAt: time.Date(2026, 9, 20, 1, 0, 0, 0, time.UTC)}, nil
 }
 
 func mcpReminderResolver() *mcpExternalResolverStub {
@@ -138,6 +171,46 @@ func TestReminderCompletePassesSelectedSpaceAndReminderID(t *testing.T) {
 	}
 	if got.ID != mcpReminderID || got.SpaceID != mcpSpaceID || service.completeSpace != mcpSpaceID || service.completeID != mcpReminderID {
 		t.Fatalf("unexpected complete call/output: got=%+v service=%+v", got, service)
+	}
+}
+
+func TestReminderUpdateMapsPatchAndSelectedSpace(t *testing.T) {
+	service := &reminderToolServiceStub{}
+	title := "Updated title"
+	got, err := ReminderUpdate(mcpExternalContext(), mcpReminderResolver(), service, ReminderUpdateInput{
+		Space: mcpSpaceID, ReminderID: mcpReminderID, Title: &title, ScheduledAt: "2026-09-22T08:00:00+07:00",
+	})
+	if err != nil {
+		t.Fatalf("update reminder: %v", err)
+	}
+	if got.ID != mcpReminderID || got.SpaceID != mcpSpaceID || service.updateCalls != 1 || service.updateSpace != mcpSpaceID || service.updateID != mcpReminderID {
+		t.Fatalf("unexpected update: got=%+v service=%+v", got, service)
+	}
+	if service.updateInput.Title == nil || *service.updateInput.Title != title || service.updateInput.ScheduledAt == nil {
+		t.Fatalf("unexpected update input: %+v", service.updateInput)
+	}
+}
+
+func TestReminderUpdateRejectsEmptyPatchBeforeService(t *testing.T) {
+	service := &reminderToolServiceStub{}
+	_, err := ReminderUpdate(mcpExternalContext(), mcpReminderResolver(), service, ReminderUpdateInput{Space: mcpSpaceID, ReminderID: mcpReminderID})
+	var mapped *MCPError
+	if !errors.As(err, &mapped) || mapped.Code != "invalid_input" {
+		t.Fatalf("error = %T %v, want invalid_input", err, err)
+	}
+	if service.updateCalls != 0 {
+		t.Fatal("empty update reached service")
+	}
+}
+
+func TestReminderDeletePassesSelectedSpaceAndID(t *testing.T) {
+	service := &reminderToolServiceStub{}
+	got, err := ReminderDelete(mcpExternalContext(), mcpReminderResolver(), service, ReminderDeleteInput{Space: mcpSpaceID, ReminderID: mcpReminderID})
+	if err != nil {
+		t.Fatalf("delete reminder: %v", err)
+	}
+	if got.ID != mcpReminderID || got.Status != string(domainreminder.StatusCancelled) || service.deleteCalls != 1 || service.deleteSpace != mcpSpaceID || service.deleteID != mcpReminderID {
+		t.Fatalf("unexpected delete: got=%+v service=%+v", got, service)
 	}
 }
 

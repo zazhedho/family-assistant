@@ -38,6 +38,21 @@ type ReminderCompleteInput struct {
 	ReminderID string `json:"reminder_id" jsonschema:"reminder UUID"`
 }
 
+type ReminderUpdateInput struct {
+	Space            string  `json:"space,omitempty" jsonschema:"Space UUID or exact user-facing name; blank selects Personal Space"`
+	ReminderID       string  `json:"reminder_id" jsonschema:"reminder UUID"`
+	Title            *string `json:"title,omitempty" jsonschema:"optional replacement title"`
+	Description      *string `json:"description,omitempty" jsonschema:"optional replacement details"`
+	ScheduledAt      string  `json:"scheduled_at,omitempty" jsonschema:"optional RFC3339 scheduled time"`
+	AssigneeMemberID *string `json:"assignee_member_id,omitempty" jsonschema:"optional assignee member UUID"`
+	ClearAssignee    bool    `json:"clear_assignee,omitempty" jsonschema:"remove the current assignee"`
+}
+
+type ReminderDeleteInput struct {
+	Space      string `json:"space,omitempty" jsonschema:"Space UUID or exact user-facing name; blank selects Personal Space"`
+	ReminderID string `json:"reminder_id" jsonschema:"reminder UUID"`
+}
+
 type ReminderOutput struct {
 	ID               string  `json:"id"`
 	SpaceID          string  `json:"space_id"`
@@ -129,6 +144,61 @@ func ReminderComplete(ctx context.Context, resolver interfaceidentity.Resolver, 
 	return reminderOutput(reminder), nil
 }
 
+func ReminderUpdate(ctx context.Context, resolver interfaceidentity.Resolver, service interfacereminder.ServiceReminderInterface, input ReminderUpdateInput) (ReminderOutput, error) {
+	actor, err := reminderActor(ctx, resolver, input.Space)
+	if err != nil {
+		return ReminderOutput{}, MapToolError(err)
+	}
+	reminderID := strings.TrimSpace(input.ReminderID)
+	if _, err := uuid.Parse(reminderID); err != nil {
+		return ReminderOutput{}, MapToolError(&serviceauthorization.ValidationError{Field: "reminder_id", Reason: "must be a valid UUID"})
+	}
+	if input.Title == nil && input.Description == nil && strings.TrimSpace(input.ScheduledAt) == "" && input.AssigneeMemberID == nil && !input.ClearAssignee {
+		return ReminderOutput{}, MapToolError(&serviceauthorization.ValidationError{Field: "update", Reason: "at least one field is required"})
+	}
+	scheduledAt, err := parseReminderTime(input.ScheduledAt, "scheduled_at", false)
+	if err != nil {
+		return ReminderOutput{}, MapToolError(err)
+	}
+	var assignee *string
+	if input.AssigneeMemberID != nil {
+		assignee, err = optionalReminderUUID(*input.AssigneeMemberID, "assignee_member_id")
+		if err != nil {
+			return ReminderOutput{}, MapToolError(err)
+		}
+	}
+	if service == nil {
+		return ReminderOutput{}, MapToolError(errors.New("reminder service is not configured"))
+	}
+	reminder, err := service.Update(ctx, actor, actor.SpaceID, reminderID, dto.ReminderUpdateInput{
+		Title: input.Title, Description: input.Description, ScheduledAt: scheduledAt,
+		AssigneeMemberID: assignee, ClearAssignee: input.ClearAssignee,
+	})
+	if err != nil {
+		return ReminderOutput{}, MapToolError(err)
+	}
+	return reminderOutput(reminder), nil
+}
+
+func ReminderDelete(ctx context.Context, resolver interfaceidentity.Resolver, service interfacereminder.ServiceReminderInterface, input ReminderDeleteInput) (ReminderOutput, error) {
+	actor, err := reminderActor(ctx, resolver, input.Space)
+	if err != nil {
+		return ReminderOutput{}, MapToolError(err)
+	}
+	reminderID := strings.TrimSpace(input.ReminderID)
+	if _, err := uuid.Parse(reminderID); err != nil {
+		return ReminderOutput{}, MapToolError(&serviceauthorization.ValidationError{Field: "reminder_id", Reason: "must be a valid UUID"})
+	}
+	if service == nil {
+		return ReminderOutput{}, MapToolError(errors.New("reminder service is not configured"))
+	}
+	reminder, err := service.Delete(ctx, actor, actor.SpaceID, reminderID)
+	if err != nil {
+		return ReminderOutput{}, MapToolError(err)
+	}
+	return reminderOutput(reminder), nil
+}
+
 func reminderActor(ctx context.Context, resolver interfaceidentity.Resolver, selector string) (domainidentity.ActorContext, error) {
 	actor, err := RequireActor(ctx, resolver)
 	if err != nil {
@@ -204,6 +274,18 @@ func registerReminderTools(server *mcpsdk.Server, service interfacereminder.Serv
 		Name: "reminder_complete", Description: "Complete an authorized Space reminder.",
 	}, func(ctx context.Context, _ *mcpsdk.CallToolRequest, input ReminderCompleteInput) (*mcpsdk.CallToolResult, ReminderOutput, error) {
 		output, err := ReminderComplete(ctx, resolver, service, input)
+		return nil, output, err
+	})
+	addTool(server, &mcpsdk.Tool{
+		Name: "reminder_update", Description: "Update a pending reminder in an authorized Space.",
+	}, func(ctx context.Context, _ *mcpsdk.CallToolRequest, input ReminderUpdateInput) (*mcpsdk.CallToolResult, ReminderOutput, error) {
+		output, err := ReminderUpdate(ctx, resolver, service, input)
+		return nil, output, err
+	})
+	addTool(server, &mcpsdk.Tool{
+		Name: "reminder_delete", Description: "Cancel and remove a reminder from an authorized Space.",
+	}, func(ctx context.Context, _ *mcpsdk.CallToolRequest, input ReminderDeleteInput) (*mcpsdk.CallToolResult, ReminderOutput, error) {
+		output, err := ReminderDelete(ctx, resolver, service, input)
 		return nil, output, err
 	})
 }

@@ -20,3 +20,11 @@ type ReminderListInput struct {
 	From   *time.Time
 	To     *time.Time
 }
+
+type ReminderUpdateInput struct {
+	Title            *string
+	Description      *string
+	ScheduledAt      *time.Time
+	AssigneeMemberID *string
+	ClearAssignee    bool
+}
