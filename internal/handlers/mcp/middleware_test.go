@@ -61,7 +61,6 @@ func TestMCPAuthMiddlewareRejectsUnauthenticatedRequests(t *testing.T) {
 		{name: "wrong bearer", header: "Bearer wrong", setup: func(*http.Request) {}},
 		{name: "wrong scheme", header: "Basic secret", setup: func(*http.Request) {}},
 		{name: "extra bearer token", header: "Bearer secret extra", setup: func(*http.Request) {}},
-		{name: "missing profile", header: "Bearer secret", setup: func(*http.Request) {}},
 	}
 
 	for _, tt := range tests {
@@ -92,6 +91,34 @@ func TestMCPAuthMiddlewareRejectsUnauthenticatedRequests(t *testing.T) {
 				t.Fatalf("expected invalid credentials/profile to skip resolver, calls=%d", resolver.resolveCall)
 			}
 		})
+	}
+}
+
+func TestMCPAuthMiddlewareAllowsServerAuthenticatedRequestsWithoutProfile(t *testing.T) {
+	middleware := NewAuthMiddleware(config.MCPConfig{
+		ServerKey:     "secret",
+		ProfileHeader: "X-Hermes-Profile",
+	})
+
+	var got ExternalRequest
+	handler := middleware.Handler(http.HandlerFunc(func(_ http.ResponseWriter, req *http.Request) {
+		var ok bool
+		got, ok = ExternalRequestFromContext(req.Context())
+		if !ok {
+			t.Error("expected trusted external request context")
+		}
+	}))
+
+	req := httptest.NewRequest(http.MethodPost, "/mcp", nil)
+	req.Header.Set("Authorization", "Bearer secret")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("server-authenticated request without profile status = %d, want %d", rec.Code, http.StatusOK)
+	}
+	if got.Provider != domainidentity.ProviderHermes || got.ExternalID != "" || got.Channel != "whatsapp" {
+		t.Fatalf("unexpected request context: %+v", got)
 	}
 }
 

@@ -8,10 +8,11 @@ import (
 )
 
 type MCPConfig struct {
-	Enabled       bool
-	Addr          string
-	ServerKey     string
-	ProfileHeader string
+	Enabled        bool
+	Addr           string
+	ServerKey      string
+	ProfileHeader  string
+	IdentitySecret string
 }
 
 func LoadMCPConfig() MCPConfig {
@@ -25,10 +26,11 @@ func LoadMCPConfig() MCPConfig {
 	}
 
 	return MCPConfig{
-		Enabled:       utils.GetEnv("MCP_ENABLED", false),
-		Addr:          addr,
-		ServerKey:     strings.TrimSpace(utils.GetEnv("MCP_SERVER_KEY", "")),
-		ProfileHeader: profileHeader,
+		Enabled:        utils.GetEnv("MCP_ENABLED", false),
+		Addr:           addr,
+		ServerKey:      strings.TrimSpace(utils.GetEnv("MCP_SERVER_KEY", "")),
+		ProfileHeader:  profileHeader,
+		IdentitySecret: strings.TrimSpace(utils.GetEnv("MCP_IDENTITY_SECRET", "")),
 	}
 }
 

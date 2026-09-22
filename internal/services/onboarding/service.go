@@ -87,7 +87,7 @@ func (s *Service) Register(ctx context.Context, input dto.AccountRegistrationInp
 		return dto.AccountRegistrationResult{}, s.fail(ctx, channel, provider, errors.New("role space_owner is not configured"))
 	}
 
-	registration := s.newRegistration(name, birthDate, provider, externalID, viewer.Id, owner.Id)
+	registration := s.newRegistration(name, birthDate, provider, externalID, whatsappPhone(provider, channel, externalID), viewer.Id, owner.Id)
 	if err := s.repository.Create(ctx, registration); err != nil {
 		if errors.Is(err, domainidentity.ErrIdentityConflict) {
 			winner, findErr := s.repository.FindByExternalIdentity(ctx, provider, externalID)
@@ -123,7 +123,7 @@ func parseBirthDate(raw string, now time.Time) (*time.Time, error) {
 	return &birthDate, nil
 }
 
-func (s *Service) newRegistration(name string, birthDate *time.Time, provider, externalID, viewerRoleID, ownerRoleID string) domainonboarding.Registration {
+func (s *Service) newRegistration(name string, birthDate *time.Time, provider, externalID, phone, viewerRoleID, ownerRoleID string) domainonboarding.Registration {
 	now := s.now().UTC()
 	userID := utils.CreateUUID()
 	spaceID := utils.CreateUUID()
@@ -132,6 +132,7 @@ func (s *Service) newRegistration(name string, birthDate *time.Time, provider, e
 		User: domainuser.Users{
 			Id:                    userID,
 			Name:                  name,
+			Phone:                 phone,
 			Role:                  utils.RoleViewer,
 			RoleId:                &viewerRoleID,
 			LoginProvider:         provider,
@@ -172,6 +173,30 @@ func (s *Service) newRegistration(name string, birthDate *time.Time, provider, e
 		},
 	}
 	return registration
+}
+
+func whatsappPhone(provider, channel, externalID string) string {
+	if provider != domainidentity.ProviderHermes {
+		return ""
+	}
+	channel = strings.ToLower(strings.TrimSpace(channel))
+	if channel != "whatsapp" && channel != "whatsapp_cloud" {
+		return ""
+	}
+	raw := strings.TrimSpace(strings.SplitN(externalID, "@", 2)[0])
+	if raw == "" {
+		return ""
+	}
+	for _, char := range raw {
+		if char < '0' || char > '9' {
+			return ""
+		}
+	}
+	phone := utils.NormalizePhoneTo62(raw)
+	if len(phone) < 9 || len(phone) > 15 {
+		return ""
+	}
+	return phone
 }
 
 func (s *Service) success(ctx context.Context, channel, provider, userID string) {

@@ -75,13 +75,13 @@ func selectorPermissions(resolver interfaceidentity.Resolver) interfaceidentity.
 }
 
 func registerSpaceTools(server *mcpsdk.Server, resolver interfaceidentity.Resolver, service interfacespace.ServiceSpaceInterface) {
-	mcpsdk.AddTool(server, &mcpsdk.Tool{
+	addTool(server, &mcpsdk.Tool{
 		Name: "space_list", Description: "List the authenticated user's active Spaces.",
 	}, func(ctx context.Context, _ *mcpsdk.CallToolRequest, _ struct{}) (*mcpsdk.CallToolResult, SpaceListOutput, error) {
 		output, err := SpaceList(ctx, resolver, service)
 		return nil, SpaceListOutput{Spaces: output}, err
 	})
-	mcpsdk.AddTool(server, &mcpsdk.Tool{
+	addTool(server, &mcpsdk.Tool{
 		Name: "space_get_members", Description: "List members of an authorized Space.",
 	}, func(ctx context.Context, _ *mcpsdk.CallToolRequest, input SpaceGetMembersInput) (*mcpsdk.CallToolResult, SpaceMembersOutput, error) {
 		output, err := SpaceGetMembers(ctx, resolver, service, input)

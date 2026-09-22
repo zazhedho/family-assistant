@@ -45,9 +45,11 @@ func (r *Repository) FindByExternalIdentity(ctx context.Context, provider, exter
 
 func (r *Repository) Create(ctx context.Context, registration domainonboarding.Registration) error {
 	err := r.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if err := tx.WithContext(ctx).
-			Omit("email", "phone", "password", "password_changed_at").
-			Create(&registration.User).Error; err != nil {
+		omit := []string{"email", "password", "password_changed_at"}
+		if strings.TrimSpace(registration.User.Phone) == "" {
+			omit = append(omit, "phone")
+		}
+		if err := tx.WithContext(ctx).Omit(omit...).Create(&registration.User).Error; err != nil {
 			return err
 		}
 		if err := tx.WithContext(ctx).Create(&registration.Space).Error; err != nil {

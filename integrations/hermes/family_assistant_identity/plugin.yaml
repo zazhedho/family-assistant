@@ -1,0 +1,12 @@
+name: family-assistant-identity
+version: "1.0.0"
+description: Sign the WhatsApp sender identity before Family Assistant MCP tool calls.
+author: Family Assistant
+requires_env:
+  - name: FAMILY_ASSISTANT_IDENTITY_SECRET
+    description: HMAC secret shared only with the Family Assistant MCP server.
+    secret: true
+provides_hooks:
+  - pre_gateway_dispatch
+provides_middleware:
+  - tool_request

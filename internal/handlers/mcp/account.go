@@ -43,7 +43,7 @@ func AccountRegister(ctx context.Context, registrar interfaceonboarding.ServiceO
 }
 
 func registerAccountTools(server *mcpsdk.Server, registrar interfaceonboarding.ServiceOnboardingInterface) {
-	mcpsdk.AddTool(server, &mcpsdk.Tool{
+	addTool(server, &mcpsdk.Tool{
 		Name:        "account_register",
 		Description: "Ask for the user's name and birth date in YYYY-MM-DD format. Explain that the birth date is used for age-policy validation, show a summary, obtain explicit confirmation, then call with consent=true.",
 	}, func(ctx context.Context, _ *mcpsdk.CallToolRequest, input AccountRegisterInput) (*mcpsdk.CallToolResult, AccountRegisterOutput, error) {

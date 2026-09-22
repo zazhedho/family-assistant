@@ -142,6 +142,50 @@ func TestCreateCommitsAllFourRecordsWithNullCredentials(t *testing.T) {
 	}
 }
 
+func TestCreatePersistsPhoneWhenProvided(t *testing.T) {
+	db, mock := newOnboardingMockDB(t)
+	repo := NewRepository(db)
+	registration := validRegistration()
+	registration.User.Phone = "628123456789"
+
+	mock.ExpectBegin()
+	mock.ExpectExec(`INSERT INTO "users" \("id","name","phone","role","role_id","email_verified_at","phone_verified_at","last_login_at","last_login_ip","last_login_user_agent","locked_until","login_provider","avatar_url","metadata","birth_date","age_verification_method","age_verified_at","created_at","updated_at","deleted_at"\)`).
+		WithArgs(
+			registration.User.Id,
+			registration.User.Name,
+			registration.User.Phone,
+			registration.User.Role,
+			registration.User.RoleId,
+			registration.User.EmailVerifiedAt,
+			registration.User.PhoneVerifiedAt,
+			registration.User.LastLoginAt,
+			registration.User.LastLoginIP,
+			registration.User.LastLoginUserAgent,
+			registration.User.LockedUntil,
+			registration.User.LoginProvider,
+			registration.User.AvatarURL,
+			"{}",
+			registration.User.BirthDate,
+			registration.User.AgeVerificationMethod,
+			registration.User.AgeVerifiedAt,
+			registration.User.CreatedAt,
+			sqlmock.AnyArg(),
+			nil,
+		).
+		WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectExec(`INSERT INTO "spaces"`).WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectExec(`INSERT INTO "space_members"`).WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectExec(`INSERT INTO "external_identities"`).WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectCommit()
+
+	if err := repo.Create(context.Background(), registration); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestCreateReturnsIdentityInsertErrorAndRollsBack(t *testing.T) {
 	db, mock := newOnboardingMockDB(t)
 	repo := NewRepository(db)

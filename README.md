@@ -186,12 +186,16 @@ go run .
 ### Local Hermes MCP wiring
 
 When Hermes runs on the same private network, enable the internal MCP endpoint
-with `MCP_ENABLED=true` and set a local-only `MCP_SERVER_KEY`. Hermes calls
-`/mcp` with:
+with `MCP_ENABLED=true` and set a local-only `MCP_SERVER_KEY`. For production
+WhatsApp identity, also set `MCP_IDENTITY_SECRET` and enable the standalone
+`integrations/hermes/family_assistant_identity` plugin. The plugin signs the
+sender identity; the MCP boundary rejects tool calls without a valid signature.
+
+Hermes calls `/mcp` with:
 
 ```text
 Authorization: Bearer <MCP_SERVER_KEY>
-X-Hermes-Profile: <stable profile id>
+X-Hermes-Profile: <profile fallback; signed plugin identity takes precedence>
 X-Hermes-Channel: whatsapp
 ```
 
@@ -215,8 +219,8 @@ registration is rejected. `identity_link` remains available for pre-existing
 HTTP or Google accounts.
 
 `identity_link` consumes a one-time code issued through the authenticated HTTP
-endpoint. `X-Hermes-Profile` is resolved dynamically to the linked user, and
-`X-Hermes-Channel` is retained for audit provenance. Space selectors accept an
+endpoint. The signed WhatsApp sender identity is resolved dynamically to the
+linked user, and `X-Hermes-Channel` is retained for audit provenance. Space selectors accept an
 authorized Space UUID or exact user-facing name; a blank selector uses the
 user's Personal Space. Every reminder operation re-authorizes the selected
 Space and resource.

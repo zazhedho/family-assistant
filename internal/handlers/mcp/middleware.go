@@ -61,6 +61,7 @@ func TrustedExternalRequestFromContext(ctx context.Context) (ExternalRequest, bo
 type AuthMiddleware struct {
 	serverKey     string
 	profileHeader string
+	identity      *IdentityVerifier
 }
 
 func NewAuthMiddleware(cfg config.MCPConfig) *AuthMiddleware {
@@ -71,6 +72,7 @@ func NewAuthMiddleware(cfg config.MCPConfig) *AuthMiddleware {
 	return &AuthMiddleware{
 		serverKey:     strings.TrimSpace(cfg.ServerKey),
 		profileHeader: profileHeader,
+		identity:      NewIdentityVerifier(cfg.IdentitySecret),
 	}
 }
 
@@ -87,18 +89,19 @@ func (m *AuthMiddleware) Handler(next http.Handler) http.Handler {
 		}
 
 		profileID := strings.TrimSpace(r.Header.Get(m.profileHeader))
-		if profileID == "" {
-			writeHTTPError(w, http.StatusUnauthorized, "authentication required")
-			return
-		}
-
 		channel := strings.TrimSpace(r.Header.Get("X-Hermes-Channel"))
 		if channel == "" {
 			channel = "whatsapp"
 		}
-		next.ServeHTTP(w, r.WithContext(WithExternalRequest(r.Context(), ExternalRequest{
+		// MCP connection setup (initialize/tools/list) has no chat sender context.
+		// Tool handlers enforce a non-empty external identity before account or
+		// protected operations, so an authenticated setup request may proceed
+		// without this per-message header.
+		ctx := WithExternalRequest(r.Context(), ExternalRequest{
 			Provider: domainidentity.ProviderHermes, ExternalID: profileID, Channel: channel,
-		})))
+		})
+		ctx = withIdentityVerifier(ctx, m.identity)
+		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
 

@@ -188,19 +188,19 @@ func reminderOutput(reminder *domainreminder.Reminder) ReminderOutput {
 }
 
 func registerReminderTools(server *mcpsdk.Server, service interfacereminder.ServiceReminderInterface, resolver interfaceidentity.Resolver) {
-	mcpsdk.AddTool(server, &mcpsdk.Tool{
+	addTool(server, &mcpsdk.Tool{
 		Name: "reminder_create", Description: "Create a reminder in an authorized Space.",
 	}, func(ctx context.Context, _ *mcpsdk.CallToolRequest, input ReminderCreateInput) (*mcpsdk.CallToolResult, ReminderOutput, error) {
 		output, err := ReminderCreate(ctx, resolver, service, input)
 		return nil, output, err
 	})
-	mcpsdk.AddTool(server, &mcpsdk.Tool{
+	addTool(server, &mcpsdk.Tool{
 		Name: "reminder_list", Description: "List reminders in an authorized Space.",
 	}, func(ctx context.Context, _ *mcpsdk.CallToolRequest, input ReminderListInput) (*mcpsdk.CallToolResult, ReminderListOutput, error) {
 		output, err := ReminderList(ctx, resolver, service, input)
 		return nil, ReminderListOutput{Reminders: output}, err
 	})
-	mcpsdk.AddTool(server, &mcpsdk.Tool{
+	addTool(server, &mcpsdk.Tool{
 		Name: "reminder_complete", Description: "Complete an authorized Space reminder.",
 	}, func(ctx context.Context, _ *mcpsdk.CallToolRequest, input ReminderCompleteInput) (*mcpsdk.CallToolResult, ReminderOutput, error) {
 		output, err := ReminderComplete(ctx, resolver, service, input)

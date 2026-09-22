@@ -142,6 +142,33 @@ func TestRegisterCreatesExternalOnlyAccountAndPersonalSpace(t *testing.T) {
 	}
 }
 
+func TestRegisterCopiesWhatsAppPhoneToUser(t *testing.T) {
+	h := newServiceHarness(t)
+	input := validInput()
+	input.ExternalID = "628123456789@s.whatsapp.net"
+
+	if _, err := h.service.Register(context.Background(), input); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	if got := h.repository.created.User.Phone; got != "628123456789" {
+		t.Fatalf("phone = %q, want normalized WhatsApp phone", got)
+	}
+}
+
+func TestRegisterDoesNotCopyNonWhatsAppIdentityToUserPhone(t *testing.T) {
+	h := newServiceHarness(t)
+	input := validInput()
+	input.Channel = "telegram"
+	input.ExternalID = "628123456789"
+
+	if _, err := h.service.Register(context.Background(), input); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	if got := h.repository.created.User.Phone; got != "" {
+		t.Fatalf("phone = %q, want empty for non-WhatsApp identity", got)
+	}
+}
+
 func TestRegisterReturnsExistingWithoutCreating(t *testing.T) {
 	h := newServiceHarness(t)
 	h.repository.found = domainonboarding.AccountRef{UserID: "user-1", SpaceID: "space-1"}

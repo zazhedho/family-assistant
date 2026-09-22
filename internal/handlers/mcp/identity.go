@@ -48,7 +48,7 @@ func IdentityLink(ctx context.Context, service interfaceidentity.LinkService, in
 }
 
 func registerIdentityTools(server *mcpsdk.Server, service interfaceidentity.LinkService) {
-	mcpsdk.AddTool(server, &mcpsdk.Tool{
+	addTool(server, &mcpsdk.Tool{
 		Name: "identity_link", Description: "Link this Hermes profile with a one-time identity code.",
 	}, func(ctx context.Context, _ *mcpsdk.CallToolRequest, input IdentityLinkInput) (*mcpsdk.CallToolResult, IdentityLinkOutput, error) {
 		output, err := IdentityLink(ctx, service, input)

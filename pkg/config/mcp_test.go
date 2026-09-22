@@ -6,7 +6,7 @@ import (
 )
 
 func TestLoadMCPConfigUsesSafeDefaults(t *testing.T) {
-	for _, key := range []string{"MCP_ENABLED", "MCP_ADDR", "MCP_SERVER_KEY", "MCP_PROFILE_HEADER"} {
+	for _, key := range []string{"MCP_ENABLED", "MCP_ADDR", "MCP_SERVER_KEY", "MCP_PROFILE_HEADER", "MCP_IDENTITY_SECRET"} {
 		t.Setenv(key, "")
 	}
 
@@ -22,6 +22,9 @@ func TestLoadMCPConfigUsesSafeDefaults(t *testing.T) {
 	}
 	if got.ProfileHeader != "X-Hermes-Profile" {
 		t.Fatalf("expected default profile header, got %q", got.ProfileHeader)
+	}
+	if got.IdentitySecret != "" {
+		t.Fatalf("expected no identity secret by default, got %q", got.IdentitySecret)
 	}
 }
 
@@ -49,9 +52,10 @@ func TestLoadMCPConfigUsesConfiguredValues(t *testing.T) {
 	t.Setenv("MCP_ADDR", "127.0.0.1:9090")
 	t.Setenv("MCP_SERVER_KEY", " mcp-secret ")
 	t.Setenv("MCP_PROFILE_HEADER", "X-Trusted-Profile")
+	t.Setenv("MCP_IDENTITY_SECRET", " identity-secret ")
 
 	got := LoadMCPConfig()
-	if !got.Enabled || got.Addr != "127.0.0.1:9090" || got.ServerKey != "mcp-secret" || got.ProfileHeader != "X-Trusted-Profile" {
+	if !got.Enabled || got.Addr != "127.0.0.1:9090" || got.ServerKey != "mcp-secret" || got.ProfileHeader != "X-Trusted-Profile" || got.IdentitySecret != "identity-secret" {
 		t.Fatalf("unexpected MCP config: %+v", got)
 	}
 }

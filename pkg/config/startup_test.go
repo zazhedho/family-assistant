@@ -184,6 +184,7 @@ func clearStartupEnv(t *testing.T) {
 		"MCP_ADDR",
 		"MCP_SERVER_KEY",
 		"MCP_PROFILE_HEADER",
+		"MCP_IDENTITY_SECRET",
 	} {
 		t.Setenv(key, "")
 	}

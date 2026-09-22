@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"time"
 
 	domainidentity "family-assistant/internal/domain/identity"
 	domainpermission "family-assistant/internal/domain/permission"
@@ -87,6 +88,7 @@ type mcpServerResponse struct {
 		IsError          bool            `json:"isError"`
 		Tools            []struct {
 			Name         string          `json:"name"`
+			InputSchema  json.RawMessage `json:"inputSchema"`
 			OutputSchema json.RawMessage `json:"outputSchema"`
 		} `json:"tools"`
 	} `json:"result,omitempty"`
@@ -251,7 +253,7 @@ func TestHTTPHandlerToolOutputSchemasUseHermesObjectRoot(t *testing.T) {
 	}
 }
 
-func TestHTTPHandlerAccountRegisterNeedsServerAuthenticationAndTrustedProfile(t *testing.T) {
+func TestHTTPHandlerAccountRegisterNeedsServerAuthenticationAndUsesTrustedProfileWhenProvided(t *testing.T) {
 	registrar := &registrarStub{result: dto.AccountRegistrationResult{Status: "created", UserID: "user-1", SpaceID: "space-1"}}
 	handler := NewHTTPHandler(config.MCPConfig{ServerKey: "secret"}, &resolverStub{err: serviceidentity.ErrUnauthenticated}, nil, registrar, nil, nil)
 	server := httptest.NewServer(handler)
@@ -265,17 +267,89 @@ func TestHTTPHandlerAccountRegisterNeedsServerAuthenticationAndTrustedProfile(t 
 	if status := mcpHTTPStatus(t, server.URL, "profile-1", "wrong", "tools/call", params); status != http.StatusUnauthorized {
 		t.Fatalf("wrong server key status = %d, want %d", status, http.StatusUnauthorized)
 	}
-	if status := mcpHTTPStatus(t, server.URL, "", "secret", "tools/call", params); status != http.StatusUnauthorized {
-		t.Fatalf("missing trusted profile status = %d, want %d", status, http.StatusUnauthorized)
-	}
-
 	initializeMCPServer(t, server.URL)
+	missingProfile := callMCPServer(t, server.URL, "", "secret", "tools/call", params)
+	if missingProfile.Error != nil || missingProfile.Result == nil || !missingProfile.Result.IsError ||
+		len(missingProfile.Result.Content) == 0 ||
+		!strings.Contains(missingProfile.Result.Content[0].Text, "authentication required") {
+		t.Fatalf("account_register without profile = %+v, want tool authentication error", missingProfile)
+	}
 	response := callMCPServer(t, server.URL, "profile-1", "secret", "tools/call", params)
 	if response.Error != nil || response.Result == nil || response.Result.IsError {
 		t.Fatalf("account_register failed without linked actor: %+v", response)
 	}
 	if registrar.calls != 1 || registrar.input.Provider != "hermes" || registrar.input.ExternalID != "profile-1" {
 		t.Fatalf("registrar input = %+v, calls = %d", registrar.input, registrar.calls)
+	}
+}
+
+func TestHTTPHandlerUsesSignedIdentityEnvelopeForToolCalls(t *testing.T) {
+	registrar := &registrarStub{result: dto.AccountRegistrationResult{Status: "created", UserID: "user-1", SpaceID: "space-1"}}
+	handler := NewHTTPHandler(config.MCPConfig{
+		ServerKey:      "server-secret",
+		IdentitySecret: "identity-secret",
+	}, &resolverStub{err: serviceidentity.ErrUnauthenticated}, nil, registrar, nil, nil)
+	server := httptest.NewServer(handler)
+	t.Cleanup(server.Close)
+
+	initialize := callMCPServer(t, server.URL, "stale-profile", "server-secret", "initialize", map[string]any{
+		"protocolVersion": "2025-11-25", "capabilities": map[string]any{},
+		"clientInfo": map[string]string{"name": "mcp-test", "version": "1"},
+	})
+	if initialize.Error != nil {
+		t.Fatalf("initialize error: %s", initialize.Error.Message)
+	}
+	tools := callMCPServer(t, server.URL, "stale-profile", "server-secret", "tools/list", map[string]any{})
+	if tools.Error != nil || tools.Result == nil {
+		t.Fatalf("tools/list error: %+v", tools)
+	}
+	for _, tool := range tools.Result.Tools {
+		if tool.Name == "account_register" && strings.Contains(string(tool.InputSchema), identityArgumentName) {
+			t.Fatalf("private identity argument leaked into account_register schema: %s", tool.InputSchema)
+		}
+	}
+	identity := newSignedIdentityEnvelope("identity-secret", time.Now())
+	response := callMCPServer(t, server.URL, "stale-profile", "server-secret", "tools/call", map[string]any{
+		"name": "account_register",
+		"arguments": map[string]any{
+			"name": "Jane Doe", "birth_date": "1990-05-20", "consent": true,
+			identityArgumentName: identity,
+		},
+	})
+	if response.Error != nil || response.Result == nil || response.Result.IsError {
+		t.Fatalf("signed identity response = %+v", response)
+	}
+	if registrar.calls != 1 || registrar.input.ExternalID != identity.ExternalID {
+		t.Fatalf("registrar input = %+v, calls = %d", registrar.input, registrar.calls)
+	}
+}
+
+func TestHTTPHandlerRejectsUnsignedToolCallWhenIdentitySecretConfigured(t *testing.T) {
+	registrar := &registrarStub{result: dto.AccountRegistrationResult{Status: "created", UserID: "user-1", SpaceID: "space-1"}}
+	handler := NewHTTPHandler(config.MCPConfig{
+		ServerKey:      "server-secret",
+		IdentitySecret: "identity-secret",
+	}, &resolverStub{err: serviceidentity.ErrUnauthenticated}, nil, registrar, nil, nil)
+	server := httptest.NewServer(handler)
+	t.Cleanup(server.Close)
+
+	initialize := callMCPServer(t, server.URL, "profile", "server-secret", "initialize", map[string]any{
+		"protocolVersion": "2025-11-25", "capabilities": map[string]any{},
+		"clientInfo": map[string]string{"name": "mcp-test", "version": "1"},
+	})
+	if initialize.Error != nil {
+		t.Fatalf("initialize error: %s", initialize.Error.Message)
+	}
+	response := callMCPServer(t, server.URL, "profile", "server-secret", "tools/call", map[string]any{
+		"name":      "account_register",
+		"arguments": map[string]any{"name": "Jane Doe", "birth_date": "1990-05-20", "consent": true},
+	})
+	if response.Error != nil || response.Result == nil || !response.Result.IsError || len(response.Result.Content) == 0 ||
+		!strings.Contains(response.Result.Content[0].Text, "authentication required") {
+		t.Fatalf("unsigned tool call = %+v, want authentication error", response)
+	}
+	if registrar.calls != 0 {
+		t.Fatalf("unsigned call reached registrar: %+v", registrar)
 	}
 }
 
