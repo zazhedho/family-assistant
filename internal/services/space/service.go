@@ -20,10 +20,14 @@ import (
 )
 
 const (
-	createPermission  = "spaces:create"
-	listPermission    = "spaces:list"
-	membersPermission = "members:list"
-	spaceOwnerRole    = "space_owner"
+	createPermission       = "spaces:create"
+	listPermission         = "spaces:list"
+	membersPermission      = "members:list"
+	updatePermission       = "spaces:update"
+	archivePermission      = "spaces:delete"
+	memberUpdatePermission = "members:update"
+	memberDeletePermission = "members:delete"
+	spaceOwnerRole         = "space_owner"
 )
 
 var (
@@ -258,6 +262,222 @@ func (s *service) Members(ctx context.Context, userID, spaceID string) ([]domain
 	}
 	s.writeSuccess(ctx, "list", spaceID, actorMembership.ID, userID, "Listed space members")
 	return members, nil
+}
+
+func (s *service) Update(ctx context.Context, userID, spaceID string, input dto.SpaceUpdateInput) (*domainspace.Space, error) {
+	actor, err := s.mutableSpaceMembership(ctx, userID, spaceID, updatePermission)
+	if err != nil {
+		return nil, err
+	}
+	if input.Name == nil && input.Category == nil {
+		err = &serviceauthorization.ValidationError{Field: "update", Reason: "at least one field is required"}
+		s.writeFailure(ctx, domainaudit.ActionUpdate, spaceID, actor.ID, userID, err)
+		return nil, err
+	}
+	fields := domainspace.SpaceUpdateFields{Name: input.Name, Category: input.Category}
+	if fields.Name != nil {
+		value := strings.TrimSpace(*fields.Name)
+		if value == "" {
+			err = &serviceauthorization.ValidationError{Field: "name", Reason: "is required"}
+			s.writeFailure(ctx, domainaudit.ActionUpdate, spaceID, actor.ID, userID, err)
+			return nil, err
+		}
+		fields.Name = &value
+	}
+	if fields.Category != nil {
+		value := strings.TrimSpace(*fields.Category)
+		if !validSharedCategory(value) {
+			err = &serviceauthorization.ValidationError{Field: "category", Reason: "must be one of family, friends, community, work, finance, custom"}
+			s.writeFailure(ctx, domainaudit.ActionUpdate, spaceID, actor.ID, userID, err)
+			return nil, err
+		}
+		fields.Category = &value
+	}
+	updatedAt := time.Now().UTC()
+	if err = s.spaces.Update(ctx, spaceID, fields, updatedAt); err != nil {
+		s.writeFailure(ctx, domainaudit.ActionUpdate, spaceID, actor.ID, userID, err)
+		return nil, err
+	}
+	updated := spaceFromMembership(actor)
+	if fields.Name != nil {
+		updated.Name = *fields.Name
+	}
+	if fields.Category != nil {
+		updated.Category = *fields.Category
+	}
+	s.writeSuccess(ctx, domainaudit.ActionUpdate, spaceID, actor.ID, userID, "Updated shared space")
+	return updated, nil
+}
+
+func (s *service) Archive(ctx context.Context, userID, spaceID string) (*domainspace.Space, error) {
+	actor, err := s.mutableSpaceMembership(ctx, userID, spaceID, archivePermission)
+	if err != nil {
+		return nil, err
+	}
+	archivedAt := time.Now().UTC()
+	if err = s.spaces.Archive(ctx, spaceID, archivedAt); err != nil {
+		s.writeFailure(ctx, domainaudit.ActionDelete, spaceID, actor.ID, userID, err)
+		return nil, err
+	}
+	archived := spaceFromMembership(actor)
+	archived.Status = domainspace.StatusArchived
+	s.writeSuccess(ctx, domainaudit.ActionDelete, spaceID, actor.ID, userID, "Archived shared space")
+	return archived, nil
+}
+
+func (s *service) UpdateMemberRole(ctx context.Context, userID, spaceID, memberID string, input dto.MemberRoleUpdateInput) (*domainspace.ResolvedMembership, error) {
+	actor, err := s.mutableSpaceMembership(ctx, userID, spaceID, memberUpdatePermission)
+	if err != nil {
+		return nil, err
+	}
+	memberID = strings.TrimSpace(memberID)
+	if memberID == "" {
+		err = &serviceauthorization.ValidationError{Field: "member_id", Reason: "is required"}
+		s.writeFailure(ctx, domainaudit.ActionUpdate, spaceID, actor.ID, userID, err)
+		return nil, err
+	}
+	roleName := strings.TrimSpace(input.Role)
+	if !validMemberRole(roleName) {
+		err = &serviceauthorization.ValidationError{Field: "role", Reason: "must be one of space_admin, space_member, space_viewer"}
+		s.writeFailure(ctx, domainaudit.ActionUpdate, spaceID, actor.ID, userID, err)
+		return nil, err
+	}
+	target, err := s.activeMember(ctx, spaceID, memberID)
+	if err != nil {
+		s.writeFailure(ctx, domainaudit.ActionUpdate, spaceID, actor.ID, userID, err)
+		return nil, err
+	}
+	if target.RoleName == spaceOwnerRole {
+		err = ErrForbidden
+		s.writeFailure(ctx, domainaudit.ActionUpdate, spaceID, actor.ID, userID, err)
+		return nil, err
+	}
+	if s.roles == nil {
+		err = errors.New("space role repository is not configured")
+		s.writeFailure(ctx, domainaudit.ActionUpdate, spaceID, actor.ID, userID, err)
+		return nil, err
+	}
+	role, roleErr := s.roles.GetByName(ctx, roleName)
+	if roleErr != nil {
+		s.writeFailure(ctx, domainaudit.ActionUpdate, spaceID, actor.ID, userID, roleErr)
+		return nil, roleErr
+	}
+	if strings.TrimSpace(role.Id) == "" {
+		err = errors.New("requested member role is not configured")
+		s.writeFailure(ctx, domainaudit.ActionUpdate, spaceID, actor.ID, userID, err)
+		return nil, err
+	}
+	if err = s.spaces.UpdateMemberRole(ctx, spaceID, memberID, role.Id, time.Now().UTC()); err != nil {
+		s.writeFailure(ctx, domainaudit.ActionUpdate, spaceID, actor.ID, userID, err)
+		return nil, err
+	}
+	updated := *target
+	updated.RoleID = role.Id
+	updated.RoleName = roleName
+	s.writeSuccess(ctx, domainaudit.ActionUpdate, spaceID, actor.ID, userID, "Updated Space member role")
+	return &updated, nil
+}
+
+func (s *service) RemoveMember(ctx context.Context, userID, spaceID, memberID string) (*domainspace.ResolvedMembership, error) {
+	actor, err := s.mutableSpaceMembership(ctx, userID, spaceID, memberDeletePermission)
+	if err != nil {
+		return nil, err
+	}
+	memberID = strings.TrimSpace(memberID)
+	if memberID == "" {
+		err = &serviceauthorization.ValidationError{Field: "member_id", Reason: "is required"}
+		s.writeFailure(ctx, domainaudit.ActionDelete, spaceID, actor.ID, userID, err)
+		return nil, err
+	}
+	target, err := s.activeMember(ctx, spaceID, memberID)
+	if err != nil {
+		s.writeFailure(ctx, domainaudit.ActionDelete, spaceID, actor.ID, userID, err)
+		return nil, err
+	}
+	if target.RoleName == spaceOwnerRole {
+		ownerCount, countErr := s.spaces.CountActiveOwners(ctx, spaceID)
+		if countErr != nil {
+			s.writeFailure(ctx, domainaudit.ActionDelete, spaceID, actor.ID, userID, countErr)
+			return nil, countErr
+		}
+		if ownerCount <= 1 {
+			err = ErrForbidden
+			s.writeFailure(ctx, domainaudit.ActionDelete, spaceID, actor.ID, userID, err)
+			return nil, err
+		}
+		err = ErrForbidden
+		s.writeFailure(ctx, domainaudit.ActionDelete, spaceID, actor.ID, userID, err)
+		return nil, err
+	}
+	if err = s.spaces.RemoveMember(ctx, spaceID, memberID, time.Now().UTC()); err != nil {
+		s.writeFailure(ctx, domainaudit.ActionDelete, spaceID, actor.ID, userID, err)
+		return nil, err
+	}
+	removed := *target
+	removed.Status = domainspace.StatusInactive
+	s.writeSuccess(ctx, domainaudit.ActionDelete, spaceID, actor.ID, userID, "Removed Space member")
+	return &removed, nil
+}
+
+func (s *service) mutableSpaceMembership(ctx context.Context, userID, spaceID, permission string) (*domainspace.ResolvedMembership, error) {
+	userID = strings.TrimSpace(userID)
+	spaceID = strings.TrimSpace(spaceID)
+	if userID == "" {
+		return nil, &serviceauthorization.ValidationError{Field: "user_id", Reason: "is required"}
+	}
+	if spaceID == "" {
+		return nil, &serviceauthorization.ValidationError{Field: "space_id", Reason: "is required"}
+	}
+	actor, err := s.spaces.FindActiveMembership(ctx, userID, spaceID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			err = ErrNotFound
+		}
+		return nil, err
+	}
+	if actor == nil {
+		return nil, ErrNotFound
+	}
+	if actor.SpaceType != domainspace.TypeShared {
+		return nil, &serviceauthorization.ValidationError{Field: "space", Reason: "personal Space cannot be changed"}
+	}
+	ok, err := s.hasPermission(ctx, actor.RoleID, permission)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		return nil, ErrForbidden
+	}
+	return actor, nil
+}
+
+func (s *service) activeMember(ctx context.Context, spaceID, memberID string) (*domainspace.ResolvedMembership, error) {
+	members, err := s.spaces.ListActiveMembers(ctx, spaceID)
+	if err != nil {
+		return nil, err
+	}
+	for i := range members {
+		if members[i].ID == memberID {
+			return &members[i], nil
+		}
+	}
+	return nil, ErrNotFound
+}
+
+func validMemberRole(role string) bool {
+	switch role {
+	case "space_admin", "space_member", "space_viewer":
+		return true
+	default:
+		return false
+	}
+}
+
+func spaceFromMembership(membership *domainspace.ResolvedMembership) *domainspace.Space {
+	return &domainspace.Space{
+		ID: membership.SpaceID, Name: membership.SpaceName, Type: membership.SpaceType,
+		Category: membership.SpaceCategory, Status: domainspace.StatusActive, CreatedAt: time.Time{},
+	}
 }
 
 func (s *service) hasPermission(ctx context.Context, roleID, permission string) (bool, error) {

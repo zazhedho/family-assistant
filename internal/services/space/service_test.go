@@ -5,6 +5,7 @@ import (
 	"errors"
 	"reflect"
 	"testing"
+	"time"
 
 	"family-assistant/internal/authscope"
 	domainaudit "family-assistant/internal/domain/audit"
@@ -21,19 +22,31 @@ import (
 var _ interfacespace.ServiceSpaceInterface = (*service)(nil)
 
 type spaceRepositoryStub struct {
-	memberships []domainspace.ResolvedMembership
-	membership  *domainspace.ResolvedMembership
-	listed      []domainspace.ResolvedMembership
-	createErr   error
-	listErr     error
-	findErr     error
-	membersErr  error
-	created     *domainspace.Space
-	owner       *domainspace.Member
-	listUserID  string
-	findUserID  string
-	findSpaceID string
-	memberSpace string
+	memberships     []domainspace.ResolvedMembership
+	membership      *domainspace.ResolvedMembership
+	listed          []domainspace.ResolvedMembership
+	createErr       error
+	listErr         error
+	findErr         error
+	membersErr      error
+	created         *domainspace.Space
+	owner           *domainspace.Member
+	listUserID      string
+	findUserID      string
+	findSpaceID     string
+	memberSpace     string
+	updatedSpaceID  string
+	updatedFields   domainspace.SpaceUpdateFields
+	updateErr       error
+	archivedSpaceID string
+	archiveErr      error
+	updatedMemberID string
+	updatedRoleID   string
+	updateMemberErr error
+	removedMemberID string
+	removeErr       error
+	ownerCount      int64
+	ownerCountErr   error
 }
 
 func (s *spaceRepositoryStub) CreateWithOwner(_ context.Context, space *domainspace.Space, member *domainspace.Member) error {
@@ -82,6 +95,30 @@ func (s *spaceRepositoryStub) ListActiveMembers(_ context.Context, spaceID strin
 		return nil, s.membersErr
 	}
 	return append([]domainspace.ResolvedMembership(nil), s.listed...), nil
+}
+
+func (s *spaceRepositoryStub) Update(_ context.Context, spaceID string, fields domainspace.SpaceUpdateFields, _ time.Time) error {
+	s.updatedSpaceID, s.updatedFields = spaceID, fields
+	return s.updateErr
+}
+
+func (s *spaceRepositoryStub) Archive(_ context.Context, spaceID string, _ time.Time) error {
+	s.archivedSpaceID = spaceID
+	return s.archiveErr
+}
+
+func (s *spaceRepositoryStub) UpdateMemberRole(_ context.Context, _, memberID, roleID string, _ time.Time) error {
+	s.updatedMemberID, s.updatedRoleID = memberID, roleID
+	return s.updateMemberErr
+}
+
+func (s *spaceRepositoryStub) RemoveMember(_ context.Context, _, memberID string, _ time.Time) error {
+	s.removedMemberID = memberID
+	return s.removeErr
+}
+
+func (s *spaceRepositoryStub) CountActiveOwners(context.Context, string) (int64, error) {
+	return s.ownerCount, s.ownerCountErr
 }
 
 type roleRepositoryStub struct {
@@ -381,6 +418,147 @@ func TestMembersListsMembersAfterActiveCallerAuthorization(t *testing.T) {
 	}
 	if repo.findUserID != "user-1" || repo.findSpaceID != "space-1" || repo.memberSpace != "space-1" || len(got) != 1 || len(audit.events) != 1 || audit.events[0].Status != domainaudit.StatusSuccess {
 		t.Fatalf("unexpected member lookup: %+v", got)
+	}
+}
+
+func sharedSpaceMembership(roleID, spaceID, userID string) domainspace.ResolvedMembership {
+	return domainspace.ResolvedMembership{
+		ID: "member-" + userID, SpaceID: spaceID, SpaceName: "Trading", SpaceType: domainspace.TypeShared,
+		SpaceCategory: domainspace.CategoryFinance, UserID: userID, RoleID: roleID, RoleName: roleID, Status: domainspace.StatusActive,
+	}
+}
+
+func TestUpdateSharedSpaceAppliesNamePatch(t *testing.T) {
+	name := "Household"
+	repo := &spaceRepositoryStub{membership: func() *domainspace.ResolvedMembership {
+		m := sharedSpaceMembership("role-admin", "space-1", "user-1")
+		return &m
+	}()}
+	service := newSpaceService(repo, map[string][]domainpermission.Permission{
+		"role-admin": {permission("spaces", "update")},
+	}, &spaceAuditStub{}).(*service)
+
+	updated, err := service.Update(context.Background(), "user-1", "space-1", dto.SpaceUpdateInput{Name: &name})
+	if err != nil {
+		t.Fatalf("update space: %v", err)
+	}
+	if updated == nil || updated.Name != name || updated.Category != domainspace.CategoryFinance || updated.Status != domainspace.StatusActive {
+		t.Fatalf("unexpected updated space: %+v", updated)
+	}
+	if repo.updatedSpaceID != "space-1" || repo.updatedFields.Name == nil || *repo.updatedFields.Name != name {
+		t.Fatalf("unexpected repository update: %+v", repo)
+	}
+}
+
+func TestUpdateRejectsPersonalSpace(t *testing.T) {
+	repo := &spaceRepositoryStub{membership: func() *domainspace.ResolvedMembership {
+		m := membership("role-owner", "personal", "user-1")
+		m.SpaceType = domainspace.TypePersonal
+		return &m
+	}()}
+	service := newSpaceService(repo, map[string][]domainpermission.Permission{
+		"role-owner": {permission("spaces", "update")},
+	}, &spaceAuditStub{}).(*service)
+
+	_, err := service.Update(context.Background(), "user-1", "personal", dto.SpaceUpdateInput{Name: func() *string { value := "Nope"; return &value }()})
+	var validationErr *serviceauthorization.ValidationError
+	if !errors.As(err, &validationErr) || validationErr.Field != "space" {
+		t.Fatalf("expected personal-space validation error, got %v", err)
+	}
+	if repo.updatedSpaceID != "" {
+		t.Fatal("personal space reached repository update")
+	}
+}
+
+func TestArchiveSharedSpaceSetsArchivedState(t *testing.T) {
+	repo := &spaceRepositoryStub{membership: func() *domainspace.ResolvedMembership {
+		m := sharedSpaceMembership("role-owner", "space-1", "user-1")
+		return &m
+	}()}
+	service := newSpaceService(repo, map[string][]domainpermission.Permission{
+		"role-owner": {permission("spaces", "delete")},
+	}, &spaceAuditStub{}).(*service)
+
+	archived, err := service.Archive(context.Background(), "user-1", "space-1")
+	if err != nil {
+		t.Fatalf("archive space: %v", err)
+	}
+	if archived == nil || archived.Status != domainspace.StatusArchived || repo.archivedSpaceID != "space-1" {
+		t.Fatalf("unexpected archive: space=%+v repo=%+v", archived, repo)
+	}
+}
+
+func TestUpdateMemberRoleRejectsOwnerDemotion(t *testing.T) {
+	actor := sharedSpaceMembership("role-admin", "space-1", "user-1")
+	target := sharedSpaceMembership("role-owner", "space-1", "user-2")
+	target.ID = "member-owner"
+	target.RoleName = spaceOwnerRole
+	repo := &spaceRepositoryStub{membership: &actor, listed: []domainspace.ResolvedMembership{target}}
+	service := newSpaceService(repo, map[string][]domainpermission.Permission{
+		"role-admin": {permission("members", "update")},
+	}, &spaceAuditStub{}).(*service)
+
+	_, err := service.UpdateMemberRole(context.Background(), "user-1", "space-1", "member-owner", dto.MemberRoleUpdateInput{Role: "space_member"})
+	if !errors.Is(err, ErrForbidden) {
+		t.Fatalf("expected owner protection, got %v", err)
+	}
+	if repo.updatedMemberID != "" {
+		t.Fatal("owner demotion reached repository")
+	}
+}
+
+func TestUpdateMemberRoleAcceptsAllowedRole(t *testing.T) {
+	actor := sharedSpaceMembership("role-admin", "space-1", "user-1")
+	target := sharedSpaceMembership("role-member", "space-1", "user-2")
+	target.ID = "member-2"
+	repo := &spaceRepositoryStub{membership: &actor, listed: []domainspace.ResolvedMembership{target}}
+	roles := &roleRepositoryStub{role: domainrole.Role{Id: "role-viewer", Name: "space_viewer"}}
+	service := NewService(repo, roles, &permissionRepositoryStub{byRole: map[string][]domainpermission.Permission{
+		"role-admin": {permission("members", "update")},
+	}}, &spaceAuditStub{}).(*service)
+
+	updated, err := service.UpdateMemberRole(context.Background(), "user-1", "space-1", "member-2", dto.MemberRoleUpdateInput{Role: "space_viewer"})
+	if err != nil {
+		t.Fatalf("update member role: %v", err)
+	}
+	if updated == nil || updated.RoleName != "space_viewer" || updated.RoleID != "role-viewer" || repo.updatedMemberID != "member-2" {
+		t.Fatalf("unexpected role update: member=%+v repo=%+v", updated, repo)
+	}
+}
+
+func TestRemoveMemberRejectsLastOwner(t *testing.T) {
+	actor := sharedSpaceMembership("role-admin", "space-1", "user-1")
+	target := sharedSpaceMembership("space_owner", "space-1", "user-2")
+	target.ID = "member-owner"
+	repo := &spaceRepositoryStub{membership: &actor, listed: []domainspace.ResolvedMembership{target}, ownerCount: 1}
+	service := newSpaceService(repo, map[string][]domainpermission.Permission{
+		"role-admin": {permission("members", "delete")},
+	}, &spaceAuditStub{}).(*service)
+
+	_, err := service.RemoveMember(context.Background(), "user-1", "space-1", "member-owner")
+	if !errors.Is(err, ErrForbidden) {
+		t.Fatalf("expected last-owner protection, got %v", err)
+	}
+	if repo.removedMemberID != "" {
+		t.Fatal("last owner reached repository")
+	}
+}
+
+func TestRemoveMemberDeactivatesNonOwner(t *testing.T) {
+	actor := sharedSpaceMembership("role-admin", "space-1", "user-1")
+	target := sharedSpaceMembership("space_member", "space-1", "user-2")
+	target.ID = "member-2"
+	repo := &spaceRepositoryStub{membership: &actor, listed: []domainspace.ResolvedMembership{target}, ownerCount: 1}
+	service := newSpaceService(repo, map[string][]domainpermission.Permission{
+		"role-admin": {permission("members", "delete")},
+	}, &spaceAuditStub{}).(*service)
+
+	removed, err := service.RemoveMember(context.Background(), "user-1", "space-1", "member-2")
+	if err != nil {
+		t.Fatalf("remove member: %v", err)
+	}
+	if removed == nil || removed.Status != domainspace.StatusInactive || repo.removedMemberID != "member-2" {
+		t.Fatalf("unexpected removal: member=%+v repo=%+v", removed, repo)
 	}
 }
 

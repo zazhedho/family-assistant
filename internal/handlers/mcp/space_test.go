@@ -17,6 +17,8 @@ type mcpSpaceServiceStub struct {
 	spaces       []domainspace.ResolvedMembership
 	members      []domainspace.ResolvedMembership
 	created      *domainspace.Space
+	space        *domainspace.Space
+	member       *domainspace.ResolvedMembership
 	createErr    error
 	createUserID string
 	createInput  dto.SpaceCreateInput
@@ -28,6 +30,22 @@ type mcpSpaceServiceStub struct {
 	membersSpace string
 	listCalls    int
 	membersCalls int
+	updateCalls  int
+	updateUser   string
+	updateSpace  string
+	updateInput  dto.SpaceUpdateInput
+	archiveCalls int
+	archiveUser  string
+	archiveSpace string
+	roleCalls    int
+	roleUser     string
+	roleSpace    string
+	roleMember   string
+	roleName     string
+	removeCalls  int
+	removeUser   string
+	removeSpace  string
+	removeMember string
 }
 
 func (s *mcpSpaceServiceStub) List(_ context.Context, userID string) ([]domainspace.ResolvedMembership, error) {
@@ -47,6 +65,30 @@ func (s *mcpSpaceServiceStub) Members(_ context.Context, userID, spaceID string)
 	s.membersCalls++
 	s.membersUser, s.membersSpace = userID, spaceID
 	return s.members, s.membersErr
+}
+
+func (s *mcpSpaceServiceStub) Update(_ context.Context, userID, spaceID string, input dto.SpaceUpdateInput) (*domainspace.Space, error) {
+	s.updateCalls++
+	s.updateUser, s.updateSpace, s.updateInput = userID, spaceID, input
+	return s.space, nil
+}
+
+func (s *mcpSpaceServiceStub) Archive(_ context.Context, userID, spaceID string) (*domainspace.Space, error) {
+	s.archiveCalls++
+	s.archiveUser, s.archiveSpace = userID, spaceID
+	return s.space, nil
+}
+
+func (s *mcpSpaceServiceStub) UpdateMemberRole(_ context.Context, userID, spaceID, memberID string, input dto.MemberRoleUpdateInput) (*domainspace.ResolvedMembership, error) {
+	s.roleCalls++
+	s.roleUser, s.roleSpace, s.roleMember, s.roleName = userID, spaceID, memberID, input.Role
+	return s.member, nil
+}
+
+func (s *mcpSpaceServiceStub) RemoveMember(_ context.Context, userID, spaceID, memberID string) (*domainspace.ResolvedMembership, error) {
+	s.removeCalls++
+	s.removeUser, s.removeSpace, s.removeMember = userID, spaceID, memberID
+	return s.member, nil
 }
 
 type mcpExternalResolverStub struct {
@@ -155,6 +197,85 @@ func TestSpaceGetMembersMapsAmbiguousNameToInvalidInput(t *testing.T) {
 	}
 	if service.membersCalls != 0 {
 		t.Fatal("ambiguous Space name reached service")
+	}
+}
+
+func TestSpaceUpdateSelectsSpaceAndPassesPatch(t *testing.T) {
+	spaceID := "00000000-0000-0000-0000-000000000001"
+	name := "Household"
+	resolver := &mcpExternalResolverStub{
+		actor: domainidentity.ActorContext{UserID: "user-1", Memberships: []domainspace.ResolvedMembership{
+			mcpMembership("member-1", spaceID, "Trading", domainspace.TypeShared, "role-admin"),
+		}},
+		permissions: []domainpermission.Permission{{Resource: "spaces", Action: "update"}},
+	}
+	service := &mcpSpaceServiceStub{space: &domainspace.Space{ID: spaceID}}
+
+	updated, err := SpaceUpdate(mcpExternalContext(), resolver, service, SpaceUpdateInput{Space: spaceID, Name: &name})
+	if err != nil {
+		t.Fatalf("space_update: %v", err)
+	}
+	if updated == nil || service.updateCalls != 1 || service.updateUser != "user-1" || service.updateSpace != spaceID || service.updateInput.Name == nil || *service.updateInput.Name != name {
+		t.Fatalf("unexpected update: result=%+v service=%+v", updated, service)
+	}
+}
+
+func TestSpaceArchiveSelectsSpace(t *testing.T) {
+	spaceID := "00000000-0000-0000-0000-000000000001"
+	resolver := &mcpExternalResolverStub{
+		actor: domainidentity.ActorContext{UserID: "user-1", Memberships: []domainspace.ResolvedMembership{
+			mcpMembership("member-1", spaceID, "Trading", domainspace.TypeShared, "role-owner"),
+		}},
+		permissions: []domainpermission.Permission{{Resource: "spaces", Action: "delete"}},
+	}
+	service := &mcpSpaceServiceStub{space: &domainspace.Space{ID: spaceID}}
+
+	archived, err := SpaceArchive(mcpExternalContext(), resolver, service, SpaceArchiveInput{Space: spaceID})
+	if err != nil {
+		t.Fatalf("space_archive: %v", err)
+	}
+	if archived == nil || service.archiveCalls != 1 || service.archiveUser != "user-1" || service.archiveSpace != spaceID {
+		t.Fatalf("unexpected archive: result=%+v service=%+v", archived, service)
+	}
+}
+
+func TestMemberUpdateRoleValidatesMemberUUIDAndPassesRole(t *testing.T) {
+	spaceID := "00000000-0000-0000-0000-000000000001"
+	memberID := "00000000-0000-0000-0000-000000000002"
+	resolver := &mcpExternalResolverStub{
+		actor: domainidentity.ActorContext{UserID: "user-1", Memberships: []domainspace.ResolvedMembership{
+			mcpMembership("actor-member", spaceID, "Trading", domainspace.TypeShared, "role-admin"),
+		}},
+		permissions: []domainpermission.Permission{{Resource: "members", Action: "update"}},
+	}
+	service := &mcpSpaceServiceStub{member: &domainspace.ResolvedMembership{ID: memberID}}
+
+	updated, err := MemberUpdateRole(mcpExternalContext(), resolver, service, MemberUpdateRoleInput{Space: spaceID, MemberID: memberID, Role: "space_viewer"})
+	if err != nil {
+		t.Fatalf("member_update_role: %v", err)
+	}
+	if updated == nil || service.roleCalls != 1 || service.roleUser != "user-1" || service.roleSpace != spaceID || service.roleMember != memberID || service.roleName != "space_viewer" {
+		t.Fatalf("unexpected role update: result=%+v service=%+v", updated, service)
+	}
+}
+
+func TestMemberRemovePassesSelectedSpaceAndMember(t *testing.T) {
+	spaceID := "00000000-0000-0000-0000-000000000001"
+	memberID := "00000000-0000-0000-0000-000000000002"
+	resolver := &mcpExternalResolverStub{
+		actor: domainidentity.ActorContext{UserID: "user-1", Memberships: []domainspace.ResolvedMembership{
+			mcpMembership("actor-member", spaceID, "Trading", domainspace.TypeShared, "role-admin"),
+		}},
+		permissions: []domainpermission.Permission{{Resource: "members", Action: "delete"}},
+	}
+	service := &mcpSpaceServiceStub{member: &domainspace.ResolvedMembership{ID: memberID}}
+
+	removed, err := MemberRemove(mcpExternalContext(), resolver, service, MemberRemoveInput{Space: spaceID, MemberID: memberID})
+	if err != nil {
+		t.Fatalf("member_remove: %v", err)
+	}
+	if removed == nil || service.removeCalls != 1 || service.removeUser != "user-1" || service.removeSpace != spaceID || service.removeMember != memberID {
+		t.Fatalf("unexpected member removal: result=%+v service=%+v", removed, service)
 	}
 }
 

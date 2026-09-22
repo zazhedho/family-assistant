@@ -239,7 +239,7 @@ func TestHTTPHandlerExposesOnlyCurrentMCPToolsWhenRemindersAreAbsent(t *testing.
 		got = append(got, tool.Name)
 	}
 	sort.Strings(got)
-	want := []string{"account_register", "activity_create", "activity_delete", "activity_list", "activity_update", "identity_link", "invitation_accept", "invitation_create", "reminder_complete", "reminder_create", "reminder_delete", "reminder_list", "reminder_update", "space_create", "space_get_members", "space_list"}
+	want := []string{"account_register", "activity_create", "activity_delete", "activity_list", "activity_update", "identity_link", "invitation_accept", "invitation_create", "member_remove", "member_update_role", "reminder_complete", "reminder_create", "reminder_delete", "reminder_list", "reminder_update", "space_archive", "space_create", "space_get_members", "space_list", "space_update"}
 	if strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Fatalf("tools = %v, want %v", got, want)
 	}

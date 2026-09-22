@@ -73,6 +73,22 @@ func (s *spaceServiceStub) Members(_ context.Context, userID, spaceID string) ([
 	return s.members, s.membersErr
 }
 
+func (s *spaceServiceStub) Update(context.Context, string, string, dto.SpaceUpdateInput) (*domainspace.Space, error) {
+	return s.space, s.createErr
+}
+
+func (s *spaceServiceStub) Archive(context.Context, string, string) (*domainspace.Space, error) {
+	return s.space, s.createErr
+}
+
+func (s *spaceServiceStub) UpdateMemberRole(context.Context, string, string, string, dto.MemberRoleUpdateInput) (*domainspace.ResolvedMembership, error) {
+	return nil, s.createErr
+}
+
+func (s *spaceServiceStub) RemoveMember(context.Context, string, string, string) (*domainspace.ResolvedMembership, error) {
+	return nil, s.createErr
+}
+
 func performSpaceRequest(method, routePath, requestPath, body string, scope authscope.Scope, handler gin.HandlerFunc) *httptest.ResponseRecorder {
 	return performSpaceRequestWithMeta(method, routePath, requestPath, body, scope, "", "", handler)
 }

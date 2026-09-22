@@ -39,6 +39,11 @@ type Space struct {
 	DeletedAt       gorm.DeletedAt `json:"-" gorm:"column:deleted_at"`
 }
 
+type SpaceUpdateFields struct {
+	Name     *string
+	Category *string
+}
+
 func (Member) TableName() string {
 	return "space_members"
 }

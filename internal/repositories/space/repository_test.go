@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	domainspace "family-assistant/internal/domain/space"
 	interfacespace "family-assistant/internal/interfaces/space"
@@ -249,6 +250,95 @@ func TestListActiveMembersFiltersDeletedAndInactiveRows(t *testing.T) {
 	}
 	if len(got) != 1 || got[0].UserID != "user-1" || got[0].RoleID != "role-1" {
 		t.Fatalf("unexpected members: %#v", got)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestUpdateScopesActiveSharedSpaceAndWritesOnlyPatch(t *testing.T) {
+	db, mock := newSpaceMockDB(t)
+	repo := &Repository{DB: db}
+	name := "Updated"
+	now := time.Date(2026, 9, 22, 10, 0, 0, 0, time.UTC)
+
+	mock.ExpectExec(`UPDATE "spaces" SET "name"=\$1,"updated_at"=\$2 WHERE \(id = \$3 AND status = \$4 AND deleted_at IS NULL\) AND "spaces"\."deleted_at" IS NULL`).
+		WithArgs(name, now, "space-1", domainspace.StatusActive).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+
+	if err := repo.Update(context.Background(), "space-1", domainspace.SpaceUpdateFields{Name: &name}, now); err != nil {
+		t.Fatalf("update space: %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestArchiveSetsArchivedStatusAndDeletedAt(t *testing.T) {
+	db, mock := newSpaceMockDB(t)
+	repo := &Repository{DB: db}
+	now := time.Date(2026, 9, 22, 10, 0, 0, 0, time.UTC)
+
+	mock.ExpectExec(`UPDATE "spaces" SET "deleted_at"=\$1,"status"=\$2,"updated_at"=\$3 WHERE \(id = \$4 AND status = \$5 AND deleted_at IS NULL\) AND "spaces"\."deleted_at" IS NULL`).
+		WithArgs(now, domainspace.StatusArchived, now, "space-1", domainspace.StatusActive).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+
+	if err := repo.Archive(context.Background(), "space-1", now); err != nil {
+		t.Fatalf("archive space: %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestUpdateMemberRoleScopesActiveMembership(t *testing.T) {
+	db, mock := newSpaceMockDB(t)
+	repo := &Repository{DB: db}
+	now := time.Date(2026, 9, 22, 10, 0, 0, 0, time.UTC)
+
+	mock.ExpectExec(`UPDATE "space_members" SET "role_id"=\$1,"updated_at"=\$2 WHERE \(id = \$3 AND space_id = \$4 AND status = \$5 AND deleted_at IS NULL\) AND "space_members"\."deleted_at" IS NULL`).
+		WithArgs("role-member", now, "member-2", "space-1", domainspace.StatusActive).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+
+	if err := repo.UpdateMemberRole(context.Background(), "space-1", "member-2", "role-member", now); err != nil {
+		t.Fatalf("update member role: %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestRemoveMemberSetsInactiveAndDeletedAt(t *testing.T) {
+	db, mock := newSpaceMockDB(t)
+	repo := &Repository{DB: db}
+	now := time.Date(2026, 9, 22, 10, 0, 0, 0, time.UTC)
+
+	mock.ExpectExec(`UPDATE "space_members" SET "deleted_at"=\$1,"status"=\$2,"updated_at"=\$3 WHERE \(id = \$4 AND space_id = \$5 AND status = \$6 AND deleted_at IS NULL\) AND "space_members"\."deleted_at" IS NULL`).
+		WithArgs(now, domainspace.StatusInactive, now, "member-2", "space-1", domainspace.StatusActive).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+
+	if err := repo.RemoveMember(context.Background(), "space-1", "member-2", now); err != nil {
+		t.Fatalf("remove member: %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestCountActiveOwnersScopesSpace(t *testing.T) {
+	db, mock := newSpaceMockDB(t)
+	repo := &Repository{DB: db}
+
+	mock.ExpectQuery(`SELECT count\(\*\) FROM space_members sm JOIN roles r ON r\.id = sm\.role_id WHERE sm\.space_id = \$1 AND r\.name = \$2 AND sm\.status = \$3 AND sm\.deleted_at IS NULL AND r\.deleted_at IS NULL`).
+		WithArgs("space-1", "space_owner", domainspace.StatusActive).
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
+
+	count, err := repo.CountActiveOwners(context.Background(), "space-1")
+	if err != nil {
+		t.Fatalf("count owners: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("owner count = %d, want 1", count)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)
