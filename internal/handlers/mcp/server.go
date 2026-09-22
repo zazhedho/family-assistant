@@ -37,7 +37,7 @@ func NewHTTPHandler(cfg config.MCPConfig, resolver interfaceidentity.Resolver, l
 		Version: "1.0.0",
 	}, nil)
 
-	registerIdentityTools(sdkServer, linkService)
+	registerIdentityTools(sdkServer, resolver, linkService)
 	registerAccountTools(sdkServer, accountRegistrar)
 	registerSpaceTools(sdkServer, resolver, spaceService)
 	registerReminderTools(sdkServer, reminderService, resolver)
