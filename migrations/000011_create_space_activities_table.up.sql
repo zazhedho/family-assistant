@@ -29,7 +29,9 @@ ON CONFLICT (name) DO UPDATE SET
 
 INSERT INTO permissions (id, name, display_name, resource, action) VALUES
     ('33333333-3333-4333-8333-000000000011', 'list_activities', 'List Activities', 'activities', 'list'),
-    ('33333333-3333-4333-8333-000000000012', 'create_activities', 'Create Activities', 'activities', 'create')
+    ('33333333-3333-4333-8333-000000000012', 'create_activities', 'Create Activities', 'activities', 'create'),
+    ('33333333-3333-4333-8333-000000000020', 'update_activities', 'Update Activities', 'activities', 'update'),
+    ('33333333-3333-4333-8333-000000000021', 'delete_activities', 'Delete Activities', 'activities', 'delete')
 ON CONFLICT (name) DO UPDATE SET
     display_name = EXCLUDED.display_name,
     resource = EXCLUDED.resource,
@@ -40,7 +42,7 @@ ON CONFLICT (name) DO UPDATE SET
 INSERT INTO role_permissions (id, role_id, permission_id)
 SELECT md5('space-rbac:' || r.name || ':' || p.name)::uuid, r.id, p.id
 FROM roles r
-JOIN permissions p ON p.resource = 'activities' AND p.name IN ('list_activities', 'create_activities') AND p.deleted_at IS NULL
+JOIN permissions p ON p.resource = 'activities' AND p.name IN ('list_activities', 'create_activities', 'update_activities', 'delete_activities') AND p.deleted_at IS NULL
 WHERE r.name IN ('space_owner', 'space_admin', 'space_member') AND r.deleted_at IS NULL
 ON CONFLICT DO NOTHING;
 

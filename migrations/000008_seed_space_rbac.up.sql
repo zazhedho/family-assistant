@@ -27,7 +27,9 @@ ON CONFLICT (name) DO UPDATE SET
 INSERT INTO permissions (id, name, display_name, resource, action) VALUES
     ('33333333-3333-4333-8333-000000000001', 'list_spaces', 'List Spaces', 'spaces', 'list'),
     ('33333333-3333-4333-8333-000000000002', 'view_spaces', 'View Spaces', 'spaces', 'view'),
-    ('33333333-3333-4333-8333-000000000003', 'create_spaces', 'Create Spaces', 'spaces', 'create')
+    ('33333333-3333-4333-8333-000000000003', 'create_spaces', 'Create Spaces', 'spaces', 'create'),
+    ('33333333-3333-4333-8333-000000000013', 'update_spaces', 'Update Spaces', 'spaces', 'update'),
+    ('33333333-3333-4333-8333-000000000014', 'delete_spaces', 'Delete Spaces', 'spaces', 'delete')
 ON CONFLICT (name) DO UPDATE SET
     display_name = EXCLUDED.display_name,
     resource = EXCLUDED.resource,
@@ -49,7 +51,9 @@ ON CONFLICT (name) DO UPDATE SET
 
 INSERT INTO permissions (id, name, display_name, resource, action) VALUES
     ('33333333-3333-4333-8333-000000000004', 'list_members', 'List Members', 'members', 'list'),
-    ('33333333-3333-4333-8333-000000000005', 'view_members', 'View Members', 'members', 'view')
+    ('33333333-3333-4333-8333-000000000005', 'view_members', 'View Members', 'members', 'view'),
+    ('33333333-3333-4333-8333-000000000015', 'update_members', 'Update Members', 'members', 'update'),
+    ('33333333-3333-4333-8333-000000000016', 'delete_members', 'Delete Members', 'members', 'delete')
 ON CONFLICT (name) DO UPDATE SET
     display_name = EXCLUDED.display_name,
     resource = EXCLUDED.resource,
@@ -70,7 +74,9 @@ ON CONFLICT (name) DO UPDATE SET
     updated_at = CURRENT_TIMESTAMP;
 
 INSERT INTO permissions (id, name, display_name, resource, action) VALUES
-    ('33333333-3333-4333-8333-000000000006', 'create_invitations', 'Create Invitations', 'invitations', 'create')
+    ('33333333-3333-4333-8333-000000000006', 'create_invitations', 'Create Invitations', 'invitations', 'create'),
+    ('33333333-3333-4333-8333-000000000017', 'list_invitations', 'List Invitations', 'invitations', 'list'),
+    ('33333333-3333-4333-8333-000000000018', 'delete_invitations', 'Delete Invitations', 'invitations', 'delete')
 ON CONFLICT (name) DO UPDATE SET
     display_name = EXCLUDED.display_name,
     resource = EXCLUDED.resource,
@@ -94,7 +100,8 @@ INSERT INTO permissions (id, name, display_name, resource, action) VALUES
     ('33333333-3333-4333-8333-000000000007', 'list_reminders', 'List Reminders', 'reminders', 'list'),
     ('33333333-3333-4333-8333-000000000008', 'view_reminders', 'View Reminders', 'reminders', 'view'),
     ('33333333-3333-4333-8333-000000000009', 'create_reminders', 'Create Reminders', 'reminders', 'create'),
-    ('33333333-3333-4333-8333-000000000010', 'update_reminders', 'Update Reminders', 'reminders', 'update')
+    ('33333333-3333-4333-8333-000000000010', 'update_reminders', 'Update Reminders', 'reminders', 'update'),
+    ('33333333-3333-4333-8333-000000000019', 'delete_reminders', 'Delete Reminders', 'reminders', 'delete')
 ON CONFLICT (name) DO UPDATE SET
     display_name = EXCLUDED.display_name,
     resource = EXCLUDED.resource,
@@ -127,77 +134,77 @@ ON CONFLICT (name) DO UPDATE SET
 INSERT INTO role_permissions (id, role_id, permission_id)
 SELECT md5('space-rbac:' || r.name || ':' || p.name)::uuid, r.id, p.id
 FROM roles r
-JOIN permissions p ON p.resource = 'spaces' AND p.name IN ('list_spaces', 'view_spaces', 'create_spaces') AND p.deleted_at IS NULL
+JOIN permissions p ON p.resource = 'spaces' AND p.name IN ('list_spaces', 'view_spaces', 'create_spaces', 'update_spaces', 'delete_spaces') AND p.deleted_at IS NULL
 WHERE r.name IN ('space_owner') AND r.deleted_at IS NULL
 ON CONFLICT DO NOTHING;
 
 INSERT INTO role_permissions (id, role_id, permission_id)
 SELECT md5('space-rbac:' || r.name || ':' || p.name)::uuid, r.id, p.id
 FROM roles r
-JOIN permissions p ON p.resource = 'members' AND p.name IN ('list_members', 'view_members') AND p.deleted_at IS NULL
+JOIN permissions p ON p.resource = 'members' AND p.name IN ('list_members', 'view_members', 'update_members', 'delete_members') AND p.deleted_at IS NULL
 WHERE r.name IN ('space_owner') AND r.deleted_at IS NULL
 ON CONFLICT DO NOTHING;
 
 INSERT INTO role_permissions (id, role_id, permission_id)
 SELECT md5('space-rbac:' || r.name || ':' || p.name)::uuid, r.id, p.id
 FROM roles r
-JOIN permissions p ON p.resource = 'invitations' AND p.name IN ('create_invitations') AND p.deleted_at IS NULL
+JOIN permissions p ON p.resource = 'invitations' AND p.name IN ('create_invitations', 'list_invitations', 'delete_invitations') AND p.deleted_at IS NULL
 WHERE r.name IN ('space_owner') AND r.deleted_at IS NULL
 ON CONFLICT DO NOTHING;
 
 INSERT INTO role_permissions (id, role_id, permission_id)
 SELECT md5('space-rbac:' || r.name || ':' || p.name)::uuid, r.id, p.id
 FROM roles r
-JOIN permissions p ON p.resource = 'reminders' AND p.name IN ('list_reminders', 'view_reminders', 'create_reminders', 'update_reminders') AND p.deleted_at IS NULL
+JOIN permissions p ON p.resource = 'reminders' AND p.name IN ('list_reminders', 'view_reminders', 'create_reminders', 'update_reminders', 'delete_reminders') AND p.deleted_at IS NULL
 WHERE r.name IN ('space_owner') AND r.deleted_at IS NULL
 ON CONFLICT DO NOTHING;
 
 INSERT INTO role_permissions (id, role_id, permission_id)
 SELECT md5('space-rbac:' || r.name || ':' || p.name)::uuid, r.id, p.id
 FROM roles r
-JOIN permissions p ON p.resource = 'activities' AND p.name IN ('list_activities', 'create_activities') AND p.deleted_at IS NULL
+JOIN permissions p ON p.resource = 'activities' AND p.name IN ('list_activities', 'create_activities', 'update_activities', 'delete_activities') AND p.deleted_at IS NULL
 WHERE r.name IN ('space_owner') AND r.deleted_at IS NULL
+ON CONFLICT DO NOTHING;
+
+INSERT INTO role_permissions (id, role_id, permission_id)
+SELECT md5('space-rbac:' || r.name || ':' || p.name)::uuid, r.id, p.id
+FROM roles r
+JOIN permissions p ON p.resource = 'spaces' AND p.name IN ('list_spaces', 'view_spaces', 'update_spaces', 'delete_spaces') AND p.deleted_at IS NULL
+WHERE r.name IN ('space_admin') AND r.deleted_at IS NULL
+ON CONFLICT DO NOTHING;
+
+INSERT INTO role_permissions (id, role_id, permission_id)
+SELECT md5('space-rbac:' || r.name || ':' || p.name)::uuid, r.id, p.id
+FROM roles r
+JOIN permissions p ON p.resource = 'members' AND p.name IN ('list_members', 'view_members', 'update_members', 'delete_members') AND p.deleted_at IS NULL
+WHERE r.name IN ('space_admin') AND r.deleted_at IS NULL
+ON CONFLICT DO NOTHING;
+
+INSERT INTO role_permissions (id, role_id, permission_id)
+SELECT md5('space-rbac:' || r.name || ':' || p.name)::uuid, r.id, p.id
+FROM roles r
+JOIN permissions p ON p.resource = 'invitations' AND p.name IN ('create_invitations', 'list_invitations', 'delete_invitations') AND p.deleted_at IS NULL
+WHERE r.name IN ('space_admin') AND r.deleted_at IS NULL
+ON CONFLICT DO NOTHING;
+
+INSERT INTO role_permissions (id, role_id, permission_id)
+SELECT md5('space-rbac:' || r.name || ':' || p.name)::uuid, r.id, p.id
+FROM roles r
+JOIN permissions p ON p.resource = 'reminders' AND p.name IN ('list_reminders', 'view_reminders', 'create_reminders', 'update_reminders', 'delete_reminders') AND p.deleted_at IS NULL
+WHERE r.name IN ('space_admin') AND r.deleted_at IS NULL
+ON CONFLICT DO NOTHING;
+
+INSERT INTO role_permissions (id, role_id, permission_id)
+SELECT md5('space-rbac:' || r.name || ':' || p.name)::uuid, r.id, p.id
+FROM roles r
+JOIN permissions p ON p.resource = 'activities' AND p.name IN ('list_activities', 'create_activities', 'update_activities', 'delete_activities') AND p.deleted_at IS NULL
+WHERE r.name IN ('space_admin') AND r.deleted_at IS NULL
 ON CONFLICT DO NOTHING;
 
 INSERT INTO role_permissions (id, role_id, permission_id)
 SELECT md5('space-rbac:' || r.name || ':' || p.name)::uuid, r.id, p.id
 FROM roles r
 JOIN permissions p ON p.resource = 'spaces' AND p.name IN ('list_spaces', 'view_spaces') AND p.deleted_at IS NULL
-WHERE r.name IN ('space_admin') AND r.deleted_at IS NULL
-ON CONFLICT DO NOTHING;
-
-INSERT INTO role_permissions (id, role_id, permission_id)
-SELECT md5('space-rbac:' || r.name || ':' || p.name)::uuid, r.id, p.id
-FROM roles r
-JOIN permissions p ON p.resource = 'members' AND p.name IN ('list_members', 'view_members') AND p.deleted_at IS NULL
-WHERE r.name IN ('space_admin') AND r.deleted_at IS NULL
-ON CONFLICT DO NOTHING;
-
-INSERT INTO role_permissions (id, role_id, permission_id)
-SELECT md5('space-rbac:' || r.name || ':' || p.name)::uuid, r.id, p.id
-FROM roles r
-JOIN permissions p ON p.resource = 'invitations' AND p.name IN ('create_invitations') AND p.deleted_at IS NULL
-WHERE r.name IN ('space_admin') AND r.deleted_at IS NULL
-ON CONFLICT DO NOTHING;
-
-INSERT INTO role_permissions (id, role_id, permission_id)
-SELECT md5('space-rbac:' || r.name || ':' || p.name)::uuid, r.id, p.id
-FROM roles r
-JOIN permissions p ON p.resource = 'reminders' AND p.name IN ('list_reminders', 'view_reminders', 'create_reminders', 'update_reminders') AND p.deleted_at IS NULL
-WHERE r.name IN ('space_admin') AND r.deleted_at IS NULL
-ON CONFLICT DO NOTHING;
-
-INSERT INTO role_permissions (id, role_id, permission_id)
-SELECT md5('space-rbac:' || r.name || ':' || p.name)::uuid, r.id, p.id
-FROM roles r
-JOIN permissions p ON p.resource = 'activities' AND p.name IN ('list_activities', 'create_activities') AND p.deleted_at IS NULL
-WHERE r.name IN ('space_admin') AND r.deleted_at IS NULL
-ON CONFLICT DO NOTHING;
-
-INSERT INTO role_permissions (id, role_id, permission_id)
-SELECT md5('space-rbac:' || r.name || ':' || p.name)::uuid, r.id, p.id
-FROM roles r
-JOIN permissions p ON p.resource = 'spaces' AND p.name IN ('list_spaces', 'view_spaces') AND p.deleted_at IS NULL
 WHERE r.name IN ('space_member') AND r.deleted_at IS NULL
 ON CONFLICT DO NOTHING;
 
@@ -211,14 +218,14 @@ ON CONFLICT DO NOTHING;
 INSERT INTO role_permissions (id, role_id, permission_id)
 SELECT md5('space-rbac:' || r.name || ':' || p.name)::uuid, r.id, p.id
 FROM roles r
-JOIN permissions p ON p.resource = 'reminders' AND p.name IN ('list_reminders', 'view_reminders', 'create_reminders', 'update_reminders') AND p.deleted_at IS NULL
+JOIN permissions p ON p.resource = 'reminders' AND p.name IN ('list_reminders', 'view_reminders', 'create_reminders', 'update_reminders', 'delete_reminders') AND p.deleted_at IS NULL
 WHERE r.name IN ('space_member') AND r.deleted_at IS NULL
 ON CONFLICT DO NOTHING;
 
 INSERT INTO role_permissions (id, role_id, permission_id)
 SELECT md5('space-rbac:' || r.name || ':' || p.name)::uuid, r.id, p.id
 FROM roles r
-JOIN permissions p ON p.resource = 'activities' AND p.name IN ('list_activities', 'create_activities') AND p.deleted_at IS NULL
+JOIN permissions p ON p.resource = 'activities' AND p.name IN ('list_activities', 'create_activities', 'update_activities', 'delete_activities') AND p.deleted_at IS NULL
 WHERE r.name IN ('space_member') AND r.deleted_at IS NULL
 ON CONFLICT DO NOTHING;
 
