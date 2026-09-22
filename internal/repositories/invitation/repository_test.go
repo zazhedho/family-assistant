@@ -281,3 +281,43 @@ func TestAcceptGuessedTokenUsesSameSafeError(t *testing.T) {
 		t.Fatalf("sql expectations: %v", err)
 	}
 }
+
+func TestListPendingExcludesTokenHash(t *testing.T) {
+	db, mock := newInvitationMockDB(t)
+	repo := &Repository{DB: db}
+	inv := invitationFixture()
+
+	mock.ExpectQuery(`SELECT .*FROM "space_invitations".*JOIN roles ON roles\.id = space_invitations\.role_id.*space_invitations\.space_id = \$1.*space_invitations\.status = \$2.*space_invitations\.deleted_at IS NULL`).
+		WithArgs(inv.SpaceID, domaininvitation.StatusPending).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "space_id", "invited_email", "role_id", "invited_by_member_id", "status", "expires_at", "accepted_at", "accepted_by_user_id", "created_at", "updated_at", "deleted_at", "role_name",
+		}).AddRow(inv.ID, inv.SpaceID, inv.InvitedEmail, inv.RoleID, inv.InvitedByMemberID, inv.Status, inv.ExpiresAt, nil, nil, inv.CreatedAt, inv.UpdatedAt, nil, "space_member"))
+
+	got, err := repo.ListPending(context.Background(), inv.SpaceID)
+	if err != nil {
+		t.Fatalf("list pending: %v", err)
+	}
+	if len(got) != 1 || got[0].ID != inv.ID || got[0].TokenHash != "" || got[0].RoleName != "space_member" {
+		t.Fatalf("unexpected pending invitations: %#v", got)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestRevokePendingScopesSpaceAndUpdatesLifecycleFields(t *testing.T) {
+	db, mock := newInvitationMockDB(t)
+	repo := &Repository{DB: db}
+	now := time.Date(2026, 9, 22, 10, 0, 0, 0, time.UTC)
+
+	mock.ExpectExec(`UPDATE "space_invitations" SET "deleted_at"=\$1,"status"=\$2,"updated_at"=\$3 WHERE \(id = \$4 AND space_id = \$5 AND status = \$6 AND deleted_at IS NULL\) AND "space_invitations"\."deleted_at" IS NULL`).
+		WithArgs(now, domaininvitation.StatusRevoked, now, "invitation-1", "space-1", domaininvitation.StatusPending).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+
+	if err := repo.RevokePending(context.Background(), "space-1", "invitation-1", now); err != nil {
+		t.Fatalf("revoke pending: %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}

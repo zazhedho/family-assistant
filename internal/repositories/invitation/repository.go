@@ -121,3 +121,32 @@ func (r *Repository) Accept(ctx context.Context, tokenHash, userID, normalizedEm
 	}
 	return acceptance, nil
 }
+
+func (r *Repository) ListPending(ctx context.Context, spaceID string) ([]domaininvitation.Invitation, error) {
+	var invitations []domaininvitation.Invitation
+	err := r.DB.WithContext(ctx).
+		Table("space_invitations").
+		Select("space_invitations.id, space_invitations.space_id, space_invitations.invited_email, space_invitations.role_id, space_invitations.invited_by_member_id, space_invitations.status, space_invitations.expires_at, space_invitations.accepted_at, space_invitations.accepted_by_user_id, space_invitations.created_at, space_invitations.updated_at, space_invitations.deleted_at, roles.name AS role_name").
+		Joins("JOIN roles ON roles.id = space_invitations.role_id AND roles.deleted_at IS NULL").
+		Where("space_invitations.space_id = ? AND space_invitations.status = ? AND space_invitations.deleted_at IS NULL", spaceID, domaininvitation.StatusPending).
+		Order("space_invitations.created_at ASC").
+		Find(&invitations).Error
+	return invitations, err
+}
+
+func (r *Repository) RevokePending(ctx context.Context, spaceID, invitationID string, revokedAt time.Time) error {
+	result := r.DB.WithContext(ctx).Model(&domaininvitation.Invitation{}).
+		Where("id = ? AND space_id = ? AND status = ? AND deleted_at IS NULL", invitationID, spaceID, domaininvitation.StatusPending).
+		Updates(map[string]any{
+			"status":     domaininvitation.StatusRevoked,
+			"deleted_at": revokedAt,
+			"updated_at": revokedAt,
+		})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return gorm.ErrRecordNotFound
+	}
+	return nil
+}

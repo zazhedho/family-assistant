@@ -26,7 +26,11 @@ import (
 	"gorm.io/gorm"
 )
 
-const createPermission = "invitations:create"
+const (
+	createPermission = "invitations:create"
+	listPermission   = "invitations:list"
+	deletePermission = "invitations:delete"
+)
 
 var (
 	ErrForbidden                       = serviceauthorization.ErrForbidden
@@ -268,6 +272,116 @@ func (s *service) Accept(ctx context.Context, rawToken string, user domainuser.U
 	return acceptance.Member, nil
 }
 
+func (s *service) List(ctx context.Context, userID, spaceID string) ([]domaininvitation.Invitation, error) {
+	actor, err := s.invitationActor(ctx, userID, spaceID, listPermission)
+	if err != nil {
+		return nil, err
+	}
+	if s.invitations == nil {
+		err = errors.New("invitation repository is not configured")
+		s.writeFailureAction(ctx, "list", spaceID, actor.ID, userID, err)
+		return nil, err
+	}
+	invitations, err := s.invitations.ListPending(ctx, spaceID)
+	if err != nil {
+		s.writeFailureAction(ctx, "list", spaceID, actor.ID, userID, err)
+		return nil, err
+	}
+	for i := range invitations {
+		invitations[i].TokenHash = ""
+	}
+	event := s.newAuditEvent(ctx, auditEventInput{action: "list", resourceID: spaceID, spaceID: spaceID, memberID: actor.ID, userID: userID})
+	event.Status = domainaudit.StatusSuccess
+	event.Message = "Listed pending space invitations"
+	s.writeAudit(ctx, event)
+	return invitations, nil
+}
+
+func (s *service) Revoke(ctx context.Context, userID, spaceID, invitationID string) (*domaininvitation.Invitation, error) {
+	actor, err := s.invitationActor(ctx, userID, spaceID, deletePermission)
+	if err != nil {
+		return nil, err
+	}
+	invitationID = strings.TrimSpace(invitationID)
+	if invitationID == "" {
+		err = &serviceauthorization.ValidationError{Field: "invitation_id", Reason: "is required"}
+		s.writeFailureAction(ctx, domainaudit.ActionDelete, spaceID, actor.ID, userID, err)
+		return nil, err
+	}
+	if s.invitations == nil {
+		err = errors.New("invitation repository is not configured")
+		s.writeFailureAction(ctx, domainaudit.ActionDelete, spaceID, actor.ID, userID, err)
+		return nil, err
+	}
+	pending, err := s.invitations.ListPending(ctx, spaceID)
+	if err != nil {
+		s.writeFailureAction(ctx, domainaudit.ActionDelete, spaceID, actor.ID, userID, err)
+		return nil, err
+	}
+	var target *domaininvitation.Invitation
+	for i := range pending {
+		if pending[i].ID == invitationID {
+			target = &pending[i]
+			break
+		}
+	}
+	if target == nil {
+		err = ErrNotFound
+		s.writeFailureAction(ctx, domainaudit.ActionDelete, spaceID, actor.ID, userID, err)
+		return nil, err
+	}
+	revokedAt := s.now().UTC()
+	if err = s.invitations.RevokePending(ctx, spaceID, invitationID, revokedAt); err != nil {
+		s.writeFailureAction(ctx, domainaudit.ActionDelete, spaceID, actor.ID, userID, err)
+		return nil, err
+	}
+	revoked := *target
+	revoked.TokenHash = ""
+	revoked.Status = domaininvitation.StatusRevoked
+	revoked.UpdatedAt = revokedAt
+	revoked.DeletedAt = gorm.DeletedAt{Time: revokedAt, Valid: true}
+	event := s.newAuditEvent(ctx, auditEventInput{action: domainaudit.ActionDelete, resourceID: invitationID, spaceID: spaceID, memberID: actor.ID, userID: userID})
+	event.Status = domainaudit.StatusSuccess
+	event.Message = "Revoked space invitation"
+	s.writeAudit(ctx, event)
+	return &revoked, nil
+}
+
+func (s *service) invitationActor(ctx context.Context, userID, spaceID, permission string) (*domainspace.ResolvedMembership, error) {
+	userID = strings.TrimSpace(userID)
+	spaceID = strings.TrimSpace(spaceID)
+	if userID == "" {
+		return nil, &serviceauthorization.ValidationError{Field: "user_id", Reason: "is required"}
+	}
+	if spaceID == "" {
+		return nil, &serviceauthorization.ValidationError{Field: "space_id", Reason: "is required"}
+	}
+	if s.spaces == nil {
+		return nil, errors.New("space repository is not configured")
+	}
+	actor, err := s.spaces.FindActiveMembership(ctx, userID, spaceID)
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		err = ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	if actor == nil || actor.SpaceID != spaceID {
+		return nil, ErrNotFound
+	}
+	if actor.SpaceType != domainspace.TypeShared || actor.Status != domainspace.StatusActive {
+		return nil, ErrForbidden
+	}
+	ok, err := s.hasPermission(ctx, actor.RoleID, permission)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		return nil, ErrForbidden
+	}
+	return actor, nil
+}
+
 func validTargetRole(roleName string) bool {
 	switch roleName {
 	case "space_admin", "space_member", "space_viewer":
@@ -342,8 +456,20 @@ func (s *service) writeFailure(ctx context.Context, spaceID, roleName, userID st
 	event := s.newAuditEvent(ctx, auditEventInput{
 		action:   domainaudit.ActionCreate,
 		spaceID:  spaceID,
-		userID:   userID,
 		roleName: roleName,
+		userID:   userID,
+	})
+	event.Status = domainaudit.StatusFailed
+	event.ErrorMessage = FailureCategory(err)
+	s.writeAudit(ctx, event)
+}
+
+func (s *service) writeFailureAction(ctx context.Context, action, spaceID, memberID, userID string, err error) {
+	event := s.newAuditEvent(ctx, auditEventInput{
+		action:   action,
+		spaceID:  spaceID,
+		memberID: memberID,
+		userID:   userID,
 	})
 	event.Status = domainaudit.StatusFailed
 	event.ErrorMessage = FailureCategory(err)

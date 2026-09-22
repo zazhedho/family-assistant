@@ -12,4 +12,6 @@ import (
 type ServiceInvitationInterface interface {
 	Create(context.Context, string, dto.InvitationCreateInput) (*domaininvitation.Invitation, string, error)
 	Accept(context.Context, string, domainuser.Users) (*domainspace.Member, error)
+	List(context.Context, string, string) ([]domaininvitation.Invitation, error)
+	Revoke(context.Context, string, string, string) (*domaininvitation.Invitation, error)
 }

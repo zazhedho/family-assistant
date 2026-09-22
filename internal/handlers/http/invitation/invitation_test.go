@@ -48,6 +48,12 @@ func (s *invitationServiceStub) Accept(_ context.Context, token string, user dom
 	}
 	return s.accepted, s.acceptErr
 }
+func (s *invitationServiceStub) List(context.Context, string, string) ([]domaininvitation.Invitation, error) {
+	return nil, nil
+}
+func (s *invitationServiceStub) Revoke(context.Context, string, string, string) (*domaininvitation.Invitation, error) {
+	return nil, nil
+}
 
 type invitationUserRepositoryStub struct {
 	user       domainuser.Users

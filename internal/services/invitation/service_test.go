@@ -26,13 +26,20 @@ import (
 )
 
 type invitationRepositoryStub struct {
-	created   *domaininvitation.Invitation
-	createErr error
-	accepted  *domaininvitation.Acceptance
-	acceptErr error
-	tokenHash string
-	userID    string
-	email     string
+	created     *domaininvitation.Invitation
+	createErr   error
+	accepted    *domaininvitation.Acceptance
+	acceptErr   error
+	tokenHash   string
+	userID      string
+	email       string
+	pending     []domaininvitation.Invitation
+	listErr     error
+	listSpace   string
+	revokeErr   error
+	revokeID    string
+	revokeSpace string
+	revokeAt    time.Time
 }
 
 var _ interfaceinvitation.ServiceInvitationInterface = (*service)(nil)
@@ -60,6 +67,19 @@ func (s *invitationRepositoryStub) Accept(_ context.Context, tokenHash, userID, 
 	return s.accepted, nil
 }
 
+func (s *invitationRepositoryStub) ListPending(_ context.Context, spaceID string) ([]domaininvitation.Invitation, error) {
+	s.listSpace = spaceID
+	if s.listErr != nil {
+		return nil, s.listErr
+	}
+	return append([]domaininvitation.Invitation(nil), s.pending...), nil
+}
+
+func (s *invitationRepositoryStub) RevokePending(_ context.Context, spaceID, invitationID string, revokedAt time.Time) error {
+	s.revokeSpace, s.revokeID, s.revokeAt = spaceID, invitationID, revokedAt
+	return s.revokeErr
+}
+
 type invitationSpaceRepositoryStub struct {
 	membership *domainspace.ResolvedMembership
 	err        error
@@ -82,6 +102,21 @@ func (s *invitationSpaceRepositoryStub) FindActiveMembership(_ context.Context, 
 }
 func (s *invitationSpaceRepositoryStub) ListActiveMembers(context.Context, string) ([]domainspace.ResolvedMembership, error) {
 	return nil, nil
+}
+func (s *invitationSpaceRepositoryStub) Update(context.Context, string, domainspace.SpaceUpdateFields, time.Time) error {
+	return nil
+}
+func (s *invitationSpaceRepositoryStub) Archive(context.Context, string, time.Time) error {
+	return nil
+}
+func (s *invitationSpaceRepositoryStub) UpdateMemberRole(context.Context, string, string, string, time.Time) error {
+	return nil
+}
+func (s *invitationSpaceRepositoryStub) RemoveMember(context.Context, string, string, time.Time) error {
+	return nil
+}
+func (s *invitationSpaceRepositoryStub) CountActiveOwners(context.Context, string) (int64, error) {
+	return 1, nil
 }
 
 type invitationRoleRepositoryStub struct {
@@ -364,6 +399,71 @@ func TestAcceptInvitationInvalidTokensShareSafeError(t *testing.T) {
 				t.Fatalf("error = %v, want ErrInvalidInvitation", err)
 			}
 		})
+	}
+}
+
+func TestListPendingInvitationsRequiresPermissionAndStripsTokenHash(t *testing.T) {
+	repo := &invitationRepositoryStub{pending: []domaininvitation.Invitation{{ID: "invitation-1", SpaceID: "space-1", TokenHash: "secret", Status: domaininvitation.StatusPending}}}
+	spaces := &invitationSpaceRepositoryStub{membership: &domainspace.ResolvedMembership{ID: "member-owner", SpaceID: "space-1", SpaceType: domainspace.TypeShared, RoleID: "role-owner", Status: domainspace.StatusActive}}
+	service := NewService(repo, spaces, nil, &invitationPermissionRepositoryStub{permissions: map[string][]domainpermission.Permission{
+		"role-owner": {{Resource: "invitations", Action: "list"}},
+	}}, &invitationAuditStub{}).(*service)
+
+	got, err := service.List(context.Background(), "user-1", "space-1")
+	if err != nil {
+		t.Fatalf("list invitations: %v", err)
+	}
+	if len(got) != 1 || got[0].TokenHash != "" || repo.listSpace != "space-1" {
+		t.Fatalf("unexpected list: invitations=%+v repo=%+v", got, repo)
+	}
+}
+
+func TestListPendingInvitationsDeniesViewer(t *testing.T) {
+	repo := &invitationRepositoryStub{}
+	spaces := &invitationSpaceRepositoryStub{membership: &domainspace.ResolvedMembership{ID: "member-viewer", SpaceID: "space-1", SpaceType: domainspace.TypeShared, RoleID: "role-viewer", Status: domainspace.StatusActive}}
+	service := NewService(repo, spaces, nil, &invitationPermissionRepositoryStub{permissions: map[string][]domainpermission.Permission{
+		"role-viewer": {{Resource: "spaces", Action: "view"}},
+	}}, &invitationAuditStub{}).(*service)
+
+	_, err := service.List(context.Background(), "user-1", "space-1")
+	if !errors.Is(err, ErrForbidden) {
+		t.Fatalf("error = %v, want forbidden", err)
+	}
+	if repo.listSpace != "" {
+		t.Fatal("viewer reached invitation repository")
+	}
+}
+
+func TestRevokePendingInvitationUpdatesStatusAndAudits(t *testing.T) {
+	repo := &invitationRepositoryStub{pending: []domaininvitation.Invitation{{ID: "invitation-1", SpaceID: "space-1", TokenHash: "secret", Status: domaininvitation.StatusPending}}}
+	spaces := &invitationSpaceRepositoryStub{membership: &domainspace.ResolvedMembership{ID: "member-admin", SpaceID: "space-1", SpaceType: domainspace.TypeShared, RoleID: "role-admin", Status: domainspace.StatusActive}}
+	audit := &invitationAuditStub{}
+	service := NewService(repo, spaces, nil, &invitationPermissionRepositoryStub{permissions: map[string][]domainpermission.Permission{
+		"role-admin": {{Resource: "invitations", Action: "delete"}},
+	}}, audit).(*service)
+
+	got, err := service.Revoke(context.Background(), "user-1", "space-1", "invitation-1")
+	if err != nil {
+		t.Fatalf("revoke invitation: %v", err)
+	}
+	if got == nil || got.Status != domaininvitation.StatusRevoked || got.TokenHash != "" || repo.revokeID != "invitation-1" || len(audit.events) != 1 || audit.events[0].Action != "delete" {
+		t.Fatalf("unexpected revoke: invitation=%+v repo=%+v audit=%+v", got, repo, audit.events)
+	}
+}
+
+func TestRevokePendingInvitationRejectsUnknownOrCompletedInvitation(t *testing.T) {
+	repo := &invitationRepositoryStub{pending: []domaininvitation.Invitation{{ID: "other", SpaceID: "space-1", Status: domaininvitation.StatusPending}}}
+	spaces := &invitationSpaceRepositoryStub{membership: &domainspace.ResolvedMembership{ID: "member-admin", SpaceID: "space-1", SpaceType: domainspace.TypeShared, RoleID: "role-admin", Status: domainspace.StatusActive}}
+	service := NewService(repo, spaces, nil, &invitationPermissionRepositoryStub{permissions: map[string][]domainpermission.Permission{
+		"role-admin": {{Resource: "invitations", Action: "delete"}},
+	}}, &invitationAuditStub{}).(*service)
+
+	_, err := service.Revoke(context.Background(), "user-1", "space-1", "invitation-1")
+	if !errors.Is(err, ErrNotFound) {
+		t.Fatalf("error = %v, want not found", err)
+	}
+	if repo.revokeID != "" {
+		t.Fatal("unknown invitation reached revoke repository")
 	}
 }
 
