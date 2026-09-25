@@ -18,9 +18,11 @@ func TestSpaceActivitiesMigrationIsScopedAndPermissionSeeded(t *testing.T) {
 		"created_by_member_id UUID NOT NULL",
 		"fk_space_activities_creator_space",
 		"occurred_at TIMESTAMPTZ NOT NULL",
-		"list_activities",
-		"create_activities",
-		"space_viewer",
+		"update_activities",
+		"delete_activities",
+		"space_owner",
+		"space_admin",
+		"space_member",
 	} {
 		if !strings.Contains(up, required) {
 			t.Errorf("missing %q", required)
