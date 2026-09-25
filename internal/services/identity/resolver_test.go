@@ -36,6 +36,10 @@ func (s *identityRepositoryStub) FindActive(_ context.Context, _, _ string) (*do
 	return s.identity, s.err
 }
 
+func (s *identityRepositoryStub) FindActiveByUserID(_ context.Context, _, _ string) (*domainidentity.ExternalIdentity, error) {
+	return s.identity, s.err
+}
+
 func (s *identityRepositoryStub) Revoke(context.Context, string, string, string) error {
 	return errors.New("not implemented")
 }

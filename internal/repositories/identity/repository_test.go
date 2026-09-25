@@ -226,6 +226,26 @@ func TestFindActiveUsesNormalizedProviderAndExternalID(t *testing.T) {
 	}
 }
 
+func TestFindActiveByUserIDUsesActiveNormalizedProvider(t *testing.T) {
+	db, mock := newIdentityMockDB(t)
+	repo := NewRepository(db)
+	mock.ExpectQuery(`SELECT .*FROM "external_identities".*user_id = \$1.*provider = \$2.*status = \$3.*deleted_at IS NULL.*ORDER BY verified_at DESC, id DESC`).
+		WithArgs("user-1", domainidentity.ProviderHermes, domainidentity.StatusActive, 1).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "user_id", "provider", "external_id", "status", "verified_at", "metadata", "created_at", "updated_at", "deleted_at"}).
+			AddRow("identity-1", "user-1", domainidentity.ProviderHermes, "profile-a", domainidentity.StatusActive, time.Now().UTC(), []byte(`{}`), time.Now().UTC(), time.Now().UTC(), nil))
+
+	identity, err := repo.FindActiveByUserID(context.Background(), " HERMES ", " user-1 ")
+	if err != nil {
+		t.Fatalf("find active by user: %v", err)
+	}
+	if identity == nil || identity.UserID != "user-1" || identity.ExternalID != "profile-a" {
+		t.Fatalf("unexpected identity: %#v", identity)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("sql expectations: %v", err)
+	}
+}
+
 func TestSameUserCanLinkTwoDistinctExternalIDs(t *testing.T) {
 	db, mock := newIdentityMockDB(t)
 	repo := NewRepository(db)
