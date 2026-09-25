@@ -23,6 +23,9 @@ func ValidateStartupConfig(port string) error {
 	problems = append(problems, validateOptionalRedisConfig()...)
 	problems = append(problems, validateOptionalSMTPConfig()...)
 	problems = append(problems, validateOptionalStorageConfig()...)
+	if err := ValidateReminderSchedulerConfig(); err != nil {
+		problems = append(problems, err.Error())
+	}
 	problems = append(problems, validateMCPConfig()...)
 
 	if len(problems) > 0 {

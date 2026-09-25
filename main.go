@@ -5,8 +5,13 @@ import (
 	"database/sql"
 	"errors"
 	"family-assistant/infrastructure/database"
+	notificationInfra "family-assistant/infrastructure/notification"
+	domainidentity "family-assistant/internal/domain/identity"
+	domainspace "family-assistant/internal/domain/space"
 	mcpHandler "family-assistant/internal/handlers/mcp"
+	interfacenotification "family-assistant/internal/interfaces/notification"
 	interfaceonboarding "family-assistant/internal/interfaces/onboarding"
+	interfacereminder "family-assistant/internal/interfaces/reminder"
 	activityRepo "family-assistant/internal/repositories/activity"
 	identityRepo "family-assistant/internal/repositories/identity"
 	invitationRepo "family-assistant/internal/repositories/invitation"
@@ -113,9 +118,9 @@ func run() error {
 	identityLink := identityService.NewLinkService(identityRepository, audit, config.LoadIdentityConfig())
 	var accountRegistrar interfaceonboarding.ServiceOnboardingInterface = onboardingService.NewService(onboardingRepo.NewRepository(routes.DB), roleRepository, audit)
 	identityResolver := identityService.NewResolver(identityRepository, spaceRepository, permissions)
-	reminders := reminderService.NewReminderService(
-		reminderRepo.NewRepository(routes.DB), spaceRepository, authorizationService.NewAuthorizer(), audit,
-	)
+	reminderRepository := reminderRepo.NewRepository(routes.DB)
+	reminderSchedulerRepository := reminderRepo.NewSchedulerRepository(routes.DB)
+	reminders := reminderService.NewReminderService(reminderRepository, spaceRepository, authorizationService.NewAuthorizer(), audit)
 	activities := activityService.NewService(
 		activityRepo.NewRepository(routes.DB), spaceRepository, authorizationService.NewAuthorizer(), audit,
 	)
@@ -131,6 +136,9 @@ func run() error {
 
 	serverContext, stopSignals := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stopSignals()
+	if _, err := startReminderScheduler(serverContext, config.LoadReminderSchedulerConfig(), reminderSchedulerRepository, identityRepository, spaceRepository); err != nil {
+		return fmt.Errorf("start reminder scheduler: %w", err)
+	}
 
 	mcpServer, mcpListener := startMCPServer(mcpConfig.Enabled, func() (*http.Server, net.Listener, error) {
 		return mcpHandler.Listen(mcpConfig, identityResolver, identityLink, accountRegistrar, spaces, reminders, mcpHandler.ToolServices{
@@ -149,6 +157,37 @@ func run() error {
 		return fmt.Errorf("server stopped unexpectedly: %w", err)
 	}
 	return nil
+}
+
+type schedulerIdentityLookup interface {
+	FindActiveByUserID(context.Context, string, string) (*domainidentity.ExternalIdentity, error)
+}
+
+type schedulerMembershipLookup interface {
+	FindActiveMembership(context.Context, string, string) (*domainspace.ResolvedMembership, error)
+}
+
+func startReminderScheduler(
+	ctx context.Context,
+	cfg config.ReminderSchedulerConfig,
+	reminders interfacereminder.SchedulerRepository,
+	identities schedulerIdentityLookup,
+	members schedulerMembershipLookup,
+) (*reminderService.ReminderScheduler, error) {
+	if !cfg.Enabled {
+		return nil, nil
+	}
+	sender, err := notificationInfra.NewWhatsAppBridge(cfg.WhatsAppBridgeURL)
+	if err != nil {
+		return nil, err
+	}
+	scheduler := reminderService.NewReminderScheduler(
+		reminders, identities, members,
+		map[string]interfacenotification.NotificationSender{"whatsapp": sender},
+		cfg.Interval, cfg.Lease, cfg.BatchSize,
+	)
+	go scheduler.Run(ctx)
+	return scheduler, nil
 }
 
 func configureRuntime() {

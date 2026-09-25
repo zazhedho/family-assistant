@@ -69,6 +69,11 @@ func (s *ReminderScheduler) Run(ctx context.Context) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	select {
+	case <-ctx.Done():
+		return
+	default:
+	}
 	if err := s.RunOnce(ctx, time.Now().UTC()); err != nil {
 		logger.WriteLog(logger.LogLevelError, fmt.Sprintf("reminder scheduler: %v", err))
 	}

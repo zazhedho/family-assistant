@@ -151,6 +151,29 @@ Personal and Shared Space settings:
 - `SPACE_INVITATION_TTL_SECONDS` controls pending invitation expiry (default `259200`).
 - `IDENTITY_LINK_TTL_SECONDS` controls one-time Hermes identity-link expiry (default `600`).
 
+Reminder delivery:
+- Set `REMINDER_SCHEDULER_ENABLED=true` and point `REMINDER_WHATSAPP_BRIDGE_URL` at the
+  Hermes WhatsApp bridge. The backend checks due reminders every 30 seconds by default.
+- `REMINDER_SCHEDULER_INTERVAL`, `REMINDER_SCHEDULER_BATCH_SIZE`, and
+  `REMINDER_SCHEDULER_LEASE` tune the poll interval, batch size, and retry lease.
+- A reminder created from a WhatsApp DM or group stores that chat target. Older reminders
+  without a target fall back to the active Hermes identity of the assignee, then creator.
+
+If `reminders` was already created before delivery scheduling was added, apply this once
+before enabling the scheduler (fresh installs get these columns from migration `000009`):
+
+```sql
+ALTER TABLE reminders
+    ADD COLUMN IF NOT EXISTS delivery_provider VARCHAR(64) NOT NULL DEFAULT '',
+    ADD COLUMN IF NOT EXISTS delivery_target VARCHAR(255) NOT NULL DEFAULT '',
+    ADD COLUMN IF NOT EXISTS notification_claimed_at TIMESTAMPTZ NULL,
+    ADD COLUMN IF NOT EXISTS notified_at TIMESTAMPTZ NULL;
+
+CREATE INDEX IF NOT EXISTS ix_reminders_notification_due
+    ON reminders (status, scheduled_at, notification_claimed_at)
+    WHERE notified_at IS NULL AND deleted_at IS NULL;
+```
+
 ### Local PostgreSQL databases
 
 Development uses the exact database name `family_assistant`. Integration tests use a

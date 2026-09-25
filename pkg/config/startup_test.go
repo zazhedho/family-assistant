@@ -136,6 +136,17 @@ func TestValidateStartupConfigRequiresStorageWhenMediaEnabled(t *testing.T) {
 	}
 }
 
+func TestValidateStartupConfigValidatesEnabledReminderScheduler(t *testing.T) {
+	clearStartupEnv(t)
+	setRequiredStartupEnv(t)
+	t.Setenv("REMINDER_SCHEDULER_ENABLED", "true")
+
+	err := ValidateStartupConfig("8080")
+	if err == nil || !strings.Contains(err.Error(), "REMINDER_WHATSAPP_BRIDGE_URL is required") {
+		t.Fatalf("error = %v, want reminder scheduler validation", err)
+	}
+}
+
 func setRequiredStartupEnv(t *testing.T) {
 	t.Helper()
 	t.Setenv("JWT_KEY", "test-secret-must-be-at-least-32-bytes")
@@ -185,6 +196,11 @@ func clearStartupEnv(t *testing.T) {
 		"MCP_SERVER_KEY",
 		"MCP_PROFILE_HEADER",
 		"MCP_IDENTITY_SECRET",
+		"REMINDER_SCHEDULER_ENABLED",
+		"REMINDER_WHATSAPP_BRIDGE_URL",
+		"REMINDER_SCHEDULER_INTERVAL",
+		"REMINDER_SCHEDULER_BATCH_SIZE",
+		"REMINDER_SCHEDULER_LEASE",
 	} {
 		t.Setenv(key, "")
 	}
