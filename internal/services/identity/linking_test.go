@@ -45,6 +45,9 @@ func (s *linkingRepositoryStub) FindActive(_ context.Context, provider, external
 	s.consumeProv, s.consumeID = provider, externalID
 	return s.identity, s.findErr
 }
+func (s *linkingRepositoryStub) FindActiveByUserID(_ context.Context, _, _ string) (*domainidentity.ExternalIdentity, error) {
+	return s.identity, s.findErr
+}
 func (s *linkingRepositoryStub) Revoke(_ context.Context, userID, provider, externalID string) error {
 	s.revokeCalls++
 	s.revokeUser, s.revokeProv, s.revokeID = userID, provider, externalID

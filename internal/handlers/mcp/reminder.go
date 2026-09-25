@@ -86,8 +86,15 @@ func ReminderCreate(ctx context.Context, resolver interfaceidentity.Resolver, se
 	if service == nil {
 		return ReminderOutput{}, MapToolError(errors.New("reminder service is not configured"))
 	}
+	request, _ := ExternalRequestFromContext(ctx)
+	deliveryProvider := strings.ToLower(strings.TrimSpace(request.Channel))
+	deliveryTarget := strings.TrimSpace(request.ChatID)
+	if deliveryTarget == "" {
+		deliveryTarget = strings.TrimSpace(request.ExternalID)
+	}
 	reminder, err := service.Create(ctx, actor, dto.ReminderCreateInput{
 		Space: actor.SpaceID, Title: input.Title, Description: input.Description, ScheduledAt: *scheduledAt, AssigneeMemberID: assignee,
+		DeliveryProvider: deliveryProvider, DeliveryTarget: deliveryTarget,
 	})
 	if err != nil {
 		return ReminderOutput{}, MapToolError(err)

@@ -16,6 +16,8 @@ class FamilyAssistantIdentityPluginTest(unittest.TestCase):
                 platform=SimpleNamespace(value="whatsapp"),
                 user_id="6285333320090@s.whatsapp.net",
                 user_id_alt="",
+                chat_id="120363@g.us",
+                chat_type="group",
             )
         )
 
@@ -28,6 +30,8 @@ class FamilyAssistantIdentityPluginTest(unittest.TestCase):
                 "provider": "hermes",
                 "external_id": "6285333320090@s.whatsapp.net",
                 "channel": "whatsapp",
+                "chat_id": "120363@g.us",
+                "chat_type": "group",
             },
         )
 
@@ -52,6 +56,8 @@ class FamilyAssistantIdentityPluginTest(unittest.TestCase):
                 "provider": "hermes",
                 "external_id": "6285333320090@s.whatsapp.net",
                 "channel": "whatsapp",
+                "chat_id": "120363@g.us",
+                "chat_type": "group",
             }
         )
         old_secret = os.environ.get("FAMILY_ASSISTANT_IDENTITY_SECRET")
@@ -67,6 +73,8 @@ class FamilyAssistantIdentityPluginTest(unittest.TestCase):
         identity = result["args"][plugin.IDENTITY_ARGUMENT_NAME]
         self.assertEqual(identity["provider"], "hermes")
         self.assertEqual(identity["external_id"], "6285333320090@s.whatsapp.net")
+        self.assertEqual(identity["chat_id"], "120363@g.us")
+        self.assertEqual(identity["chat_type"], "group")
         self.assertTrue(plugin.verify_signature("identity-secret", identity))
 
     def test_does_not_modify_other_tools(self):

@@ -28,6 +28,8 @@ type IdentityEnvelope struct {
 	Provider   string `json:"provider"`
 	ExternalID string `json:"external_id"`
 	Channel    string `json:"channel"`
+	ChatID     string `json:"chat_id,omitempty"`
+	ChatType   string `json:"chat_type,omitempty"`
 	IssuedAt   int64  `json:"issued_at"`
 	Nonce      string `json:"nonce"`
 	Signature  string `json:"signature"`
@@ -115,6 +117,8 @@ func (v *IdentityVerifier) Verify(req *mcpsdk.CallToolRequest) (ExternalRequest,
 		Provider:   strings.ToLower(strings.TrimSpace(envelope.Provider)),
 		ExternalID: strings.TrimSpace(envelope.ExternalID),
 		Channel:    strings.ToLower(strings.TrimSpace(envelope.Channel)),
+		ChatID:     strings.TrimSpace(envelope.ChatID),
+		ChatType:   strings.ToLower(strings.TrimSpace(envelope.ChatType)),
 	}, nil
 }
 
@@ -142,6 +146,12 @@ func (v *IdentityVerifier) valid(envelope IdentityEnvelope) bool {
 	if envelope.Version != identityEnvelopeVersion || !safeIdentityPart(envelope.Provider) ||
 		!safeIdentityPart(envelope.ExternalID) || !safeIdentityPart(envelope.Channel) ||
 		!safeIdentityPart(envelope.Nonce) || envelope.IssuedAt <= 0 || envelope.Signature == "" {
+		return false
+	}
+	if envelope.ChatID != "" && !safeIdentityPart(envelope.ChatID) {
+		return false
+	}
+	if envelope.ChatType != "" && !safeIdentityPart(envelope.ChatType) {
 		return false
 	}
 	if _, err := hex.DecodeString(envelope.Signature); err != nil {
@@ -177,6 +187,8 @@ func signIdentityEnvelope(secret string, envelope IdentityEnvelope) string {
 		envelope.Provider,
 		envelope.ExternalID,
 		envelope.Channel,
+		envelope.ChatID,
+		envelope.ChatType,
 		strconv.FormatInt(envelope.IssuedAt, 10),
 		envelope.Nonce,
 	}, "\x00")

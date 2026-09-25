@@ -133,6 +133,26 @@ func (r *Repository) FindActive(ctx context.Context, provider, externalID string
 	return &identity, nil
 }
 
+func (r *Repository) FindActiveByUserID(ctx context.Context, provider, userID string) (*domainidentity.ExternalIdentity, error) {
+	provider = domainidentity.NormalizeProvider(provider)
+	userID = strings.TrimSpace(userID)
+	if provider == "" || userID == "" {
+		return nil, domainidentity.ErrIdentityNotFound
+	}
+	var identity domainidentity.ExternalIdentity
+	err := r.DB.WithContext(ctx).
+		Where("user_id = ? AND provider = ? AND status = ? AND deleted_at IS NULL", userID, provider, domainidentity.StatusActive).
+		Order("verified_at DESC, id DESC").
+		Take(&identity).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, domainidentity.ErrIdentityNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &identity, nil
+}
+
 func (r *Repository) Revoke(ctx context.Context, userID, provider, externalID string) error {
 	userID = strings.TrimSpace(userID)
 	provider = domainidentity.NormalizeProvider(provider)

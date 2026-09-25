@@ -10,6 +10,7 @@ import (
 	"family-assistant/utils"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 type Repository struct {
@@ -20,7 +21,12 @@ func NewRepository(db *gorm.DB) interfacereminder.RepoReminderInterface {
 	return &Repository{DB: db}
 }
 
+func NewSchedulerRepository(db *gorm.DB) interfacereminder.SchedulerRepository {
+	return &Repository{DB: db}
+}
+
 var _ interfacereminder.RepoReminderInterface = (*Repository)(nil)
+var _ interfacereminder.SchedulerRepository = (*Repository)(nil)
 
 func (r *Repository) Create(ctx context.Context, reminder *domainreminder.Reminder) error {
 	if reminder == nil {
@@ -33,8 +39,85 @@ func (r *Repository) Create(ctx context.Context, reminder *domainreminder.Remind
 		reminder.ID = utils.CreateUUID()
 	}
 	return r.DB.WithContext(ctx).
-		Select("id", "space_id", "created_by_member_id", "assignee_member_id", "title", "description", "scheduled_at", "status", "completed_at", "created_at", "updated_at").
+		Select("id", "space_id", "created_by_member_id", "assignee_member_id", "title", "description", "scheduled_at", "status", "delivery_provider", "delivery_target", "completed_at", "created_at", "updated_at").
 		Create(reminder).Error
+}
+
+func (r *Repository) ClaimDueForNotification(ctx context.Context, now, staleBefore time.Time, limit int) ([]domainreminder.Reminder, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+
+	var reminders []domainreminder.Reminder
+	err := r.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Model(&domainreminder.Reminder{}).
+			Clauses(clause.Locking{Strength: "UPDATE", Options: "SKIP LOCKED"}).
+			Where("status = ? AND scheduled_at <= ? AND notified_at IS NULL AND deleted_at IS NULL AND (notification_claimed_at IS NULL OR notification_claimed_at < ?)", domainreminder.StatusPending, now, staleBefore).
+			Order("scheduled_at ASC").
+			Limit(limit).
+			Find(&reminders).Error; err != nil {
+			return err
+		}
+		if len(reminders) == 0 {
+			return nil
+		}
+
+		ids := make([]string, 0, len(reminders))
+		for i := range reminders {
+			ids = append(ids, reminders[i].ID)
+		}
+		if err := tx.Model(&domainreminder.Reminder{}).
+			Where("id IN ? AND status = ? AND notified_at IS NULL", ids, domainreminder.StatusPending).
+			Updates(map[string]any{"notification_claimed_at": now, "updated_at": now}).Error; err != nil {
+			return err
+		}
+		for i := range reminders {
+			claimedAt := now
+			reminders[i].NotificationClaimedAt = &claimedAt
+		}
+		return nil
+	})
+	return reminders, err
+}
+
+func (r *Repository) MarkNotificationSent(ctx context.Context, reminderID string, claimedAt, sentAt time.Time) error {
+	if strings.TrimSpace(reminderID) == "" {
+		return domainreminder.ErrReminderIDRequired
+	}
+	if claimedAt.IsZero() {
+		return domainreminder.ErrStatusConflict
+	}
+	result := r.DB.WithContext(ctx).
+		Model(&domainreminder.Reminder{}).
+		Where("id = ? AND status = ? AND notified_at IS NULL AND notification_claimed_at = ?", reminderID, domainreminder.StatusPending, claimedAt).
+		Updates(map[string]any{"notified_at": sentAt, "notification_claimed_at": nil, "updated_at": sentAt})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return domainreminder.ErrStatusConflict
+	}
+	return nil
+}
+
+func (r *Repository) ReleaseNotificationClaim(ctx context.Context, reminderID string, claimedAt time.Time) error {
+	if strings.TrimSpace(reminderID) == "" {
+		return domainreminder.ErrReminderIDRequired
+	}
+	if claimedAt.IsZero() {
+		return domainreminder.ErrStatusConflict
+	}
+	result := r.DB.WithContext(ctx).
+		Model(&domainreminder.Reminder{}).
+		Where("id = ? AND status = ? AND notified_at IS NULL AND notification_claimed_at = ?", reminderID, domainreminder.StatusPending, claimedAt).
+		Updates(map[string]any{"notification_claimed_at": nil, "updated_at": time.Now().UTC()})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return domainreminder.ErrStatusConflict
+	}
+	return nil
 }
 
 func (r *Repository) FindByIDInSpace(ctx context.Context, spaceID, reminderID string) (*domainreminder.Reminder, error) {

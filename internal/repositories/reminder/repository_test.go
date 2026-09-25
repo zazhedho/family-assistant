@@ -73,7 +73,7 @@ func TestCreatePersistsSpaceAndOptionalAssignee(t *testing.T) {
 	repo := NewRepository(db)
 	reminder := reminderFixture()
 
-	mock.ExpectExec(regexp.QuoteMeta(`INSERT INTO "reminders" ("id","space_id","created_by_member_id","assignee_member_id","title","description","scheduled_at","status","completed_at","created_at","updated_at") VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`)).
+	mock.ExpectExec(regexp.QuoteMeta(`INSERT INTO "reminders" ("id","space_id","created_by_member_id","assignee_member_id","title","description","scheduled_at","status","delivery_provider","delivery_target","completed_at","created_at","updated_at") VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`)).
 		WithArgs(
 			reminder.ID,
 			reminder.SpaceID,
@@ -83,6 +83,8 @@ func TestCreatePersistsSpaceAndOptionalAssignee(t *testing.T) {
 			reminder.Description,
 			reminder.ScheduledAt,
 			reminder.Status,
+			reminder.DeliveryProvider,
+			reminder.DeliveryTarget,
 			reminder.CompletedAt,
 			reminder.CreatedAt,
 			reminder.UpdatedAt,
@@ -103,7 +105,7 @@ func TestCreateGeneratesUUIDWhenIDIsEmpty(t *testing.T) {
 	reminder := reminderFixture()
 	reminder.ID = ""
 
-	mock.ExpectExec(regexp.QuoteMeta(`INSERT INTO "reminders" ("id","space_id","created_by_member_id","assignee_member_id","title","description","scheduled_at","status","completed_at","created_at","updated_at") VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`)).
+	mock.ExpectExec(regexp.QuoteMeta(`INSERT INTO "reminders" ("id","space_id","created_by_member_id","assignee_member_id","title","description","scheduled_at","status","delivery_provider","delivery_target","completed_at","created_at","updated_at") VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`)).
 		WithArgs(
 			sqlmock.AnyArg(),
 			reminder.SpaceID,
@@ -113,6 +115,8 @@ func TestCreateGeneratesUUIDWhenIDIsEmpty(t *testing.T) {
 			reminder.Description,
 			reminder.ScheduledAt,
 			reminder.Status,
+			reminder.DeliveryProvider,
+			reminder.DeliveryTarget,
 			reminder.CompletedAt,
 			reminder.CreatedAt,
 			reminder.UpdatedAt,
