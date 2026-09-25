@@ -63,7 +63,7 @@ func (b *WhatsAppBridge) Send(ctx context.Context, target domainreminder.Deliver
 	if err != nil {
 		return fmt.Errorf("send notification: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 		return fmt.Errorf("notification bridge status %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
