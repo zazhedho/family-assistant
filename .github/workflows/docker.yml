@@ -1,0 +1,83 @@
+name: Build & Push Family Assistant (Smart)
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  detect-changes:
+    runs-on: ubuntu-latest
+    outputs:
+      backend: ${{ steps.filter.outputs.backend }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            backend:
+              - 'Dockerfile'
+              - 'entrypoint.sh'
+              - 'go.mod'
+              - 'go.sum'
+              - 'main.go'
+              - 'cmd/**'
+              - 'infrastructure/**'
+              - 'internal/**'
+              - 'middlewares/**'
+              - 'migrations/**'
+              - 'pkg/**'
+              - 'utils/**'
+
+  build-backend:
+    needs: detect-changes
+    if: needs.detect-changes.outputs.backend == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build & Push Backend
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/family-assistant:latest
+            ghcr.io/${{ github.repository_owner }}/family-assistant:${{ github.sha }}
+
+  deploy:
+    needs:
+      - detect-changes
+      - build-backend
+    if: |
+      always() &&
+      !cancelled() &&
+      !failure() &&
+      needs.detect-changes.outputs.backend == 'true'
+    runs-on: ubuntu-latest
+    environment: Production
+
+    steps:
+      - name: Deploy to VPS
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          script: |
+            cd /opt/apps/family-assistant
+            docker compose pull backend
+            docker compose up -d backend
