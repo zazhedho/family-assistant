@@ -80,13 +80,16 @@ func (r *Repository) ClaimDueForNotification(ctx context.Context, now, staleBefo
 	return reminders, err
 }
 
-func (r *Repository) MarkNotificationSent(ctx context.Context, reminderID string, sentAt time.Time) error {
+func (r *Repository) MarkNotificationSent(ctx context.Context, reminderID string, claimedAt, sentAt time.Time) error {
 	if strings.TrimSpace(reminderID) == "" {
 		return domainreminder.ErrReminderIDRequired
 	}
+	if claimedAt.IsZero() {
+		return domainreminder.ErrStatusConflict
+	}
 	result := r.DB.WithContext(ctx).
 		Model(&domainreminder.Reminder{}).
-		Where("id = ? AND status = ? AND notified_at IS NULL AND notification_claimed_at IS NOT NULL", reminderID, domainreminder.StatusPending).
+		Where("id = ? AND status = ? AND notified_at IS NULL AND notification_claimed_at = ?", reminderID, domainreminder.StatusPending, claimedAt).
 		Updates(map[string]any{"notified_at": sentAt, "notification_claimed_at": nil, "updated_at": sentAt})
 	if result.Error != nil {
 		return result.Error
@@ -97,13 +100,16 @@ func (r *Repository) MarkNotificationSent(ctx context.Context, reminderID string
 	return nil
 }
 
-func (r *Repository) ReleaseNotificationClaim(ctx context.Context, reminderID string) error {
+func (r *Repository) ReleaseNotificationClaim(ctx context.Context, reminderID string, claimedAt time.Time) error {
 	if strings.TrimSpace(reminderID) == "" {
 		return domainreminder.ErrReminderIDRequired
 	}
+	if claimedAt.IsZero() {
+		return domainreminder.ErrStatusConflict
+	}
 	result := r.DB.WithContext(ctx).
 		Model(&domainreminder.Reminder{}).
-		Where("id = ? AND status = ? AND notified_at IS NULL", reminderID, domainreminder.StatusPending).
+		Where("id = ? AND status = ? AND notified_at IS NULL AND notification_claimed_at = ?", reminderID, domainreminder.StatusPending, claimedAt).
 		Updates(map[string]any{"notification_claimed_at": nil, "updated_at": time.Now().UTC()})
 	if result.Error != nil {
 		return result.Error

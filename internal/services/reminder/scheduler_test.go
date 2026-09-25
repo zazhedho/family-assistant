@@ -13,22 +13,31 @@ import (
 )
 
 type schedulerRepositoryStub struct {
-	due      []domainreminder.Reminder
-	sent     []string
-	released []string
+	due            []domainreminder.Reminder
+	sent           []string
+	sentClaims     []time.Time
+	released       []string
+	releasedClaims []time.Time
 }
 
-func (s *schedulerRepositoryStub) ClaimDueForNotification(context.Context, time.Time, time.Time, int) ([]domainreminder.Reminder, error) {
-	return append([]domainreminder.Reminder(nil), s.due...), nil
+func (s *schedulerRepositoryStub) ClaimDueForNotification(_ context.Context, now, _ time.Time, _ int) ([]domainreminder.Reminder, error) {
+	due := append([]domainreminder.Reminder(nil), s.due...)
+	for i := range due {
+		claimedAt := now
+		due[i].NotificationClaimedAt = &claimedAt
+	}
+	return due, nil
 }
 
-func (s *schedulerRepositoryStub) MarkNotificationSent(_ context.Context, reminderID string, _ time.Time) error {
+func (s *schedulerRepositoryStub) MarkNotificationSent(_ context.Context, reminderID string, claimedAt, _ time.Time) error {
 	s.sent = append(s.sent, reminderID)
+	s.sentClaims = append(s.sentClaims, claimedAt)
 	return nil
 }
 
-func (s *schedulerRepositoryStub) ReleaseNotificationClaim(_ context.Context, reminderID string) error {
+func (s *schedulerRepositoryStub) ReleaseNotificationClaim(_ context.Context, reminderID string, claimedAt time.Time) error {
 	s.released = append(s.released, reminderID)
+	s.releasedClaims = append(s.releasedClaims, claimedAt)
 	return nil
 }
 
@@ -54,12 +63,15 @@ type membershipResolverStub struct {
 	members map[string]string
 }
 
-func (s *membershipResolverStub) FindActiveMembership(_ context.Context, _, memberID string) (*domainspace.ResolvedMembership, error) {
-	userID := s.members[memberID]
-	if userID == "" {
-		return nil, errors.New("membership not found")
+func (s *membershipResolverStub) ListActiveMembers(_ context.Context, _ string) ([]domainspace.ResolvedMembership, error) {
+	result := make([]domainspace.ResolvedMembership, 0, len(s.members))
+	for memberID, userID := range s.members {
+		if userID == "" {
+			continue
+		}
+		result = append(result, domainspace.ResolvedMembership{ID: memberID, UserID: userID, Status: domainspace.StatusActive})
 	}
-	return &domainspace.ResolvedMembership{UserID: userID, Status: domainspace.StatusActive}, nil
+	return result, nil
 }
 
 type identityResolverStub struct {
@@ -94,6 +106,9 @@ func TestReminderSchedulerSendsStoredTextAndMarksNotification(t *testing.T) {
 	if len(reminders.sent) != 1 || reminders.sent[0] != "reminder-1" {
 		t.Fatalf("marked sent = %v", reminders.sent)
 	}
+	if len(reminders.sentClaims) != 1 || !reminders.sentClaims[0].Equal(time.Date(2026, 9, 25, 8, 0, 0, 0, time.UTC)) {
+		t.Fatalf("sent claim = %v", reminders.sentClaims)
+	}
 }
 
 func TestReminderSchedulerReleasesFailedSendAndContinues(t *testing.T) {
@@ -109,6 +124,9 @@ func TestReminderSchedulerReleasesFailedSendAndContinues(t *testing.T) {
 	}
 	if len(reminders.released) != 1 || reminders.released[0] != "reminder-1" {
 		t.Fatalf("released = %v", reminders.released)
+	}
+	if len(reminders.releasedClaims) != 1 {
+		t.Fatalf("released claims = %v", reminders.releasedClaims)
 	}
 	if len(reminders.sent) != 1 || reminders.sent[0] != "reminder-2" {
 		t.Fatalf("marked sent = %v", reminders.sent)

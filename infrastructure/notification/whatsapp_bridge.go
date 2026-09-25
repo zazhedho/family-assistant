@@ -37,7 +37,8 @@ func (b *WhatsAppBridge) Send(ctx context.Context, target domainreminder.Deliver
 	if b == nil || b.client == nil {
 		return fmt.Errorf("WhatsApp bridge is not configured")
 	}
-	if strings.ToLower(strings.TrimSpace(target.Provider)) != "whatsapp" {
+	provider := strings.ToLower(strings.TrimSpace(target.Provider))
+	if provider != "whatsapp" && provider != "whatsapp_cloud" {
 		return fmt.Errorf("unsupported notification provider %q", target.Provider)
 	}
 	if strings.TrimSpace(target.Target) == "" {

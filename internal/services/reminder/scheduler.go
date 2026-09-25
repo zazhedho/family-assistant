@@ -26,7 +26,7 @@ type reminderIdentityResolver interface {
 }
 
 type reminderMembershipResolver interface {
-	FindActiveMembership(context.Context, string, string) (*domainspace.ResolvedMembership, error)
+	ListActiveMembers(context.Context, string) ([]domainspace.ResolvedMembership, error)
 }
 
 type ReminderScheduler struct {
@@ -110,7 +110,11 @@ func (s *ReminderScheduler) RunOnce(ctx context.Context, now time.Time) error {
 		}
 		failures = append(failures, fmt.Errorf("reminder %s: %w", due[i].ID, deliveryErr))
 		if release {
-			if releaseErr := s.reminders.ReleaseNotificationClaim(ctx, due[i].ID); releaseErr != nil {
+			if due[i].NotificationClaimedAt == nil {
+				failures = append(failures, fmt.Errorf("release reminder %s: claim timestamp is missing", due[i].ID))
+				continue
+			}
+			if releaseErr := s.reminders.ReleaseNotificationClaim(ctx, due[i].ID, *due[i].NotificationClaimedAt); releaseErr != nil {
 				failures = append(failures, fmt.Errorf("release reminder %s: %w", due[i].ID, releaseErr))
 			}
 		}
@@ -130,7 +134,10 @@ func (s *ReminderScheduler) deliver(ctx context.Context, reminder *domainreminde
 	if err := sender.Send(ctx, target, reminderMessage(reminder)); err != nil {
 		return true, err
 	}
-	if err := s.reminders.MarkNotificationSent(ctx, reminder.ID, sentAt); err != nil {
+	if reminder.NotificationClaimedAt == nil {
+		return true, errors.New("reminder claim timestamp is missing")
+	}
+	if err := s.reminders.MarkNotificationSent(ctx, reminder.ID, *reminder.NotificationClaimedAt, sentAt); err != nil {
 		// Keep the claim until its lease expires: the message may already be delivered.
 		return false, fmt.Errorf("mark notification sent: %w", err)
 	}
@@ -149,6 +156,10 @@ func (s *ReminderScheduler) target(ctx context.Context, reminder *domainreminder
 	if s.members == nil || s.identities == nil {
 		return domainreminder.DeliveryTarget{}, errors.New("reminder delivery fallback is not configured")
 	}
+	members, err := s.members.ListActiveMembers(ctx, reminder.SpaceID)
+	if err != nil {
+		return domainreminder.DeliveryTarget{}, fmt.Errorf("list reminder members: %w", err)
+	}
 
 	memberIDs := make([]string, 0, 2)
 	if reminder.AssigneeMemberID != nil {
@@ -164,8 +175,14 @@ func (s *ReminderScheduler) target(ctx context.Context, reminder *domainreminder
 			continue
 		}
 		seen[memberID] = struct{}{}
-		member, err := s.members.FindActiveMembership(ctx, reminder.SpaceID, memberID)
-		if err != nil || member == nil || member.Status != domainspace.StatusActive || strings.TrimSpace(member.UserID) == "" {
+		var member *domainspace.ResolvedMembership
+		for i := range members {
+			if strings.TrimSpace(members[i].ID) == memberID && members[i].Status == domainspace.StatusActive {
+				member = &members[i]
+				break
+			}
+		}
+		if member == nil || strings.TrimSpace(member.UserID) == "" {
 			continue
 		}
 		identity, err := s.identities.FindActiveByUserID(ctx, domainidentity.ProviderHermes, member.UserID)

@@ -50,11 +50,12 @@ func TestMarkNotificationSentUpdatesOnlyPendingClaim(t *testing.T) {
 	db, mock := newReminderMockDB(t)
 	repo := NewSchedulerRepository(db)
 	sentAt := time.Date(2026, 9, 25, 8, 1, 0, 0, time.UTC)
+	claimedAt := time.Date(2026, 9, 25, 8, 0, 0, 0, time.UTC)
 
-	mock.ExpectExec(`UPDATE "reminders" SET .*notification_claimed_at.*notified_at.* WHERE .*id.*status.*`).
+	mock.ExpectExec(`UPDATE "reminders" SET .*notification_claimed_at.*notified_at.* WHERE .*id.*status.*notification_claimed_at.*`).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 
-	if err := repo.MarkNotificationSent(context.Background(), "reminder-1", sentAt); err != nil {
+	if err := repo.MarkNotificationSent(context.Background(), "reminder-1", claimedAt, sentAt); err != nil {
 		t.Fatalf("mark notification sent: %v", err)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
@@ -65,11 +66,12 @@ func TestMarkNotificationSentUpdatesOnlyPendingClaim(t *testing.T) {
 func TestReleaseNotificationClaimClearsClaim(t *testing.T) {
 	db, mock := newReminderMockDB(t)
 	repo := NewSchedulerRepository(db)
+	claimedAt := time.Date(2026, 9, 25, 8, 0, 0, 0, time.UTC)
 
-	mock.ExpectExec(`UPDATE "reminders" SET .*notification_claimed_at.* WHERE .*id.*status.*`).
+	mock.ExpectExec(`UPDATE "reminders" SET .*notification_claimed_at.* WHERE .*id.*status.*notification_claimed_at.*`).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 
-	if err := repo.ReleaseNotificationClaim(context.Background(), "reminder-1"); err != nil {
+	if err := repo.ReleaseNotificationClaim(context.Background(), "reminder-1", claimedAt); err != nil {
 		t.Fatalf("release notification claim: %v", err)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {

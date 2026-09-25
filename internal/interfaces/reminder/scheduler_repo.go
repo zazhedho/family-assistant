@@ -9,6 +9,6 @@ import (
 
 type SchedulerRepository interface {
 	ClaimDueForNotification(context.Context, time.Time, time.Time, int) ([]domainreminder.Reminder, error)
-	MarkNotificationSent(context.Context, string, time.Time) error
-	ReleaseNotificationClaim(context.Context, string) error
+	MarkNotificationSent(context.Context, string, time.Time, time.Time) error
+	ReleaseNotificationClaim(context.Context, string, time.Time) error
 }

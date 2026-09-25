@@ -183,7 +183,7 @@ func startReminderScheduler(
 	}
 	scheduler := reminderService.NewReminderScheduler(
 		reminders, identities, members,
-		map[string]interfacenotification.NotificationSender{"whatsapp": sender},
+		map[string]interfacenotification.NotificationSender{"whatsapp": sender, "whatsapp_cloud": sender},
 		cfg.Interval, cfg.Lease, cfg.BatchSize,
 	)
 	go scheduler.Run(ctx)
