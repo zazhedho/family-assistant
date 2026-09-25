@@ -17,6 +17,11 @@ var (
 
 type Status string
 
+type DeliveryTarget struct {
+	Provider string
+	Target   string
+}
+
 const (
 	StatusPending   Status = "PENDING"
 	StatusCompleted Status = "COMPLETED"
