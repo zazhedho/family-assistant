@@ -112,6 +112,10 @@ func onboardingLookupQuery() string {
 	return `SELECT .*FROM external_identities ei.*JOIN spaces s.*s.created_by_user_id = ei.user_id.*s.type = 'PERSONAL'.*s.status = 'ACTIVE'.*s.deleted_at IS NULL.*WHERE ei.provider = \$1.*ei.external_id = \$2.*ei.status = 'ACTIVE'.*ei.deleted_at IS NULL.*LIMIT \$3`
 }
 
+func onboardingPhoneLookupQuery() string {
+	return `SELECT .*FROM users u.*JOIN spaces s.*s.created_by_user_id = u.id.*s.type = 'PERSONAL'.*s.status = 'ACTIVE'.*s.deleted_at IS NULL.*WHERE u.phone = \$1.*u.deleted_at IS NULL.*LIMIT \$2`
+}
+
 func expectCreateBeforeIdentity(mock sqlmock.Sqlmock) {
 	mock.ExpectBegin()
 	mock.ExpectExec(onboardingUserInsertQuery()).
@@ -291,6 +295,73 @@ func TestFindByExternalIdentityMapsRecordNotFound(t *testing.T) {
 	_, err := repo.FindByExternalIdentity(context.Background(), " HERMES ", " profile-1 ")
 	if !errors.Is(err, domainidentity.ErrIdentityNotFound) {
 		t.Fatalf("error = %v, want ErrIdentityNotFound", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestFindByPhoneReturnsPersonalAccount(t *testing.T) {
+	db, mock := newOnboardingMockDB(t)
+	repo := NewRepository(db)
+	mock.ExpectQuery(onboardingPhoneLookupQuery()).
+		WithArgs("628123456789", 1).
+		WillReturnRows(sqlmock.NewRows([]string{"user_id", "space_id"}).AddRow("user-1", "space-1"))
+
+	got, err := repo.FindByPhone(context.Background(), " 628123456789 ")
+	if err != nil || got != (domainonboarding.AccountRef{UserID: "user-1", SpaceID: "space-1"}) {
+		t.Fatalf("account = %#v, err = %v", got, err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestFindByPhoneMapsRecordNotFound(t *testing.T) {
+	db, mock := newOnboardingMockDB(t)
+	repo := NewRepository(db)
+	mock.ExpectQuery(onboardingPhoneLookupQuery()).
+		WithArgs("628123456789", 1).
+		WillReturnError(gorm.ErrRecordNotFound)
+
+	_, err := repo.FindByPhone(context.Background(), "628123456789")
+	if !errors.Is(err, domainidentity.ErrIdentityNotFound) {
+		t.Fatalf("error = %v, want identity not found", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestLinkExternalIdentityCreatesActiveIdentity(t *testing.T) {
+	db, mock := newOnboardingMockDB(t)
+	repo := NewRepository(db)
+	identity := validRegistration().Identity
+	identity.Provider = " HERMES "
+	identity.ExternalID = " profile-1 "
+	identity.Status = ""
+	identity.Metadata = nil
+	mock.ExpectExec(`INSERT INTO "external_identities"`).WillReturnResult(sqlmock.NewResult(1, 1))
+
+	if err := repo.LinkExternalIdentity(context.Background(), identity); err != nil {
+		t.Fatalf("link identity: %v", err)
+	}
+	if identity.Provider != " HERMES " || identity.ExternalID != " profile-1 " {
+		t.Fatalf("input identity was unexpectedly mutated: %+v", identity)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestLinkExternalIdentityMapsDuplicate(t *testing.T) {
+	db, mock := newOnboardingMockDB(t)
+	repo := NewRepository(db)
+	mock.ExpectExec(`INSERT INTO "external_identities"`).WillReturnError(&pgconn.PgError{Code: "23505"})
+
+	err := repo.LinkExternalIdentity(context.Background(), validRegistration().Identity)
+	if !errors.Is(err, domainidentity.ErrIdentityConflict) {
+		t.Fatalf("error = %v, want identity conflict", err)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)

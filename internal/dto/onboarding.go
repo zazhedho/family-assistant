@@ -14,3 +14,9 @@ type AccountRegistrationResult struct {
 	UserID  string
 	SpaceID string
 }
+
+type AccountLinkInput struct {
+	Provider   string
+	ExternalID string
+	Channel    string
+}

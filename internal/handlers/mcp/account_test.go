@@ -13,15 +13,23 @@ import (
 )
 
 type registrarStub struct {
-	input  dto.AccountRegistrationInput
-	result dto.AccountRegistrationResult
-	err    error
-	calls  int
+	input     dto.AccountRegistrationInput
+	linkInput dto.AccountLinkInput
+	result    dto.AccountRegistrationResult
+	err       error
+	calls     int
+	linkCalls int
 }
 
 func (s *registrarStub) Register(_ context.Context, input dto.AccountRegistrationInput) (dto.AccountRegistrationResult, error) {
 	s.calls++
 	s.input = input
+	return s.result, s.err
+}
+
+func (s *registrarStub) LinkExisting(_ context.Context, input dto.AccountLinkInput) (dto.AccountRegistrationResult, error) {
+	s.linkCalls++
+	s.linkInput = input
 	return s.result, s.err
 }
 
@@ -43,6 +51,30 @@ func TestAccountRegisterUsesOnlyTrustedExternalRequest(t *testing.T) {
 	encoded, err := json.Marshal(got)
 	if err != nil || strings.Contains(string(encoded), "1990-05-20") || strings.Contains(string(encoded), "profile-1") {
 		t.Fatalf("unsafe output = %s, err = %v", encoded, err)
+	}
+}
+
+func TestAccountLinkUsesOnlyTrustedExternalRequest(t *testing.T) {
+	service := &registrarStub{result: dto.AccountRegistrationResult{Status: "existing", UserID: "user-1", SpaceID: "space-1"}}
+	ctx := WithExternalRequest(context.Background(), ExternalRequest{
+		Provider: "hermes", ExternalID: "628123456789@s.whatsapp.net", Channel: "whatsapp",
+	})
+
+	got, err := AccountLink(ctx, service)
+	if err != nil || got != (AccountRegisterOutput{Status: "existing", UserID: "user-1", SpaceID: "space-1"}) {
+		t.Fatalf("output = %+v, err = %v", got, err)
+	}
+	if service.linkCalls != 1 || service.linkInput.Provider != "hermes" || service.linkInput.ExternalID != "628123456789@s.whatsapp.net" || service.linkInput.Channel != "whatsapp" {
+		t.Fatalf("link input = %+v, calls = %d", service.linkInput, service.linkCalls)
+	}
+}
+
+func TestAccountLinkRequiresTrustedExternalRequest(t *testing.T) {
+	service := &registrarStub{}
+	_, err := AccountLink(context.Background(), service)
+	var mapped *MCPError
+	if !errors.As(err, &mapped) || mapped.Code != "unauthenticated" || service.linkCalls != 0 {
+		t.Fatalf("error = %T %v, calls = %d", err, err, service.linkCalls)
 	}
 }
 

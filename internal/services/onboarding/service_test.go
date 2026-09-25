@@ -30,9 +30,15 @@ type repositoryStub struct {
 	findErr     error
 	findResults []findResult
 	findCalls   int
+	phoneFound  domainonboarding.AccountRef
+	phoneErr    error
+	phoneCalls  int
 	createErr   error
 	createCalls int
 	created     domainonboarding.Registration
+	linkErr     error
+	linkCalls   int
+	linked      domainidentity.ExternalIdentity
 }
 
 func (r *repositoryStub) FindByExternalIdentity(_ context.Context, _, _ string) (domainonboarding.AccountRef, error) {
@@ -55,6 +61,23 @@ func (r *repositoryStub) Create(_ context.Context, registration domainonboarding
 	r.createCalls++
 	r.created = registration
 	return r.createErr
+}
+
+func (r *repositoryStub) FindByPhone(_ context.Context, _ string) (domainonboarding.AccountRef, error) {
+	r.phoneCalls++
+	if r.phoneErr != nil {
+		return domainonboarding.AccountRef{}, r.phoneErr
+	}
+	if r.phoneFound != (domainonboarding.AccountRef{}) {
+		return r.phoneFound, nil
+	}
+	return domainonboarding.AccountRef{}, domainidentity.ErrIdentityNotFound
+}
+
+func (r *repositoryStub) LinkExternalIdentity(_ context.Context, identity domainidentity.ExternalIdentity) error {
+	r.linkCalls++
+	r.linked = identity
+	return r.linkErr
 }
 
 type roleFinderStub struct {
@@ -176,6 +199,34 @@ func TestRegisterReturnsExistingWithoutCreating(t *testing.T) {
 	got, err := h.service.Register(context.Background(), validInput())
 	if err != nil || got != (dto.AccountRegistrationResult{Status: StatusExisting, UserID: "user-1", SpaceID: "space-1"}) || h.repository.createCalls != 0 {
 		t.Fatalf("result = %+v, create calls = %d, err = %v", got, h.repository.createCalls, err)
+	}
+}
+
+func TestLinkExistingWhatsAppAccountByPhone(t *testing.T) {
+	h := newServiceHarness(t)
+	h.repository.phoneFound = domainonboarding.AccountRef{UserID: "user-1", SpaceID: "space-1"}
+
+	got, err := h.service.LinkExisting(context.Background(), dto.AccountLinkInput{
+		Provider: " HERMES ", ExternalID: "628123456789@s.whatsapp.net", Channel: " whatsapp ",
+	})
+	if err != nil || got != (dto.AccountRegistrationResult{Status: StatusExisting, UserID: "user-1", SpaceID: "space-1"}) {
+		t.Fatalf("result = %+v, err = %v", got, err)
+	}
+	if h.repository.phoneCalls != 1 || h.repository.linkCalls != 1 || h.repository.createCalls != 0 {
+		t.Fatalf("phone calls = %d, link calls = %d, create calls = %d", h.repository.phoneCalls, h.repository.linkCalls, h.repository.createCalls)
+	}
+	if h.repository.linked.UserID != "user-1" || h.repository.linked.Provider != "hermes" || h.repository.linked.ExternalID != "628123456789@s.whatsapp.net" || h.repository.linked.Status != domainidentity.StatusActive {
+		t.Fatalf("linked identity = %+v", h.repository.linked)
+	}
+}
+
+func TestLinkExistingRequiresKnownWhatsAppPhone(t *testing.T) {
+	h := newServiceHarness(t)
+	got, err := h.service.LinkExisting(context.Background(), dto.AccountLinkInput{
+		Provider: "hermes", ExternalID: "profile-1", Channel: "whatsapp",
+	})
+	if !errors.Is(err, domainidentity.ErrIdentityNotFound) || got != (dto.AccountRegistrationResult{}) || h.repository.phoneCalls != 0 || h.repository.linkCalls != 0 {
+		t.Fatalf("result = %+v, err = %v, phone calls = %d, link calls = %d", got, err, h.repository.phoneCalls, h.repository.linkCalls)
 	}
 }
 

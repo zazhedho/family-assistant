@@ -43,6 +43,47 @@ func (r *Repository) FindByExternalIdentity(ctx context.Context, provider, exter
 	return account, err
 }
 
+func (r *Repository) FindByPhone(ctx context.Context, phone string) (domainonboarding.AccountRef, error) {
+	phone = strings.TrimSpace(phone)
+	if phone == "" {
+		return domainonboarding.AccountRef{}, domainidentity.ErrIdentityNotFound
+	}
+
+	var account domainonboarding.AccountRef
+	err := r.DB.WithContext(ctx).
+		Table("users u").
+		Select("u.id::text AS user_id, s.id::text AS space_id").
+		Joins("JOIN spaces s ON s.created_by_user_id = u.id AND s.type = 'PERSONAL' AND s.status = 'ACTIVE' AND s.deleted_at IS NULL").
+		Where("u.phone = ? AND u.deleted_at IS NULL", phone).
+		Take(&account).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return domainonboarding.AccountRef{}, domainidentity.ErrIdentityNotFound
+	}
+	return account, err
+}
+
+func (r *Repository) LinkExternalIdentity(ctx context.Context, identity domainidentity.ExternalIdentity) error {
+	identity.Provider = domainidentity.NormalizeProvider(identity.Provider)
+	identity.ExternalID = strings.TrimSpace(identity.ExternalID)
+	identity.UserID = strings.TrimSpace(identity.UserID)
+	if identity.UserID == "" || identity.Provider == "" || identity.ExternalID == "" {
+		return domainidentity.ErrIdentityNotFound
+	}
+	if identity.Status == "" {
+		identity.Status = domainidentity.StatusActive
+	}
+	if identity.Metadata == nil {
+		identity.Metadata = map[string]any{}
+	}
+	if err := r.DB.WithContext(ctx).Create(&identity).Error; err != nil {
+		if isExternalIdentityDuplicate(err) {
+			return domainidentity.ErrIdentityConflict
+		}
+		return err
+	}
+	return nil
+}
+
 func (r *Repository) Create(ctx context.Context, registration domainonboarding.Registration) error {
 	err := r.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		omit := []string{"email", "password", "password_changed_at"}

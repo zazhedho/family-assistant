@@ -42,12 +42,36 @@ func AccountRegister(ctx context.Context, registrar interfaceonboarding.ServiceO
 	return AccountRegisterOutput{Status: result.Status, UserID: result.UserID, SpaceID: result.SpaceID}, nil
 }
 
+func AccountLink(ctx context.Context, registrar interfaceonboarding.ServiceOnboardingInterface) (AccountRegisterOutput, error) {
+	request, ok := ExternalRequestFromContext(ctx)
+	if !ok || strings.TrimSpace(request.Provider) == "" || strings.TrimSpace(request.ExternalID) == "" {
+		return AccountRegisterOutput{}, MapToolError(serviceidentity.ErrUnauthenticated)
+	}
+	if registrar == nil {
+		return AccountRegisterOutput{}, MapToolError(errors.New("account registration service is not configured"))
+	}
+	result, err := registrar.LinkExisting(ctx, dto.AccountLinkInput{
+		Provider: request.Provider, ExternalID: request.ExternalID, Channel: request.Channel,
+	})
+	if err != nil {
+		return AccountRegisterOutput{}, MapToolError(err)
+	}
+	return AccountRegisterOutput{Status: result.Status, UserID: result.UserID, SpaceID: result.SpaceID}, nil
+}
+
 func registerAccountTools(server *mcpsdk.Server, registrar interfaceonboarding.ServiceOnboardingInterface) {
 	addTool(server, &mcpsdk.Tool{
 		Name:        "account_register",
 		Description: "Ask for the user's name and birth date in YYYY-MM-DD format. Explain that the birth date is used for age-policy validation, show a summary, obtain explicit confirmation, then call with consent=true.",
 	}, func(ctx context.Context, _ *mcpsdk.CallToolRequest, input AccountRegisterInput) (*mcpsdk.CallToolResult, AccountRegisterOutput, error) {
 		output, err := AccountRegister(ctx, registrar, input)
+		return nil, output, err
+	})
+	addTool(server, &mcpsdk.Tool{
+		Name:        "account_link",
+		Description: "Link the current WhatsApp number to an existing account without asking for a password or one-time code.",
+	}, func(ctx context.Context, _ *mcpsdk.CallToolRequest, _ struct{}) (*mcpsdk.CallToolResult, AccountRegisterOutput, error) {
+		output, err := AccountLink(ctx, registrar)
 		return nil, output, err
 	})
 }

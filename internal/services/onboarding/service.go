@@ -101,6 +101,69 @@ func (s *Service) Register(ctx context.Context, input dto.AccountRegistrationInp
 	return dto.AccountRegistrationResult{Status: StatusCreated, UserID: registration.User.Id, SpaceID: registration.Space.ID}, nil
 }
 
+func (s *Service) LinkExisting(ctx context.Context, input dto.AccountLinkInput) (dto.AccountRegistrationResult, error) {
+	provider := domainidentity.NormalizeProvider(input.Provider)
+	externalID := strings.TrimSpace(input.ExternalID)
+	channel := strings.TrimSpace(input.Channel)
+	if provider == "" || externalID == "" {
+		return dto.AccountRegistrationResult{}, s.fail(ctx, channel, provider, serviceidentity.ErrUnauthenticated)
+	}
+	phone := whatsappPhone(provider, channel, externalID)
+	if phone == "" {
+		return dto.AccountRegistrationResult{}, s.fail(ctx, channel, provider, domainidentity.ErrIdentityNotFound)
+	}
+	if s.repository == nil {
+		return dto.AccountRegistrationResult{}, s.fail(ctx, channel, provider, errors.New("onboarding repository is not configured"))
+	}
+
+	account, err := s.repository.FindByExternalIdentity(ctx, provider, externalID)
+	if err == nil {
+		return existingAccountResult(account, func() { s.success(ctx, channel, provider, account.UserID) })
+	}
+	if !errors.Is(err, domainidentity.ErrIdentityNotFound) {
+		return dto.AccountRegistrationResult{}, s.fail(ctx, channel, provider, err)
+	}
+
+	account, err = s.repository.FindByPhone(ctx, phone)
+	if err != nil {
+		return dto.AccountRegistrationResult{}, s.fail(ctx, channel, provider, err)
+	}
+	if strings.TrimSpace(account.UserID) == "" || strings.TrimSpace(account.SpaceID) == "" {
+		return dto.AccountRegistrationResult{}, s.fail(ctx, channel, provider, domainidentity.ErrIdentityNotFound)
+	}
+	now := s.now().UTC()
+	identity := domainidentity.ExternalIdentity{
+		ID:         utils.CreateUUID(),
+		UserID:     account.UserID,
+		Provider:   provider,
+		ExternalID: externalID,
+		Status:     domainidentity.StatusActive,
+		VerifiedAt: now,
+		Metadata:   map[string]any{},
+		CreatedAt:  now,
+		UpdatedAt:  now,
+	}
+	if err := s.repository.LinkExternalIdentity(ctx, identity); err != nil {
+		if errors.Is(err, domainidentity.ErrIdentityConflict) {
+			winner, findErr := s.repository.FindByExternalIdentity(ctx, provider, externalID)
+			if findErr == nil {
+				return existingAccountResult(winner, func() { s.success(ctx, channel, provider, winner.UserID) })
+			}
+		}
+		return dto.AccountRegistrationResult{}, s.fail(ctx, channel, provider, err)
+	}
+	s.success(ctx, channel, provider, account.UserID)
+	return dto.AccountRegistrationResult{Status: StatusExisting, UserID: account.UserID, SpaceID: account.SpaceID}, nil
+}
+
+func existingAccountResult(account domainonboarding.AccountRef, onSuccess func()) (dto.AccountRegistrationResult, error) {
+	if strings.TrimSpace(account.UserID) == "" || strings.TrimSpace(account.SpaceID) == "" {
+		return dto.AccountRegistrationResult{}, domainidentity.ErrIdentityNotFound
+	}
+	onSuccess()
+	return dto.AccountRegistrationResult{Status: StatusExisting, UserID: account.UserID, SpaceID: account.SpaceID}, nil
+}
+
 func parseBirthDate(raw string, now time.Time) (*time.Time, error) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {

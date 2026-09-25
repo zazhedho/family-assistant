@@ -10,6 +10,7 @@ import (
 
 type ServiceOnboardingInterface interface {
 	Register(context.Context, dto.AccountRegistrationInput) (dto.AccountRegistrationResult, error)
+	LinkExisting(context.Context, dto.AccountLinkInput) (dto.AccountRegistrationResult, error)
 }
 
 type RoleFinder interface {

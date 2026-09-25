@@ -226,6 +226,7 @@ The endpoint is `http://127.0.0.1:8081/mcp` by default. The exact tool allowlist
 is:
 
 - `account_register`
+- `account_link`
 - `identity_link`
 - `identity_revoke`
 - `space_create`
@@ -257,7 +258,9 @@ or activity deletion use lifecycle-safe soft-delete/revoke state changes, so
 historical audit records remain available while normal list tools hide removed
 rows.
 
-For a new WhatsApp account, Hermes asks for the user's name and birth date,
+For an existing account whose phone number matches the current WhatsApp sender,
+Hermes calls `account_link` first. The account is linked without a password or
+one-time code. If no matching account exists, Hermes asks for the user's name and birth date,
 explains that the birth date is used for minimum-age validation, shows a
 confirmation summary, and then calls `account_register` once with
 `consent: true`. Email and password are not requested. Replaying the same
@@ -265,9 +268,10 @@ profile is idempotent and returns the existing account; underage independent
 registration is rejected. `identity_link` remains available for pre-existing
 HTTP or Google accounts.
 
-`identity_link` consumes a one-time code issued through the authenticated HTTP
-endpoint. The signed WhatsApp sender identity is resolved dynamically to the
-linked user, and `X-Hermes-Channel` is retained for audit provenance. Space selectors accept an
+`identity_link` remains the migration fallback for a different phone number and
+consumes a one-time code issued by an authenticated account owner. The signed
+WhatsApp sender identity is resolved dynamically to the linked user, and
+`X-Hermes-Channel` is retained for audit provenance. Space selectors accept an
 authorized Space UUID or exact user-facing name; a blank selector uses the
 user's Personal Space. Every reminder operation re-authorizes the selected
 Space and resource.
