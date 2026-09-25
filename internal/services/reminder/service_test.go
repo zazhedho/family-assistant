@@ -238,6 +238,26 @@ func TestCreateRejectsAssigneeOutsideActorSpaceAsNotFound(t *testing.T) {
 	}
 }
 
+func TestCreateRejectsPartialDeliveryTarget(t *testing.T) {
+	repo := &reminderRepositoryStub{}
+	spaces := &spaceRepositoryStub{members: []domainspace.ResolvedMembership{
+		membership(personalSpaceID, creatorID, "space_owner", "user-1"),
+	}}
+	service := newReminderService(repo, spaces, nil)
+	actor := actor(personalSpaceID, domainspace.TypePersonal, creatorID, "space_owner", "reminders:create")
+
+	_, err := service.Create(context.Background(), actor, dto.ReminderCreateInput{
+		Title: "Pay bill", ScheduledAt: time.Now().UTC(), DeliveryTarget: "chat-1",
+	})
+	var validation *authorization.ValidationError
+	if !errors.As(err, &validation) || validation.Field != "delivery_target" {
+		t.Fatalf("error = %v, want delivery target validation", err)
+	}
+	if repo.created != nil {
+		t.Fatal("partial delivery target reached repository")
+	}
+}
+
 func TestListSharedReturnsRemindersForActiveMemberWithoutAssignmentFilter(t *testing.T) {
 	assigned := assigneeID
 	repo := &reminderRepositoryStub{listed: []domainreminder.Reminder{

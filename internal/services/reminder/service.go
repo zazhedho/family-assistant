@@ -69,6 +69,11 @@ func (s *service) Create(ctx context.Context, actor domainidentity.ActorContext,
 	if input.ScheduledAt.IsZero() {
 		return nil, &authorization.ValidationError{Field: "scheduled_at", Reason: "is required"}
 	}
+	deliveryProvider := strings.ToLower(strings.TrimSpace(input.DeliveryProvider))
+	deliveryTarget := strings.TrimSpace(input.DeliveryTarget)
+	if (deliveryProvider == "") != (deliveryTarget == "") {
+		return nil, &authorization.ValidationError{Field: "delivery_target", Reason: "provider and target are required together"}
+	}
 
 	if err := s.authorize.Authorize(ctx, actor, createPermission, domainauthorization.Resource{SpaceID: spaceID}); err != nil {
 		return nil, err
@@ -97,8 +102,8 @@ func (s *service) Create(ctx context.Context, actor domainidentity.ActorContext,
 		Description:       input.Description,
 		ScheduledAt:       input.ScheduledAt,
 		Status:            domainreminder.StatusPending,
-		DeliveryProvider:  strings.ToLower(strings.TrimSpace(input.DeliveryProvider)),
-		DeliveryTarget:    strings.TrimSpace(input.DeliveryTarget),
+		DeliveryProvider:  deliveryProvider,
+		DeliveryTarget:    deliveryTarget,
 	}
 	if err := s.reminders.Create(ctx, created); err != nil {
 		return nil, err
