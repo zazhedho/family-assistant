@@ -43,13 +43,9 @@ def capture_gateway_identity(event: Any, **_: Any) -> None:
     if not external_id:
         _current_identity.set(None)
         return None
-    _current_identity.set(
-        {
-            "provider": "hermes",
-            "external_id": external_id,
-            "channel": platform,
-        }
-    )
+    chat_id = _text(getattr(source, "chat_id", "")) or external_id
+    chat_type = _text(getattr(source, "chat_type", ""))
+    _current_identity.set(_identity(platform, external_id, chat_id, chat_type))
     return None
 
 
@@ -68,6 +64,8 @@ def inject_identity(tool_name: str = "", args: dict[str, Any] | None = None, **_
         "provider": identity["provider"],
         "external_id": identity["external_id"],
         "channel": identity["channel"],
+        "chat_id": identity.get("chat_id", ""),
+        "chat_type": identity.get("chat_type", ""),
         "issued_at": int(time.time()),
         "nonce": secrets.token_urlsafe(18),
     }
@@ -104,14 +102,18 @@ def _session_identity() -> dict[str, str] | None:
         external_id = _text(get_session_env("HERMES_SESSION_USER_ID", "")) or _text(
             get_session_env("HERMES_SESSION_USER_ID_ALT", "")
         )
+        chat_id = _text(get_session_env("HERMES_SESSION_CHAT_ID", ""))
+        chat_type = _text(get_session_env("HERMES_SESSION_CHAT_TYPE", ""))
     except Exception:
         platform = _text(os.environ.get("HERMES_SESSION_PLATFORM", ""))
         external_id = _text(os.environ.get("HERMES_SESSION_USER_ID", "")) or _text(
             os.environ.get("HERMES_SESSION_USER_ID_ALT", "")
         )
+        chat_id = _text(os.environ.get("HERMES_SESSION_CHAT_ID", ""))
+        chat_type = _text(os.environ.get("HERMES_SESSION_CHAT_TYPE", ""))
     if platform not in {"whatsapp", "whatsapp_cloud"} or not external_id:
         return None
-    return {"provider": "hermes", "external_id": external_id, "channel": platform}
+    return _identity(platform, external_id, chat_id or external_id, chat_type)
 
 
 def _is_target_tool(tool_name: str) -> bool:
@@ -126,6 +128,8 @@ def _sign(secret: str, envelope: dict[str, Any]) -> str:
             str(envelope.get("provider") or ""),
             str(envelope.get("external_id") or ""),
             str(envelope.get("channel") or ""),
+            str(envelope.get("chat_id") or ""),
+            str(envelope.get("chat_type") or ""),
             str(envelope.get("issued_at") or ""),
             str(envelope.get("nonce") or ""),
         )
@@ -136,3 +140,13 @@ def _sign(secret: str, envelope: dict[str, Any]) -> str:
 def _text(value: Any) -> str:
     value = getattr(value, "value", value)
     return str(value or "").strip()
+
+
+def _identity(platform: str, external_id: str, chat_id: str, chat_type: str) -> dict[str, str]:
+    return {
+        "provider": "hermes",
+        "external_id": external_id,
+        "channel": platform,
+        "chat_id": chat_id,
+        "chat_type": chat_type,
+    }

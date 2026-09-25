@@ -38,6 +38,9 @@ func TestIdentityVerifierAcceptsValidEnvelopeAndOverridesHeaderIdentity(t *testi
 	if got.Provider != "hermes" || got.ExternalID != "6285333320090@s.whatsapp.net" || got.Channel != "whatsapp" {
 		t.Fatalf("unexpected trusted identity: %+v", got)
 	}
+	if got.ChatID != "120363@g.us" || got.ChatType != "group" {
+		t.Fatalf("unexpected chat context: %+v", got)
+	}
 }
 
 func TestIdentityVerifierRejectsMissingEnvelope(t *testing.T) {
@@ -61,6 +64,22 @@ func TestIdentityVerifierRejectsTamperedEnvelope(t *testing.T) {
 	}
 	envelope := newSignedIdentityEnvelope("identity-secret", now)
 	envelope.ExternalID = "attacker@s.whatsapp.net"
+
+	_, err := verifier.Verify(toolRequestWithEnvelope(t, envelope))
+	if !errors.Is(err, serviceidentity.ErrUnauthenticated) {
+		t.Fatalf("error = %v, want unauthenticated", err)
+	}
+}
+
+func TestIdentityVerifierRejectsTamperedChatContext(t *testing.T) {
+	now := time.Unix(1_800_000_000, 0)
+	verifier := &IdentityVerifier{
+		secret: []byte("identity-secret"),
+		maxAge: time.Minute,
+		now:    func() time.Time { return now },
+	}
+	envelope := newSignedIdentityEnvelope("identity-secret", now)
+	envelope.ChatID = "attacker@g.us"
 
 	_, err := verifier.Verify(toolRequestWithEnvelope(t, envelope))
 	if !errors.Is(err, serviceidentity.ErrUnauthenticated) {
@@ -134,6 +153,8 @@ func newSignedIdentityEnvelope(secret string, issuedAt time.Time) IdentityEnvelo
 		Provider:   "hermes",
 		ExternalID: "6285333320090@s.whatsapp.net",
 		Channel:    "whatsapp",
+		ChatID:     "120363@g.us",
+		ChatType:   "group",
 		IssuedAt:   issuedAt.Unix(),
 		Nonce:      "nonce-1",
 	}

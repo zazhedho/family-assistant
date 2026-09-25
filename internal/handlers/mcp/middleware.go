@@ -20,6 +20,8 @@ type ExternalRequest struct {
 	Provider   string
 	ExternalID string
 	Channel    string
+	ChatID     string
+	ChatType   string
 }
 
 type externalRequestContextKey struct{}
