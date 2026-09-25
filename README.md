@@ -1,6 +1,6 @@
 # Family Assistant
 
-Backend service for a private household assistant with:
+Backend service for a private assistant with personal and shared Spaces:
 - Gin HTTP router
 - PostgreSQL via GORM
 - JWT authentication
@@ -275,6 +275,210 @@ WhatsApp sender identity is resolved dynamically to the linked user, and
 authorized Space UUID or exact user-facing name; a blank selector uses the
 user's Personal Space. Every reminder operation re-authorizes the selected
 Space and resource.
+
+### Production deployment: Docker image and Hermes on one VPS
+
+The VPS needs Docker Compose, Nginx, Hermes, access to PostgreSQL (Neon is
+supported), and optionally Redis. The application repository does not need to
+be cloned on the VPS. GitHub Actions builds `ghcr.io/<owner>/family-assistant:latest`
+from changes on `main`, then deploys the `backend` service from
+`/opt/apps/family-assistant/docker-compose.yml`. Set the GitHub Actions
+`Production` secrets `VPS_HOST`, `VPS_USER`, and `VPS_SSH_KEY`; grant the VPS
+access to the GHCR package if it is private. README and Hermes plugin changes
+alone do not trigger an image build or deploy.
+
+1. Create `/opt/apps/family-assistant/docker-compose.yml` on the VPS. This is
+   the current image-only layout; replace the Docker gateway address if the new
+   server uses a different network:
+
+   ```yaml
+   services:
+     backend:
+       image: ghcr.io/zazhedho/family-assistant:latest
+       container_name: family-assistant-backend
+       env_file:
+         - .env
+       ports:
+         - "127.0.0.1:8086:8080"
+         - "127.0.0.1:8087:8081"
+       extra_hosts:
+         - "host.docker.internal:172.24.0.1"
+       restart: unless-stopped
+       logging:
+         driver: json-file
+         options:
+           max-size: 10m
+           max-file: "3"
+       environment:
+         TZ: Asia/Jakarta
+       volumes:
+         - /var/log/apps/family-assistant:/var/log/family-assistant
+   ```
+
+2. Create `/opt/apps/family-assistant/.env` from [`.env.example`](.env.example)
+   and restrict it to the service administrator (`chmod 600`). Set at least
+   `APP_NAME`, `APP_ENV=production`, `PORT=8080`, `DATABASE_URL` (Neon requires
+   TLS), `JWT_KEY`, `JWT_EXP`, `PATH_MIGRATE=file://migrations`, and
+   `RUN_MIGRATION=true`. The image contains the migrations. For Hermes, set:
+
+   ```dotenv
+   MCP_ENABLED=true
+   MCP_ADDR=0.0.0.0:8081
+   MCP_SERVER_KEY=<random bearer key>
+   MCP_IDENTITY_SECRET=<different random HMAC secret>
+   REMINDER_SCHEDULER_ENABLED=true
+   REMINDER_WHATSAPP_BRIDGE_URL=http://host.docker.internal:3011
+   REMINDER_SCHEDULER_INTERVAL=30s
+   ```
+
+   Set Redis variables only when Redis is available. Keep `MCP_SERVER_KEY`,
+   `MCP_IDENTITY_SECRET`, `JWT_KEY`, and database credentials out of Git.
+   Fresh databases migrate on first container start; the SQL patch above is
+   only for databases created before reminder delivery was added.
+
+3. Install Hermes as a host service and pair the dedicated bot number with
+   `hermes whatsapp`. Install its background gateway with
+   `hermes gateway install`. Its WhatsApp bridge listens on host loopback port `3010`.
+   The backend container reaches it through a host-only Nginx proxy on `3011`.
+   Create the Compose network with `docker compose create backend`, then find
+   its gateway with `docker network inspect family-assistant_default`. Use that
+   address in both `extra_hosts` above and the Nginx `listen` directive. Save
+   this server block as `/etc/nginx/conf.d/family-assistant-hermes-bridge.conf`:
+
+   ```nginx
+   server {
+       listen 172.24.0.1:3011;
+       server_name _;
+       location / {
+           proxy_http_version 1.1;
+           proxy_set_header Host 127.0.0.1:3010;
+           proxy_pass http://127.0.0.1:3010;
+       }
+   }
+   ```
+
+   Keep `3011` bound to the Docker gateway, and keep `3010`, `8086`, and `8087`
+   off public interfaces. Test Nginx with `nginx -t`, then reload it with
+   `systemctl reload nginx`.
+
+4. Install the standalone identity plugin without modifying Hermes source.
+   From a checkout on the deployment machine, copy `plugin.py`, `plugin.yaml`,
+   and `__init__.py` from
+   [`integrations/hermes/family_assistant_identity/`](integrations/hermes/family_assistant_identity/)
+   to `/root/.hermes/plugins/family-assistant-identity/` on the VPS:
+
+   ```sh
+   ssh root@<server> 'mkdir -p /root/.hermes/plugins/family-assistant-identity'
+   scp integrations/hermes/family_assistant_identity/plugin.py \
+     integrations/hermes/family_assistant_identity/plugin.yaml \
+     integrations/hermes/family_assistant_identity/__init__.py \
+     root@<server>:/root/.hermes/plugins/family-assistant-identity/
+   ```
+
+   The plugin must be updated whenever its signed envelope changes; updating the backend
+   image or Hermes does not copy it. In `/root/.hermes/.env`, set:
+
+   ```dotenv
+   WHATSAPP_ENABLED=true
+   WHATSAPP_MODE=bot
+   WHATSAPP_ALLOWED_USERS=<comma-separated allowed phone numbers>
+   MCP_FAMILY_ASSISTANT_API_KEY=<same value as MCP_SERVER_KEY>
+   FAMILY_ASSISTANT_IDENTITY_SECRET=<same value as MCP_IDENTITY_SECRET>
+   ```
+
+5. Merge these blocks into `/root/.hermes/config.yaml` (do not replace the
+   rest of Hermes' configuration). Substitute the actual group JID and admin
+   number; use the bridge logs to discover the group JID. `group_allow_from`
+   limits groups, `WHATSAPP_ALLOWED_USERS` limits senders (including group
+   members), and the admin lists limit privileged WhatsApp commands. Add a new
+   user's number to the sender allowlist before expecting onboarding replies:
+
+   ```yaml
+   mcp_servers:
+     family_assistant:
+       url: http://127.0.0.1:8087/mcp
+       connect_timeout: 15.0
+       headers:
+         Authorization: Bearer ${MCP_FAMILY_ASSISTANT_API_KEY}
+         X-Hermes-Channel: whatsapp
+       identity_header:
+         name: X-Hermes-Profile
+         value_from: profile
+       enabled: true
+
+   platform_toolsets:
+     whatsapp: [mcp-family_assistant]
+
+   platforms:
+     whatsapp:
+       extra:
+         bridge_port: 3010
+         allow_admin_from: ['<admin-number>@s.whatsapp.net', '<admin-number>']
+         group_allow_admin_from: ['<admin-number>@s.whatsapp.net', '<admin-number>']
+         user_allowed_commands: []
+         group_user_allowed_commands: []
+
+   whatsapp:
+     group_policy: allowlist
+     group_allow_from: <group-jid>@g.us
+     require_mention: true
+
+   plugins:
+     enabled: [family-assistant-identity]
+     entries:
+       family-assistant-identity:
+         allow_tool_override: true
+
+   display:
+     platforms:
+       whatsapp:
+         tool_progress: false
+         show_reasoning: false
+         interim_assistant_messages: false
+   ```
+
+   The plugin manifest requests `tools.override`; Hermes must grant it. Check
+   gateway logs for `capability=tools.override decision=allow` after restart.
+   Append these durable rules to `/root/.hermes/SOUL.md` so new sessions follow
+   the same onboarding flow:
+
+   ```text
+   Reply in Indonesian for Family Assistant. At the start of a new WhatsApp
+   session, call account_link before registration or protected operations.
+   If the number has no matching account, offer registration on greetings.
+   Ask naturally for name and birth date, normalize the date to YYYY-MM-DD,
+   explain the age check, summarize the data, and call account_register only
+   after explicit consent. Do not ask for a one-time code when account_link
+   succeeds; identity_link is only for a different-number migration.
+   Never claim a tool action succeeded if it failed.
+   Use Family Assistant MCP for data; backend scheduler delivers reminders.
+   Do not create Hermes cron jobs for Family Assistant reminders.
+   ```
+
+   Review old `/root/.hermes/memories/MEMORY.md` and `USER.md` before copying
+   them to another server: stale link-code or Hermes cron instructions can
+   override the intended flow.
+
+6. Start and check services:
+
+   ```sh
+   cd /opt/apps/family-assistant
+   docker compose pull backend
+   docker compose up -d backend
+   curl -f http://127.0.0.1:8086/healthcheck
+   hermes gateway restart
+   hermes gateway status
+   hermes mcp test family_assistant
+   ```
+
+   The MCP test must list `account_link`. Then send `tautkan akun saya` from a
+   WhatsApp number already stored in `users.phone`: the tool should return
+   `status=existing`. Send a reminder from a permitted chat and verify it is
+   delivered there after the due time. A successful `tools/list` alone does not
+   prove that signed WhatsApp identity works. If the agent still sees an old
+   tool list, use `/new` in that WhatsApp chat. If a fresh session returns
+   `authentication required`, compare the deployed plugin files with this
+   repository and check both shared-secret pairs and the capability grant.
 
 Default health check:
 

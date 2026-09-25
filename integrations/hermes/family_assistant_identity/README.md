@@ -2,7 +2,9 @@
 
 This is a standalone Hermes plugin. It does not modify the Hermes installation.
 
-Install it as a symlink so project updates are picked up without copying files:
+For an image-only VPS, follow the [production deployment guide](../../../README.md)
+and copy the plugin files; the application repository is not required there.
+For a local checkout, install it as a symlink so project updates are picked up:
 
 ```sh
 mkdir -p "$HERMES_HOME/plugins"
