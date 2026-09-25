@@ -164,7 +164,7 @@ type schedulerIdentityLookup interface {
 }
 
 type schedulerMembershipLookup interface {
-	FindActiveMembership(context.Context, string, string) (*domainspace.ResolvedMembership, error)
+	ListActiveMembers(context.Context, string) ([]domainspace.ResolvedMembership, error)
 }
 
 func startReminderScheduler(
