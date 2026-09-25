@@ -63,8 +63,8 @@ func reminderColumns() []string {
 }
 
 func expectComplete(mock sqlmock.Sqlmock, completedAt time.Time, rows int64) {
-	mock.ExpectExec(`UPDATE "reminders" SET .* WHERE \(id = \$4 AND space_id = \$5 AND status = \$6\) AND .*deleted_at.*IS NULL`).
-		WithArgs(completedAt, domainreminder.StatusCompleted, completedAt, reminderID, spaceID, domainreminder.StatusPending).
+	mock.ExpectExec(`UPDATE "reminders" SET .* WHERE \(id = \$4 AND space_id = \$5 AND status IN \(\$6,\$7\)\) AND .*deleted_at.*IS NULL`).
+		WithArgs(completedAt, domainreminder.StatusCompleted, completedAt, reminderID, spaceID, domainreminder.StatusPending, domainreminder.StatusSent).
 		WillReturnResult(sqlmock.NewResult(0, rows))
 }
 
@@ -203,16 +203,16 @@ func TestListRejectsUnscopedSpaceBeforeQuery(t *testing.T) {
 	}
 }
 
-func TestCompletePendingScopesBySpaceAndStatus(t *testing.T) {
+func TestCompleteUnfinishedScopesBySpaceAndStatus(t *testing.T) {
 	db, mock := newReminderMockDB(t)
 	repo := NewRepository(db)
 	now := time.Date(2026, 9, 20, 8, 0, 0, 0, time.UTC)
 
-	mock.ExpectExec(`UPDATE "reminders" SET .* WHERE \(id = \$4 AND space_id = \$5 AND status = \$6\) AND .*deleted_at.*IS NULL`).
-		WithArgs(now, domainreminder.StatusCompleted, now, reminderID, spaceID, domainreminder.StatusPending).
+	mock.ExpectExec(`UPDATE "reminders" SET .* WHERE \(id = \$4 AND space_id = \$5 AND status IN \(\$6,\$7\)\) AND .*deleted_at.*IS NULL`).
+		WithArgs(now, domainreminder.StatusCompleted, now, reminderID, spaceID, domainreminder.StatusPending, domainreminder.StatusSent).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 
-	if err := repo.CompletePending(context.Background(), spaceID, reminderID, now); err != nil {
+	if err := repo.CompleteUnfinished(context.Background(), spaceID, reminderID, now); err != nil {
 		t.Fatalf("complete reminder: %v", err)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
@@ -220,13 +220,13 @@ func TestCompletePendingScopesBySpaceAndStatus(t *testing.T) {
 	}
 }
 
-func TestCompletePendingReturnsStatusConflictWhenNoPendingRow(t *testing.T) {
+func TestCompleteUnfinishedReturnsStatusConflictWhenNoOpenRow(t *testing.T) {
 	db, mock := newReminderMockDB(t)
 	repo := NewRepository(db)
 	now := time.Date(2026, 9, 20, 8, 0, 0, 0, time.UTC)
 	expectComplete(mock, now, 0)
 
-	err := repo.CompletePending(context.Background(), spaceID, reminderID, now)
+	err := repo.CompleteUnfinished(context.Background(), spaceID, reminderID, now)
 	if !errors.Is(err, domainreminder.ErrStatusConflict) {
 		t.Fatalf("expected status conflict, got %v", err)
 	}
@@ -235,15 +235,15 @@ func TestCompletePendingReturnsStatusConflictWhenNoPendingRow(t *testing.T) {
 	}
 }
 
-func TestCompletePendingRejectsBlankScopeOrReminderIDBeforeQuery(t *testing.T) {
+func TestCompleteUnfinishedRejectsBlankScopeOrReminderIDBeforeQuery(t *testing.T) {
 	db, mock := newReminderMockDB(t)
 	repo := NewRepository(db)
 	now := time.Now().UTC()
 
-	if err := repo.CompletePending(context.Background(), " \t", reminderID, now); !errors.Is(err, domainreminder.ErrSpaceIDRequired) {
+	if err := repo.CompleteUnfinished(context.Background(), " \t", reminderID, now); !errors.Is(err, domainreminder.ErrSpaceIDRequired) {
 		t.Fatalf("expected space ID required, got %v", err)
 	}
-	if err := repo.CompletePending(context.Background(), spaceID, " \t", now); !errors.Is(err, domainreminder.ErrReminderIDRequired) {
+	if err := repo.CompleteUnfinished(context.Background(), spaceID, " \t", now); !errors.Is(err, domainreminder.ErrReminderIDRequired) {
 		t.Fatalf("expected reminder ID required, got %v", err)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {

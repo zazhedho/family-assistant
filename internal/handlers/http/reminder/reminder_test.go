@@ -174,6 +174,13 @@ func TestReminderCreateRejectsNonRFC3339(t *testing.T) {
 	}
 }
 
+func TestReminderStatusFilterAcceptsSent(t *testing.T) {
+	status, err := statusFilter("SENT")
+	if err != nil || status == nil || *status != domainreminder.StatusSent {
+		t.Fatalf("statusFilter(SENT) = %v, %v", status, err)
+	}
+}
+
 func TestReminderListUsesExplicitUUIDSpaceAndStrictTime(t *testing.T) {
 	service := &reminderHTTPServiceStub{}
 	resolver := &userResolverStub{actor: httpTestActor()}

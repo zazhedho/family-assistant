@@ -158,6 +158,8 @@ Reminder delivery:
   `REMINDER_SCHEDULER_LEASE` tune the poll interval, batch size, and retry lease.
 - A reminder created from a WhatsApp DM or group stores that chat target. Older reminders
   without a target fall back to the active Hermes identity of the assignee, then creator.
+- Reminder status is `PENDING` before delivery, `SENT` after the bridge accepts the
+  notification, and `COMPLETED` only after a user confirms the task is done.
 
 If `reminders` was already created before delivery scheduling was added, apply this once
 before enabling the scheduler (fresh installs get these columns from migration `000009`):
@@ -172,6 +174,20 @@ ALTER TABLE reminders
 CREATE INDEX IF NOT EXISTS ix_reminders_notification_due
     ON reminders (status, scheduled_at, notification_claimed_at)
     WHERE notified_at IS NULL AND deleted_at IS NULL;
+```
+
+Before deploying a backend with `SENT` support to an existing database, run this
+once. Editing migration `000009` only affects fresh databases; it does not rerun
+against a live database:
+
+```sql
+BEGIN;
+ALTER TABLE reminders DROP CONSTRAINT ck_reminders_status;
+ALTER TABLE reminders ADD CONSTRAINT ck_reminders_status
+    CHECK (status IN ('PENDING','SENT','COMPLETED','CANCELLED'));
+UPDATE reminders SET status = 'SENT'
+    WHERE status = 'PENDING' AND notified_at IS NOT NULL AND deleted_at IS NULL;
+COMMIT;
 ```
 
 ### Local PostgreSQL databases

@@ -24,11 +24,12 @@ const (
 	listPermission   = "reminders:list"
 	updatePermission = "reminders:update"
 	deletePermission = "reminders:delete"
+	requiredReason   = "is required"
 )
 
 var ErrConflict = errors.New("conflict")
 
-type auditStore interface {
+type auditStorer interface {
 	Store(context.Context, domainaudit.AuditEvent) error
 }
 
@@ -36,10 +37,10 @@ type service struct {
 	reminders interfacereminder.RepoReminderInterface
 	spaces    interfacespace.RepoSpaceInterface
 	authorize interfaceauthorization.Authorizer
-	audit     auditStore
+	audit     auditStorer
 }
 
-func NewReminderService(reminders interfacereminder.RepoReminderInterface, spaces interfacespace.RepoSpaceInterface, authorize interfaceauthorization.Authorizer, audit auditStore) interfacereminder.ServiceReminderInterface {
+func NewReminderService(reminders interfacereminder.RepoReminderInterface, spaces interfacespace.RepoSpaceInterface, authorize interfaceauthorization.Authorizer, audit auditStorer) interfacereminder.ServiceReminderInterface {
 	return &service{reminders: reminders, spaces: spaces, authorize: authorize, audit: audit}
 }
 
@@ -64,10 +65,10 @@ func (s *service) Create(ctx context.Context, actor domainidentity.ActorContext,
 	}()
 
 	if strings.TrimSpace(input.Title) == "" {
-		return nil, &authorization.ValidationError{Field: "title", Reason: "is required"}
+		return nil, &authorization.ValidationError{Field: "title", Reason: requiredReason}
 	}
 	if input.ScheduledAt.IsZero() {
-		return nil, &authorization.ValidationError{Field: "scheduled_at", Reason: "is required"}
+		return nil, &authorization.ValidationError{Field: "scheduled_at", Reason: requiredReason}
 	}
 	deliveryProvider := strings.ToLower(strings.TrimSpace(input.DeliveryProvider))
 	deliveryTarget := strings.TrimSpace(input.DeliveryTarget)
@@ -185,11 +186,11 @@ func (s *service) Complete(ctx context.Context, actor domainidentity.ActorContex
 	if !canComplete(actorMember.RoleName, actorMember.ID, reminder) {
 		return nil, authorization.ErrForbidden
 	}
-	if reminder.Status != domainreminder.StatusPending {
+	if reminder.Status != domainreminder.StatusPending && reminder.Status != domainreminder.StatusSent {
 		return nil, ErrConflict
 	}
 	now := time.Now().UTC()
-	if err := s.reminders.CompletePending(ctx, spaceID, reminderID, now); err != nil {
+	if err := s.reminders.CompleteUnfinished(ctx, spaceID, reminderID, now); err != nil {
 		if errors.Is(err, domainreminder.ErrStatusConflict) {
 			return nil, ErrConflict
 		}
@@ -332,7 +333,7 @@ func reminderUpdateFields(input dto.ReminderUpdateInput, members []domainspace.R
 	if input.Title != nil {
 		title := strings.TrimSpace(*input.Title)
 		if title == "" {
-			return fields, &authorization.ValidationError{Field: "title", Reason: "is required"}
+			return fields, &authorization.ValidationError{Field: "title", Reason: requiredReason}
 		}
 		fields.Title = &title
 	}
@@ -342,7 +343,7 @@ func reminderUpdateFields(input dto.ReminderUpdateInput, members []domainspace.R
 	}
 	if input.ScheduledAt != nil {
 		if input.ScheduledAt.IsZero() {
-			return fields, &authorization.ValidationError{Field: "scheduled_at", Reason: "is required"}
+			return fields, &authorization.ValidationError{Field: "scheduled_at", Reason: requiredReason}
 		}
 		scheduledAt := input.ScheduledAt.UTC()
 		fields.ScheduledAt = &scheduledAt

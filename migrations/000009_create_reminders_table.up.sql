@@ -15,7 +15,7 @@ CREATE TABLE IF NOT EXISTS reminders (
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     deleted_at TIMESTAMPTZ,
-    CONSTRAINT ck_reminders_status CHECK (status IN ('PENDING','COMPLETED','CANCELLED')),
+    CONSTRAINT ck_reminders_status CHECK (status IN ('PENDING','SENT','COMPLETED','CANCELLED')),
     CONSTRAINT fk_reminders_creator_space FOREIGN KEY (space_id, created_by_member_id)
         REFERENCES space_members(space_id, id),
     CONSTRAINT fk_reminders_assignee_space FOREIGN KEY (space_id, assignee_member_id)

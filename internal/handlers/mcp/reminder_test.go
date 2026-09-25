@@ -117,6 +117,13 @@ func mcpReminderResolver() *mcpExternalResolverStub {
 	}
 }
 
+func TestReminderStatusFilterAcceptsSent(t *testing.T) {
+	status, err := statusFilter("SENT")
+	if err != nil || status == nil || *status != domainreminder.StatusSent {
+		t.Fatalf("statusFilter(SENT) = %v, %v", status, err)
+	}
+}
+
 func TestReminderCreateSelectsPersonalSpaceAndMapsAssignee(t *testing.T) {
 	service := &reminderToolServiceStub{}
 	resolver := mcpReminderResolver()

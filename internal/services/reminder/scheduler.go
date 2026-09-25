@@ -153,6 +153,10 @@ func (s *ReminderScheduler) target(ctx context.Context, reminder *domainreminder
 	if provider != "" || target != "" {
 		return domainreminder.DeliveryTarget{}, errors.New("incomplete reminder delivery target")
 	}
+	return s.fallbackTarget(ctx, reminder)
+}
+
+func (s *ReminderScheduler) fallbackTarget(ctx context.Context, reminder *domainreminder.Reminder) (domainreminder.DeliveryTarget, error) {
 	if s.members == nil || s.identities == nil {
 		return domainreminder.DeliveryTarget{}, errors.New("reminder delivery fallback is not configured")
 	}
@@ -160,14 +164,26 @@ func (s *ReminderScheduler) target(ctx context.Context, reminder *domainreminder
 	if err != nil {
 		return domainreminder.DeliveryTarget{}, fmt.Errorf("list reminder members: %w", err)
 	}
-
-	memberIDs := make([]string, 0, 2)
-	if reminder.AssigneeMemberID != nil {
-		memberIDs = append(memberIDs, strings.TrimSpace(*reminder.AssigneeMemberID))
+	for _, memberID := range reminderMemberIDs(reminder) {
+		member := activeReminderMember(members, memberID)
+		if target, ok := s.whatsappTarget(ctx, member); ok {
+			return target, nil
+		}
 	}
-	memberIDs = append(memberIDs, strings.TrimSpace(reminder.CreatedByMemberID))
-	seen := make(map[string]struct{}, len(memberIDs))
-	for _, memberID := range memberIDs {
+	return domainreminder.DeliveryTarget{}, errors.New("no active WhatsApp delivery target")
+}
+
+func reminderMemberIDs(reminder *domainreminder.Reminder) []string {
+	candidates := make([]string, 0, 2)
+	if reminder.AssigneeMemberID != nil {
+		candidates = append(candidates, *reminder.AssigneeMemberID)
+	}
+	candidates = append(candidates, reminder.CreatedByMemberID)
+
+	memberIDs := make([]string, 0, len(candidates))
+	seen := make(map[string]struct{}, len(candidates))
+	for _, memberID := range candidates {
+		memberID = strings.TrimSpace(memberID)
 		if memberID == "" {
 			continue
 		}
@@ -175,23 +191,29 @@ func (s *ReminderScheduler) target(ctx context.Context, reminder *domainreminder
 			continue
 		}
 		seen[memberID] = struct{}{}
-		var member *domainspace.ResolvedMembership
-		for i := range members {
-			if strings.TrimSpace(members[i].ID) == memberID && members[i].Status == domainspace.StatusActive {
-				member = &members[i]
-				break
-			}
-		}
-		if member == nil || strings.TrimSpace(member.UserID) == "" {
-			continue
-		}
-		identity, err := s.identities.FindActiveByUserID(ctx, domainidentity.ProviderHermes, member.UserID)
-		if err != nil || identity == nil || strings.TrimSpace(identity.ExternalID) == "" {
-			continue
-		}
-		return domainreminder.DeliveryTarget{Provider: "whatsapp", Target: strings.TrimSpace(identity.ExternalID)}, nil
+		memberIDs = append(memberIDs, memberID)
 	}
-	return domainreminder.DeliveryTarget{}, errors.New("no active WhatsApp delivery target")
+	return memberIDs
+}
+
+func activeReminderMember(members []domainspace.ResolvedMembership, memberID string) *domainspace.ResolvedMembership {
+	for i := range members {
+		if strings.TrimSpace(members[i].ID) == memberID && members[i].Status == domainspace.StatusActive {
+			return &members[i]
+		}
+	}
+	return nil
+}
+
+func (s *ReminderScheduler) whatsappTarget(ctx context.Context, member *domainspace.ResolvedMembership) (domainreminder.DeliveryTarget, bool) {
+	if member == nil || strings.TrimSpace(member.UserID) == "" {
+		return domainreminder.DeliveryTarget{}, false
+	}
+	identity, err := s.identities.FindActiveByUserID(ctx, domainidentity.ProviderHermes, member.UserID)
+	if err != nil || identity == nil || strings.TrimSpace(identity.ExternalID) == "" {
+		return domainreminder.DeliveryTarget{}, false
+	}
+	return domainreminder.DeliveryTarget{Provider: "whatsapp", Target: strings.TrimSpace(identity.ExternalID)}, true
 }
 
 func reminderMessage(reminder *domainreminder.Reminder) string {

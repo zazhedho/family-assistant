@@ -28,7 +28,7 @@ type ReminderCreateInput struct {
 
 type ReminderListInput struct {
 	Space  string `json:"space,omitempty" jsonschema:"Space UUID or exact user-facing name; blank selects Personal Space"`
-	Status string `json:"status,omitempty" jsonschema:"PENDING, COMPLETED, or CANCELLED"` //nolint:misspell // persisted API enum; preserve spelling.
+	Status string `json:"status,omitempty" jsonschema:"PENDING, SENT, COMPLETED, or CANCELLED"` //nolint:misspell // persisted API enum; preserve spelling.
 	From   string `json:"from,omitempty" jsonschema:"RFC3339 lower bound"`
 	To     string `json:"to,omitempty" jsonschema:"RFC3339 upper bound"`
 }
@@ -52,6 +52,8 @@ type ReminderDeleteInput struct {
 	Space      string `json:"space,omitempty" jsonschema:"Space UUID or exact user-facing name; blank selects Personal Space"`
 	ReminderID string `json:"reminder_id" jsonschema:"reminder UUID"`
 }
+
+const validReminderUUIDReason = "must be a valid UUID"
 
 type ReminderOutput struct {
 	ID               string  `json:"id"`
@@ -139,7 +141,7 @@ func ReminderComplete(ctx context.Context, resolver interfaceidentity.Resolver, 
 	}
 	reminderID := strings.TrimSpace(input.ReminderID)
 	if _, err := uuid.Parse(reminderID); err != nil {
-		return ReminderOutput{}, MapToolError(&serviceauthorization.ValidationError{Field: "reminder_id", Reason: "must be a valid UUID"})
+		return ReminderOutput{}, MapToolError(&serviceauthorization.ValidationError{Field: "reminder_id", Reason: validReminderUUIDReason})
 	}
 	if service == nil {
 		return ReminderOutput{}, MapToolError(errors.New("reminder service is not configured"))
@@ -158,7 +160,7 @@ func ReminderUpdate(ctx context.Context, resolver interfaceidentity.Resolver, se
 	}
 	reminderID := strings.TrimSpace(input.ReminderID)
 	if _, err := uuid.Parse(reminderID); err != nil {
-		return ReminderOutput{}, MapToolError(&serviceauthorization.ValidationError{Field: "reminder_id", Reason: "must be a valid UUID"})
+		return ReminderOutput{}, MapToolError(&serviceauthorization.ValidationError{Field: "reminder_id", Reason: validReminderUUIDReason})
 	}
 	if input.Title == nil && input.Description == nil && strings.TrimSpace(input.ScheduledAt) == "" && input.AssigneeMemberID == nil && !input.ClearAssignee {
 		return ReminderOutput{}, MapToolError(&serviceauthorization.ValidationError{Field: "update", Reason: "at least one field is required"})
@@ -194,7 +196,7 @@ func ReminderDelete(ctx context.Context, resolver interfaceidentity.Resolver, se
 	}
 	reminderID := strings.TrimSpace(input.ReminderID)
 	if _, err := uuid.Parse(reminderID); err != nil {
-		return ReminderOutput{}, MapToolError(&serviceauthorization.ValidationError{Field: "reminder_id", Reason: "must be a valid UUID"})
+		return ReminderOutput{}, MapToolError(&serviceauthorization.ValidationError{Field: "reminder_id", Reason: validReminderUUIDReason})
 	}
 	if service == nil {
 		return ReminderOutput{}, MapToolError(errors.New("reminder service is not configured"))
@@ -220,7 +222,7 @@ func optionalReminderUUID(value, field string) (*string, error) {
 		return nil, nil
 	}
 	if _, err := uuid.Parse(value); err != nil {
-		return nil, &serviceauthorization.ValidationError{Field: field, Reason: "must be a valid UUID"}
+		return nil, &serviceauthorization.ValidationError{Field: field, Reason: validReminderUUIDReason}
 	}
 	return &value, nil
 }
@@ -247,7 +249,7 @@ func statusFilter(value string) (*domainreminder.Status, error) {
 	}
 	status := domainreminder.Status(value)
 	switch status {
-	case domainreminder.StatusPending, domainreminder.StatusCompleted, domainreminder.StatusCancelled:
+	case domainreminder.StatusPending, domainreminder.StatusSent, domainreminder.StatusCompleted, domainreminder.StatusCancelled:
 		return &status, nil
 	default:
 		return nil, &serviceauthorization.ValidationError{Field: "status", Reason: "is invalid"}

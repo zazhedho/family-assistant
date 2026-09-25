@@ -262,7 +262,7 @@ func statusFilter(value string) (*domainreminder.Status, error) {
 	}
 	status := domainreminder.Status(value)
 	switch status {
-	case domainreminder.StatusPending, domainreminder.StatusCompleted, domainreminder.StatusCancelled:
+	case domainreminder.StatusPending, domainreminder.StatusSent, domainreminder.StatusCompleted, domainreminder.StatusCancelled:
 		return &status, nil
 	default:
 		return nil, &serviceauthorization.ValidationError{Field: "status", Reason: "is invalid"}

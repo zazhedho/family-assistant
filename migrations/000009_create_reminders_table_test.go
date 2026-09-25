@@ -62,6 +62,7 @@ func TestReminderMigrationIsSpaceScoped(t *testing.T) {
 		"fk_reminders_creator_space",
 		"fk_reminders_assignee_space",
 		"deleted_at TIMESTAMPTZ",
+		"'PENDING','SENT','COMPLETED','CANCELLED'",
 	} {
 		if !strings.Contains(up, required) {
 			t.Errorf("missing %q", required)

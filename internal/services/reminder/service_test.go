@@ -50,8 +50,8 @@ type reminderRepositoryStub struct {
 }
 
 func (s *reminderRepositoryStub) Create(_ context.Context, reminder *domainreminder.Reminder) error {
-	copy := *reminder
-	s.created = &copy
+	reminderCopy := *reminder
+	s.created = &reminderCopy
 	return nil
 }
 
@@ -63,8 +63,8 @@ func (s *reminderRepositoryStub) FindByIDInSpace(_ context.Context, spaceID, rem
 	if s.found == nil {
 		return nil, gorm.ErrRecordNotFound
 	}
-	copy := *s.found
-	return &copy, nil
+	reminderCopy := *s.found
+	return &reminderCopy, nil
 }
 
 func (s *reminderRepositoryStub) List(_ context.Context, filter domainreminder.ListFilter) ([]domainreminder.Reminder, error) {
@@ -72,7 +72,7 @@ func (s *reminderRepositoryStub) List(_ context.Context, filter domainreminder.L
 	return append([]domainreminder.Reminder(nil), s.listed...), nil
 }
 
-func (s *reminderRepositoryStub) CompletePending(_ context.Context, _, _ string, _ time.Time) error {
+func (s *reminderRepositoryStub) CompleteUnfinished(_ context.Context, _, _ string, _ time.Time) error {
 	if s.completeErr != nil {
 		return s.completeErr
 	}
@@ -323,6 +323,24 @@ func TestCompleteOwnerCanCompleteAnyReminderInSpace(t *testing.T) {
 	}
 	if got.Status != domainreminder.StatusCompleted || !repo.completed {
 		t.Fatalf("completion = %#v, repository completed=%v", got, repo.completed)
+	}
+}
+
+func TestCompleteSentReminder(t *testing.T) {
+	reminder := &domainreminder.Reminder{
+		ID: reminderID, SpaceID: sharedSpaceID, CreatedByMemberID: creatorID,
+		Status: domainreminder.Status("SENT"),
+	}
+	repo := &reminderRepositoryStub{found: reminder}
+	spaces := &spaceRepositoryStub{members: []domainspace.ResolvedMembership{
+		membership(sharedSpaceID, creatorID, "space_owner", "user-1"),
+	}}
+	service := newReminderService(repo, spaces, nil)
+	actor := actor(sharedSpaceID, domainspace.TypeShared, creatorID, "space_owner", "reminders:update")
+
+	got, err := service.Complete(context.Background(), actor, sharedSpaceID, reminderID)
+	if err != nil || got.Status != domainreminder.StatusCompleted || !repo.completed {
+		t.Fatalf("complete SENT reminder = %#v, repository completed=%v, err=%v", got, repo.completed, err)
 	}
 }
 

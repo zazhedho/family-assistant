@@ -90,7 +90,7 @@ func (r *Repository) MarkNotificationSent(ctx context.Context, reminderID string
 	result := r.DB.WithContext(ctx).
 		Model(&domainreminder.Reminder{}).
 		Where("id = ? AND status = ? AND notified_at IS NULL AND notification_claimed_at = ?", reminderID, domainreminder.StatusPending, claimedAt).
-		Updates(map[string]any{"notified_at": sentAt, "notification_claimed_at": nil, "updated_at": sentAt})
+		Updates(map[string]any{"notified_at": sentAt, "notification_claimed_at": nil, "status": domainreminder.StatusSent, "updated_at": sentAt})
 	if result.Error != nil {
 		return result.Error
 	}
@@ -160,7 +160,7 @@ func (r *Repository) List(ctx context.Context, filter domainreminder.ListFilter)
 	return reminders, nil
 }
 
-func (r *Repository) CompletePending(ctx context.Context, spaceID, reminderID string, completedAt time.Time) error {
+func (r *Repository) CompleteUnfinished(ctx context.Context, spaceID, reminderID string, completedAt time.Time) error {
 	if err := validateSpaceID(spaceID); err != nil {
 		return err
 	}
@@ -170,7 +170,7 @@ func (r *Repository) CompletePending(ctx context.Context, spaceID, reminderID st
 
 	result := r.DB.WithContext(ctx).
 		Model(&domainreminder.Reminder{}).
-		Where("id = ? AND space_id = ? AND status = ?", reminderID, spaceID, domainreminder.StatusPending).
+		Where("id = ? AND space_id = ? AND status IN ?", reminderID, spaceID, []domainreminder.Status{domainreminder.StatusPending, domainreminder.StatusSent}).
 		Updates(map[string]any{
 			"completed_at": completedAt,
 			"status":       domainreminder.StatusCompleted,

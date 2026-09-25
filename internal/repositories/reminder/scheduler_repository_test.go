@@ -46,13 +46,14 @@ func TestClaimDueForNotificationClaimsPendingRows(t *testing.T) {
 	}
 }
 
-func TestMarkNotificationSentUpdatesOnlyPendingClaim(t *testing.T) {
+func TestMarkNotificationSentTransitionsPendingClaimToSent(t *testing.T) {
 	db, mock := newReminderMockDB(t)
 	repo := NewSchedulerRepository(db)
 	sentAt := time.Date(2026, 9, 25, 8, 1, 0, 0, time.UTC)
 	claimedAt := time.Date(2026, 9, 25, 8, 0, 0, 0, time.UTC)
 
-	mock.ExpectExec(`UPDATE "reminders" SET .*notification_claimed_at.*notified_at.* WHERE .*id.*status.*notification_claimed_at.*`).
+	mock.ExpectExec(`UPDATE "reminders" SET .*notification_claimed_at.*notified_at.*status.* WHERE .*id.*status.*notification_claimed_at.*`).
+		WithArgs(nil, sentAt, "SENT", sentAt, "reminder-1", domainreminder.StatusPending, claimedAt).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 
 	if err := repo.MarkNotificationSent(context.Background(), "reminder-1", claimedAt, sentAt); err != nil {

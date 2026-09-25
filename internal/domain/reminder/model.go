@@ -24,6 +24,7 @@ type DeliveryTarget struct {
 
 const (
 	StatusPending   Status = "PENDING"
+	StatusSent      Status = "SENT"
 	StatusCompleted Status = "COMPLETED"
 	StatusCancelled Status = "CANCELLED" //nolint:misspell // persisted API enum; preserve spelling.
 )
