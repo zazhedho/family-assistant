@@ -194,8 +194,10 @@ func TestCreateDefaultsToActorPersonalSpace(t *testing.T) {
 	actor := actor(personalSpaceID, domainspace.TypePersonal, creatorID, "space_owner", "reminders:create")
 
 	created, err := service.Create(context.Background(), actor, dto.ReminderCreateInput{
-		Title:       "Pay electricity bill",
-		ScheduledAt: time.Date(2026, 9, 20, 8, 0, 0, 0, time.UTC),
+		Title:            "Pay electricity bill",
+		ScheduledAt:      time.Date(2026, 9, 20, 8, 0, 0, 0, time.UTC),
+		DeliveryProvider: "whatsapp",
+		DeliveryTarget:   "sender@s.whatsapp.net",
 	})
 	if err != nil {
 		t.Fatalf("create reminder: %v", err)
@@ -208,6 +210,9 @@ func TestCreateDefaultsToActorPersonalSpace(t *testing.T) {
 	}
 	if repo.created.Status != domainreminder.StatusPending {
 		t.Fatalf("status = %q, want %q", repo.created.Status, domainreminder.StatusPending)
+	}
+	if repo.created.DeliveryProvider != "whatsapp" || repo.created.DeliveryTarget != "sender@s.whatsapp.net" {
+		t.Fatalf("delivery = %q/%q, want WhatsApp sender", repo.created.DeliveryProvider, repo.created.DeliveryTarget)
 	}
 }
 

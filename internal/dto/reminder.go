@@ -12,6 +12,8 @@ type ReminderCreateInput struct {
 	Description      string
 	ScheduledAt      time.Time
 	AssigneeMemberID *string
+	DeliveryProvider string
+	DeliveryTarget   string
 }
 
 type ReminderListInput struct {

@@ -97,6 +97,8 @@ func (s *service) Create(ctx context.Context, actor domainidentity.ActorContext,
 		Description:       input.Description,
 		ScheduledAt:       input.ScheduledAt,
 		Status:            domainreminder.StatusPending,
+		DeliveryProvider:  strings.ToLower(strings.TrimSpace(input.DeliveryProvider)),
+		DeliveryTarget:    strings.TrimSpace(input.DeliveryTarget),
 	}
 	if err := s.reminders.Create(ctx, created); err != nil {
 		return nil, err

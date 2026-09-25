@@ -135,6 +135,23 @@ func TestReminderCreateSelectsPersonalSpaceAndMapsAssignee(t *testing.T) {
 	}
 }
 
+func TestReminderCreateCapturesTrustedChatTarget(t *testing.T) {
+	service := &reminderToolServiceStub{}
+	ctx := WithExternalRequest(context.Background(), ExternalRequest{
+		Provider: "hermes", ExternalID: "sender@s.whatsapp.net", Channel: "whatsapp",
+		ChatID: "120363@g.us", ChatType: "group",
+	})
+
+	if _, err := ReminderCreate(ctx, mcpReminderResolver(), service, ReminderCreateInput{
+		Title: "Baby feeding", ScheduledAt: "2026-09-20T08:00:00Z",
+	}); err != nil {
+		t.Fatalf("create reminder: %v", err)
+	}
+	if service.createInput.DeliveryProvider != "whatsapp" || service.createInput.DeliveryTarget != "120363@g.us" {
+		t.Fatalf("delivery target = %+v, want trusted WhatsApp group", service.createInput)
+	}
+}
+
 func TestReminderCreateRejectsInvalidScheduleSafely(t *testing.T) {
 	service := &reminderToolServiceStub{}
 	_, err := ReminderCreate(mcpExternalContext(), mcpReminderResolver(), service, ReminderCreateInput{Title: "Pay bill", ScheduledAt: "tomorrow"})
