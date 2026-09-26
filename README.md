@@ -423,7 +423,7 @@ alone do not trigger an image build or deploy.
        enabled: true
 
    platform_toolsets:
-     whatsapp: [mcp-family_assistant]
+     whatsapp: [web, browser, mcp-family_assistant]
 
    platforms:
      whatsapp:
@@ -495,6 +495,52 @@ alone do not trigger an image build or deploy.
    tool list, use `/new` in that WhatsApp chat. If a fresh session returns
    `authentication required`, compare the deployed plugin files with this
    repository and check both shared-secret pairs and the capability grant.
+
+### Hermes WhatsApp profile and tool access
+
+Keep group chats on the shared `default` profile, with web/browser and Family
+Assistant MCP only. Route only the administrator's direct WhatsApp chat to a
+separate `admin` profile. Do not copy WhatsApp credentials into that profile.
+
+In `/root/.hermes/config.yaml`, merge this into the default profile config and
+replace the placeholder with the administrator's phone number or JID:
+
+```yaml
+group_sessions_per_user: false
+
+gateway:
+  multiplex_profiles: true
+  profile_routes:
+    - name: admin-whatsapp-dm
+      platform: whatsapp
+      chat_id: "<admin-number>@s.whatsapp.net"
+      profile: admin
+```
+
+Create the isolated admin profile from the default profile, then set its
+WhatsApp tools and terminal backend:
+
+```sh
+hermes profile create admin --clone
+hermes -p admin tools enable hermes-whatsapp --platform whatsapp
+hermes -p admin tools enable mcp-family_assistant --platform whatsapp
+hermes -p admin tools enable a2a --platform whatsapp
+hermes -p admin config set terminal.backend local
+hermes gateway restart
+```
+
+The admin profile must be served by the default profile's multiplexed gateway.
+After restarting, verify `hermes status` lists both `default` and `admin`, and
+that only the admin DM route targets `admin`. A group chat—including messages
+sent by the administrator—stays on `default`; therefore terminal, file, and
+code-execution tools remain unavailable in groups. All sender allowlists still
+apply, including to group participants. Send `/new` in the admin DM and group
+after changing toolsets so each session reloads its tool schema.
+
+`terminal.backend: local` executes on the Hermes host without container
+isolation. If the gateway runs as `root`, terminal access from the administrator
+DM is root access to the VPS. Keep this route private and never add a group
+route to the admin profile.
 
 Default health check:
 

@@ -131,7 +131,7 @@ func (s *ReminderScheduler) deliver(ctx context.Context, reminder *domainreminde
 	if sender == nil {
 		return true, fmt.Errorf("notification sender %q is not configured", target.Provider)
 	}
-	if err := sender.Send(ctx, target, reminderMessage(reminder)); err != nil {
+	if err := sender.Send(ctx, target, reminderMessage(reminder, s.assigneeName(ctx, reminder), sentAt)); err != nil {
 		return true, err
 	}
 	if reminder.NotificationClaimedAt == nil {
@@ -216,10 +216,38 @@ func (s *ReminderScheduler) whatsappTarget(ctx context.Context, member *domainsp
 	return domainreminder.DeliveryTarget{Provider: "whatsapp", Target: strings.TrimSpace(identity.ExternalID)}, true
 }
 
-func reminderMessage(reminder *domainreminder.Reminder) string {
-	message := "⏰ Pengingat: " + strings.TrimSpace(reminder.Title)
-	if description := strings.TrimSpace(reminder.Description); description != "" {
-		message += "\n" + description
+func (s *ReminderScheduler) assigneeName(ctx context.Context, reminder *domainreminder.Reminder) string {
+	if s.members == nil || reminder.AssigneeMemberID == nil {
+		return ""
 	}
-	return message
+	members, err := s.members.ListActiveMembers(ctx, reminder.SpaceID)
+	if err != nil {
+		return ""
+	}
+	member := activeReminderMember(members, *reminder.AssigneeMemberID)
+	if member == nil {
+		return ""
+	}
+	return strings.TrimSpace(member.UserName)
+}
+
+func reminderMessage(reminder *domainreminder.Reminder, assigneeName string, sentAt time.Time) string {
+	lines := []string{"🔔 *!!! REMINDER !!!*", "", "*" + strings.TrimSpace(reminder.Title) + "*"}
+	if description := strings.TrimSpace(reminder.Description); description != "" {
+		lines = append(lines, description)
+	}
+	if !reminder.ScheduledAt.IsZero() {
+		scheduledAt := reminder.ScheduledAt.In(time.Local)
+		scheduleLabel := scheduledAt.Format("02/01/2006 · 15.04 MST")
+		deliveredAt := sentAt.In(time.Local)
+		if scheduledAt.Year() == deliveredAt.Year() && scheduledAt.YearDay() == deliveredAt.YearDay() {
+			scheduleLabel = "Hari ini · " + scheduledAt.Format("15.04 MST")
+		}
+		lines = append(lines, "", "🕒 "+scheduleLabel)
+	}
+	if assigneeName := strings.TrimSpace(assigneeName); assigneeName != "" {
+		lines = append(lines, "👤 Untuk: "+assigneeName)
+	}
+	lines = append(lines, "", "Balas *selesai* jika sudah dilakukan.")
+	return strings.Join(lines, "\n")
 }

@@ -61,6 +61,7 @@ func (s *schedulerSenderStub) Send(_ context.Context, target domainreminder.Deli
 
 type membershipResolverStub struct {
 	members map[string]string
+	names   map[string]string
 }
 
 func (s *membershipResolverStub) ListActiveMembers(_ context.Context, _ string) ([]domainspace.ResolvedMembership, error) {
@@ -69,7 +70,7 @@ func (s *membershipResolverStub) ListActiveMembers(_ context.Context, _ string) 
 		if userID == "" {
 			continue
 		}
-		result = append(result, domainspace.ResolvedMembership{ID: memberID, UserID: userID, Status: domainspace.StatusActive})
+		result = append(result, domainspace.ResolvedMembership{ID: memberID, UserID: userID, UserName: s.names[memberID], Status: domainspace.StatusActive})
 	}
 	return result, nil
 }
@@ -90,23 +91,29 @@ func newScheduler(reminders *schedulerRepositoryStub, sender interfacenotificati
 	return NewReminderScheduler(reminders, identities, memberships, map[string]interfacenotification.NotificationSender{"whatsapp": sender}, time.Minute, time.Minute, 10)
 }
 
-func TestReminderSchedulerSendsStoredTextAndMarksNotification(t *testing.T) {
+func TestReminderSchedulerFormatsNotificationAndMarksSent(t *testing.T) {
+	assigneeID := "member-1"
+	runAt := time.Date(2026, 9, 25, 12, 27, 0, 0, time.UTC)
 	reminders := &schedulerRepositoryStub{due: []domainreminder.Reminder{{
-		ID: "reminder-1", Title: "Susu bayi", Description: "Habiskan 120 ml", DeliveryProvider: "whatsapp", DeliveryTarget: "120363@g.us",
+		ID: "reminder-1", Title: "Susu bayi", Description: "Habiskan 120 ml", ScheduledAt: time.Date(2026, 9, 25, 12, 27, 0, 0, time.UTC),
+		AssigneeMemberID: &assigneeID, DeliveryProvider: "whatsapp", DeliveryTarget: "120363@g.us",
 	}}}
 	sender := &schedulerSenderStub{}
-	scheduler := newScheduler(reminders, sender, &membershipResolverStub{}, &identityResolverStub{})
+	memberships := &membershipResolverStub{members: map[string]string{assigneeID: "user-1"}, names: map[string]string{assigneeID: "Mommy Zeia"}}
+	scheduler := newScheduler(reminders, sender, memberships, &identityResolverStub{})
 
-	if err := scheduler.RunOnce(context.Background(), time.Date(2026, 9, 25, 8, 0, 0, 0, time.UTC)); err != nil {
+	if err := scheduler.RunOnce(context.Background(), runAt); err != nil {
 		t.Fatalf("run once: %v", err)
 	}
-	if len(sender.messages) != 1 || sender.messages[0].target.Target != "120363@g.us" || sender.messages[0].message != "⏰ Pengingat: Susu bayi\nHabiskan 120 ml" {
+	localScheduledAt := reminders.due[0].ScheduledAt.In(time.Local)
+	wantMessage := "🔔 *!!! REMINDER !!!*\n\n*Susu bayi*\nHabiskan 120 ml\n\n🕒 Hari ini · " + localScheduledAt.Format("15.04 MST") + "\n👤 Untuk: Mommy Zeia\n\nBalas *selesai* jika sudah dilakukan."
+	if len(sender.messages) != 1 || sender.messages[0].target.Target != "120363@g.us" || sender.messages[0].message != wantMessage {
 		t.Fatalf("sent messages = %+v", sender.messages)
 	}
 	if len(reminders.sent) != 1 || reminders.sent[0] != "reminder-1" {
 		t.Fatalf("marked sent = %v", reminders.sent)
 	}
-	if len(reminders.sentClaims) != 1 || !reminders.sentClaims[0].Equal(time.Date(2026, 9, 25, 8, 0, 0, 0, time.UTC)) {
+	if len(reminders.sentClaims) != 1 || !reminders.sentClaims[0].Equal(runAt) {
 		t.Fatalf("sent claim = %v", reminders.sentClaims)
 	}
 }
