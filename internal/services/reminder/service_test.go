@@ -49,7 +49,31 @@ type reminderRepositoryStub struct {
 	deleteErr    error
 }
 
+type reminderIndexWrite struct {
+	id          string
+	scheduledAt time.Time
+}
+
+type reminderIndexWriterStub struct {
+	upserts []reminderIndexWrite
+	removed []string
+	err     error
+}
+
+func (s *reminderIndexWriterStub) Upsert(_ context.Context, id string, scheduledAt time.Time) error {
+	s.upserts = append(s.upserts, reminderIndexWrite{id: id, scheduledAt: scheduledAt})
+	return s.err
+}
+
+func (s *reminderIndexWriterStub) Remove(_ context.Context, id string) error {
+	s.removed = append(s.removed, id)
+	return s.err
+}
+
 func (s *reminderRepositoryStub) Create(_ context.Context, reminder *domainreminder.Reminder) error {
+	if reminder.ID == "" {
+		reminder.ID = reminderID
+	}
 	reminderCopy := *reminder
 	s.created = &reminderCopy
 	return nil
@@ -180,9 +204,9 @@ func membership(spaceID, memberID, role, userID string) domainspace.ResolvedMemb
 
 func newReminderService(repo *reminderRepositoryStub, spaces *spaceRepositoryStub, audit *auditStoreStub) interfacereminder.ServiceReminderInterface {
 	if audit == nil {
-		return NewReminderService(repo, spaces, authorization.NewAuthorizer(), nil)
+		return NewReminderService(repo, spaces, authorization.NewAuthorizer(), nil, nil)
 	}
-	return NewReminderService(repo, spaces, authorization.NewAuthorizer(), audit)
+	return NewReminderService(repo, spaces, authorization.NewAuthorizer(), audit, nil)
 }
 
 func TestCreateDefaultsToActorPersonalSpace(t *testing.T) {
@@ -213,6 +237,81 @@ func TestCreateDefaultsToActorPersonalSpace(t *testing.T) {
 	}
 	if repo.created.DeliveryProvider != "whatsapp" || repo.created.DeliveryTarget != "sender@s.whatsapp.net" {
 		t.Fatalf("delivery = %q/%q, want WhatsApp sender", repo.created.DeliveryProvider, repo.created.DeliveryTarget)
+	}
+}
+
+func TestCreateIndexesPersistedReminder(t *testing.T) {
+	repo := &reminderRepositoryStub{}
+	spaces := &spaceRepositoryStub{members: []domainspace.ResolvedMembership{
+		membership(personalSpaceID, creatorID, "space_owner", "user-1"),
+	}}
+	index := &reminderIndexWriterStub{}
+	service := NewReminderService(repo, spaces, authorization.NewAuthorizer(), nil, index)
+	actor := actor(personalSpaceID, domainspace.TypePersonal, creatorID, "space_owner", "reminders:create")
+	scheduledAt := time.Date(2026, 9, 28, 10, 0, 0, 0, time.UTC)
+
+	_, err := service.Create(context.Background(), actor, dto.ReminderCreateInput{Title: "Feed baby", ScheduledAt: scheduledAt})
+	if err != nil {
+		t.Fatalf("create reminder: %v", err)
+	}
+	if len(index.upserts) != 1 || index.upserts[0].id != reminderID || !index.upserts[0].scheduledAt.Equal(scheduledAt) {
+		t.Fatalf("indexed reminders = %+v", index.upserts)
+	}
+}
+
+func TestUpdateReschedulesDueIndex(t *testing.T) {
+	reminder := &domainreminder.Reminder{ID: reminderID, SpaceID: sharedSpaceID, CreatedByMemberID: creatorID, Status: domainreminder.StatusPending}
+	repo := &reminderRepositoryStub{found: reminder}
+	spaces := &spaceRepositoryStub{members: []domainspace.ResolvedMembership{
+		membership(sharedSpaceID, creatorID, "space_owner", "user-1"),
+	}}
+	index := &reminderIndexWriterStub{}
+	service := NewReminderService(repo, spaces, authorization.NewAuthorizer(), nil, index)
+	actor := actor(sharedSpaceID, domainspace.TypeShared, creatorID, "space_owner", "reminders:update")
+	scheduledAt := time.Date(2026, 9, 28, 11, 0, 0, 0, time.UTC)
+
+	_, err := service.Update(context.Background(), actor, sharedSpaceID, reminderID, dto.ReminderUpdateInput{ScheduledAt: &scheduledAt})
+	if err != nil {
+		t.Fatalf("update reminder: %v", err)
+	}
+	if len(index.upserts) != 1 || index.upserts[0].id != reminderID || !index.upserts[0].scheduledAt.Equal(scheduledAt) {
+		t.Fatalf("indexed reminders = %+v", index.upserts)
+	}
+}
+
+func TestCompleteRemovesReminderFromDueIndex(t *testing.T) {
+	reminder := &domainreminder.Reminder{ID: reminderID, SpaceID: sharedSpaceID, CreatedByMemberID: creatorID, Status: domainreminder.StatusPending}
+	repo := &reminderRepositoryStub{found: reminder}
+	spaces := &spaceRepositoryStub{members: []domainspace.ResolvedMembership{
+		membership(sharedSpaceID, creatorID, "space_owner", "user-1"),
+	}}
+	index := &reminderIndexWriterStub{}
+	service := NewReminderService(repo, spaces, authorization.NewAuthorizer(), nil, index)
+	actor := actor(sharedSpaceID, domainspace.TypeShared, creatorID, "space_owner", "reminders:update")
+
+	if _, err := service.Complete(context.Background(), actor, sharedSpaceID, reminderID); err != nil {
+		t.Fatalf("complete reminder: %v", err)
+	}
+	if len(index.removed) != 1 || index.removed[0] != reminderID {
+		t.Fatalf("removed index IDs = %v", index.removed)
+	}
+}
+
+func TestDeleteRemovesReminderFromDueIndex(t *testing.T) {
+	reminder := &domainreminder.Reminder{ID: reminderID, SpaceID: sharedSpaceID, CreatedByMemberID: creatorID, Status: domainreminder.StatusPending}
+	repo := &reminderRepositoryStub{found: reminder}
+	spaces := &spaceRepositoryStub{members: []domainspace.ResolvedMembership{
+		membership(sharedSpaceID, creatorID, "space_owner", "user-1"),
+	}}
+	index := &reminderIndexWriterStub{}
+	service := NewReminderService(repo, spaces, authorization.NewAuthorizer(), nil, index)
+	actor := actor(sharedSpaceID, domainspace.TypeShared, creatorID, "space_owner", "reminders:delete")
+
+	if _, err := service.Delete(context.Background(), actor, sharedSpaceID, reminderID); err != nil {
+		t.Fatalf("delete reminder: %v", err)
+	}
+	if len(index.removed) != 1 || index.removed[0] != reminderID {
+		t.Fatalf("removed index IDs = %v", index.removed)
 	}
 }
 

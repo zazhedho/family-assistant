@@ -3,6 +3,7 @@ package servicereminder
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -16,6 +17,7 @@ import (
 	interfacereminder "family-assistant/internal/interfaces/reminder"
 	interfacespace "family-assistant/internal/interfaces/space"
 	"family-assistant/internal/services/authorization"
+	"family-assistant/pkg/logger"
 	"gorm.io/gorm"
 )
 
@@ -38,10 +40,11 @@ type service struct {
 	spaces    interfacespace.RepoSpaceInterface
 	authorize interfaceauthorization.Authorizer
 	audit     auditStorer
+	index     interfacereminder.ReminderIndexWriter
 }
 
-func NewReminderService(reminders interfacereminder.RepoReminderInterface, spaces interfacespace.RepoSpaceInterface, authorize interfaceauthorization.Authorizer, audit auditStorer) interfacereminder.ServiceReminderInterface {
-	return &service{reminders: reminders, spaces: spaces, authorize: authorize, audit: audit}
+func NewReminderService(reminders interfacereminder.RepoReminderInterface, spaces interfacespace.RepoSpaceInterface, authorize interfaceauthorization.Authorizer, audit auditStorer, index interfacereminder.ReminderIndexWriter) interfacereminder.ServiceReminderInterface {
+	return &service{reminders: reminders, spaces: spaces, authorize: authorize, audit: audit, index: index}
 }
 
 func (s *service) Create(ctx context.Context, actor domainidentity.ActorContext, input dto.ReminderCreateInput) (created *domainreminder.Reminder, err error) {
@@ -109,6 +112,7 @@ func (s *service) Create(ctx context.Context, actor domainidentity.ActorContext,
 	if err := s.reminders.Create(ctx, created); err != nil {
 		return nil, err
 	}
+	s.indexReminder(ctx, created)
 	s.writeAudit(ctx, auditEvent(actor, domainaudit.ActionCreate, created.SpaceID, created.ID, created.CreatedByMemberID, domainaudit.StatusSuccess, nil))
 	return created, nil
 }
@@ -196,6 +200,7 @@ func (s *service) Complete(ctx context.Context, actor domainidentity.ActorContex
 		}
 		return nil, err
 	}
+	s.removeReminderFromIndex(ctx, reminderID)
 	reminder.Status = domainreminder.StatusCompleted
 	reminder.CompletedAt = &now
 	result = reminder
@@ -261,6 +266,9 @@ func (s *service) Update(ctx context.Context, actor domainidentity.ActorContext,
 		return nil, err
 	}
 	applyReminderUpdate(reminder, fields, now)
+	if fields.ScheduledAt != nil {
+		s.indexReminder(ctx, reminder)
+	}
 	result = reminder
 	s.writeAudit(ctx, auditEvent(actor, domainaudit.ActionUpdate, spaceID, reminder.ID, reminder.CreatedByMemberID, domainaudit.StatusSuccess, nil))
 	return result, nil
@@ -320,6 +328,7 @@ func (s *service) Delete(ctx context.Context, actor domainidentity.ActorContext,
 		}
 		return nil, err
 	}
+	s.removeReminderFromIndex(ctx, reminderID)
 	reminder.Status = status
 	reminder.UpdatedAt = now
 	reminder.DeletedAt = gorm.DeletedAt{Time: now, Valid: true}
@@ -481,6 +490,24 @@ func auditEvent(actor domainidentity.ActorContext, action, spaceID, resourceID, 
 func (s *service) writeAudit(ctx context.Context, event domainaudit.AuditEvent) {
 	if s.audit != nil {
 		_ = s.audit.Store(ctx, event)
+	}
+}
+
+func (s *service) indexReminder(ctx context.Context, reminder *domainreminder.Reminder) {
+	if s.index == nil || reminder == nil {
+		return
+	}
+	if err := s.index.Upsert(ctx, reminder.ID, reminder.ScheduledAt); err != nil {
+		logger.WriteLog(logger.LogLevelError, fmt.Sprintf("reminder due index upsert failed: %v", err))
+	}
+}
+
+func (s *service) removeReminderFromIndex(ctx context.Context, reminderID string) {
+	if s.index == nil {
+		return
+	}
+	if err := s.index.Remove(ctx, reminderID); err != nil {
+		logger.WriteLog(logger.LogLevelError, fmt.Sprintf("reminder due index removal failed: %v", err))
 	}
 }
 

@@ -16,10 +16,19 @@ import (
 )
 
 const (
-	defaultSchedulerInterval = 30 * time.Second
-	defaultSchedulerLease    = 2 * time.Minute
-	defaultSchedulerBatch    = 50
+	defaultSchedulerInterval       = 30 * time.Second
+	defaultSchedulerLease          = 2 * time.Minute
+	defaultSchedulerBatch          = 50
+	databaseFallbackInterval       = time.Minute
+	reminderIndexReconcileInterval = time.Hour
 )
+
+type ReminderSchedulerOptions struct {
+	Interval  time.Duration
+	Lease     time.Duration
+	BatchSize int
+	DueIndex  interfacereminder.DueReminderIndex
+}
 
 type reminderIdentityResolver interface {
 	FindActiveByUserID(context.Context, string, string) (*domainidentity.ExternalIdentity, error)
@@ -30,13 +39,16 @@ type reminderMembershipResolver interface {
 }
 
 type ReminderScheduler struct {
-	reminders  interfacereminder.SchedulerRepository
-	identities reminderIdentityResolver
-	members    reminderMembershipResolver
-	senders    map[string]interfacenotification.NotificationSender
-	interval   time.Duration
-	lease      time.Duration
-	batchSize  int
+	reminders            interfacereminder.SchedulerRepository
+	identities           reminderIdentityResolver
+	members              reminderMembershipResolver
+	senders              map[string]interfacenotification.NotificationSender
+	index                interfacereminder.DueReminderIndex
+	interval             time.Duration
+	lease                time.Duration
+	batchSize            int
+	lastDatabaseFallback time.Time
+	indexDegraded        bool
 }
 
 func NewReminderScheduler(
@@ -44,21 +56,20 @@ func NewReminderScheduler(
 	identities reminderIdentityResolver,
 	members reminderMembershipResolver,
 	senders map[string]interfacenotification.NotificationSender,
-	interval, lease time.Duration,
-	batchSize int,
+	options ReminderSchedulerOptions,
 ) *ReminderScheduler {
-	if interval <= 0 {
-		interval = defaultSchedulerInterval
+	if options.Interval <= 0 {
+		options.Interval = defaultSchedulerInterval
 	}
-	if lease <= 0 {
-		lease = defaultSchedulerLease
+	if options.Lease <= 0 {
+		options.Lease = defaultSchedulerLease
 	}
-	if batchSize <= 0 {
-		batchSize = defaultSchedulerBatch
+	if options.BatchSize <= 0 {
+		options.BatchSize = defaultSchedulerBatch
 	}
 	return &ReminderScheduler{
 		reminders: reminders, identities: identities, members: members, senders: senders,
-		interval: interval, lease: lease, batchSize: batchSize,
+		index: options.DueIndex, interval: options.Interval, lease: options.Lease, batchSize: options.BatchSize,
 	}
 }
 
@@ -74,11 +85,19 @@ func (s *ReminderScheduler) Run(ctx context.Context) {
 		return
 	default:
 	}
+	if err := s.reconcileReminderIndex(ctx); err != nil {
+		s.indexDegraded = true
+		logger.WriteLog(logger.LogLevelError, fmt.Sprintf("reminder scheduler index reconciliation: %v", err))
+	} else {
+		s.indexDegraded = false
+	}
 	if err := s.RunOnce(ctx, time.Now().UTC()); err != nil {
 		logger.WriteLog(logger.LogLevelError, fmt.Sprintf("reminder scheduler: %v", err))
 	}
 	ticker := time.NewTicker(s.interval)
 	defer ticker.Stop()
+	reconcileTicker := time.NewTicker(reminderIndexReconcileInterval)
+	defer reconcileTicker.Stop()
 	for {
 		select {
 		case <-ctx.Done():
@@ -86,6 +105,13 @@ func (s *ReminderScheduler) Run(ctx context.Context) {
 		case now := <-ticker.C:
 			if err := s.RunOnce(ctx, now.UTC()); err != nil {
 				logger.WriteLog(logger.LogLevelError, fmt.Sprintf("reminder scheduler: %v", err))
+			}
+		case <-reconcileTicker.C:
+			if err := s.reconcileReminderIndex(ctx); err != nil {
+				s.indexDegraded = true
+				logger.WriteLog(logger.LogLevelError, fmt.Sprintf("reminder scheduler index reconciliation: %v", err))
+			} else {
+				s.indexDegraded = false
 			}
 		}
 	}
@@ -98,6 +124,13 @@ func (s *ReminderScheduler) RunOnce(ctx context.Context, now time.Time) error {
 	if now.IsZero() {
 		now = time.Now().UTC()
 	}
+	hasDue, useDatabase, indexErr := s.checkDueSource(ctx, now)
+	if !hasDue && !useDatabase {
+		return nil
+	}
+	if indexErr != nil {
+		logger.WriteLog(logger.LogLevelError, fmt.Sprintf("reminder scheduler using PostgreSQL fallback: %v", indexErr))
+	}
 	due, err := s.reminders.ClaimDueForNotification(ctx, now, now.Add(-s.lease), s.batchSize)
 	if err != nil {
 		return fmt.Errorf("claim due reminders: %w", err)
@@ -106,6 +139,11 @@ func (s *ReminderScheduler) RunOnce(ctx context.Context, now time.Time) error {
 	for i := range due {
 		release, deliveryErr := s.deliver(ctx, &due[i], now)
 		if deliveryErr == nil {
+			if s.index != nil {
+				if err := s.index.Remove(ctx, due[i].ID); err != nil {
+					failures = append(failures, fmt.Errorf("remove sent reminder %s from index: %w", due[i].ID, err))
+				}
+			}
 			continue
 		}
 		failures = append(failures, fmt.Errorf("reminder %s: %w", due[i].ID, deliveryErr))
@@ -120,6 +158,71 @@ func (s *ReminderScheduler) RunOnce(ctx context.Context, now time.Time) error {
 		}
 	}
 	return errors.Join(failures...)
+}
+
+func (s *ReminderScheduler) useDatabaseFallback(now time.Time) bool {
+	if !s.lastDatabaseFallback.IsZero() && now.Sub(s.lastDatabaseFallback) < databaseFallbackInterval {
+		return false
+	}
+	s.lastDatabaseFallback = now
+	return true
+}
+
+func (s *ReminderScheduler) checkDueSource(ctx context.Context, now time.Time) (hasDue, useDatabase bool, indexErr error) {
+	if s.index == nil {
+		return false, s.useDatabaseFallback(now), nil
+	}
+	hasDue, err := s.index.HasDue(ctx, now)
+	if err != nil {
+		s.indexDegraded = true
+	}
+	if s.indexDegraded {
+		if !s.useDatabaseFallback(now) {
+			return false, false, err
+		}
+		if reconcileErr := s.reconcileReminderIndex(ctx); reconcileErr != nil {
+			return false, true, errors.Join(err, reconcileErr)
+		}
+		hasDue, err = s.index.HasDue(ctx, now)
+		if err != nil {
+			s.indexDegraded = true
+			return false, true, err
+		}
+		s.indexDegraded = false
+	}
+	s.lastDatabaseFallback = time.Time{}
+	return hasDue, false, nil
+}
+
+func (s *ReminderScheduler) reconcileReminderIndex(ctx context.Context) error {
+	if s == nil || s.index == nil || s.reminders == nil {
+		return nil
+	}
+	indexedIDs, err := s.index.AllIDs(ctx)
+	if err != nil {
+		return fmt.Errorf("list indexed reminders: %w", err)
+	}
+	pending, err := s.reminders.ListPendingForNotification(ctx)
+	if err != nil {
+		return fmt.Errorf("list pending reminders: %w", err)
+	}
+	activeIDs := make(map[string]struct{}, len(pending))
+	for i := range pending {
+		activeIDs[pending[i].ID] = struct{}{}
+	}
+	if err := s.index.UpsertMany(ctx, pending); err != nil {
+		return fmt.Errorf("upsert pending reminder index: %w", err)
+	}
+	staleIDs := make([]string, 0)
+	for _, id := range indexedIDs {
+		if _, ok := activeIDs[id]; !ok {
+			staleIDs = append(staleIDs, id)
+		}
+	}
+	if err := s.index.RemoveMany(ctx, staleIDs); err != nil {
+		return fmt.Errorf("remove stale reminder index entries: %w", err)
+	}
+	return nil
 }
 
 func (s *ReminderScheduler) deliver(ctx context.Context, reminder *domainreminder.Reminder, sentAt time.Time) (bool, error) {

@@ -82,7 +82,7 @@ func TestPersonalGroupSpaceArchitecture(t *testing.T) {
 	identities := identityService.NewResolver(identityRepo.NewRepository(db), spacesRepo, permissions)
 	links := identityService.NewLinkService(identityRepo.NewRepository(db), audits, config.IdentityConfig{TTL: 10 * time.Minute})
 	reminders := reminderService.NewReminderService(
-		reminderRepo.NewRepository(db), spacesRepo, authorization.NewAuthorizer(), audits,
+		reminderRepo.NewRepository(db), spacesRepo, authorization.NewAuthorizer(), audits, nil,
 	)
 	activities := activityService.NewService(
 		activityRepo.NewRepository(db), spacesRepo, authorization.NewAuthorizer(), audits,

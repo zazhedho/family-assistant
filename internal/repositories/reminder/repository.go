@@ -80,6 +80,17 @@ func (r *Repository) ClaimDueForNotification(ctx context.Context, now, staleBefo
 	return reminders, err
 }
 
+func (r *Repository) ListPendingForNotification(ctx context.Context) ([]domainreminder.Reminder, error) {
+	var reminders []domainreminder.Reminder
+	err := r.DB.WithContext(ctx).
+		Model(&domainreminder.Reminder{}).
+		Select("id", "scheduled_at").
+		Where("status = ? AND notified_at IS NULL AND deleted_at IS NULL", domainreminder.StatusPending).
+		Order("scheduled_at ASC").
+		Find(&reminders).Error
+	return reminders, err
+}
+
 func (r *Repository) MarkNotificationSent(ctx context.Context, reminderID string, claimedAt, sentAt time.Time) error {
 	if strings.TrimSpace(reminderID) == "" {
 		return domainreminder.ErrReminderIDRequired

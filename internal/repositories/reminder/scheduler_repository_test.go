@@ -46,6 +46,26 @@ func TestClaimDueForNotificationClaimsPendingRows(t *testing.T) {
 	}
 }
 
+func TestListPendingForNotificationReturnsOnlyIndexFields(t *testing.T) {
+	db, mock := newReminderMockDB(t)
+	repo := NewSchedulerRepository(db)
+	scheduledAt := time.Date(2026, 9, 28, 8, 0, 0, 0, time.UTC)
+
+	mock.ExpectQuery(`SELECT .* FROM "reminders" WHERE .*status.*notified_at.*deleted_at.*ORDER BY scheduled_at ASC`).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "scheduled_at"}).AddRow("reminder-1", scheduledAt))
+
+	got, err := repo.ListPendingForNotification(context.Background())
+	if err != nil {
+		t.Fatalf("list pending reminders: %v", err)
+	}
+	if len(got) != 1 || got[0].ID != "reminder-1" || !got[0].ScheduledAt.Equal(scheduledAt) {
+		t.Fatalf("pending reminders = %#v", got)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("sql expectations: %v", err)
+	}
+}
+
 func TestMarkNotificationSentTransitionsPendingClaimToSent(t *testing.T) {
 	db, mock := newReminderMockDB(t)
 	repo := NewSchedulerRepository(db)

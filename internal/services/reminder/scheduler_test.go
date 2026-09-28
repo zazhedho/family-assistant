@@ -14,19 +14,65 @@ import (
 
 type schedulerRepositoryStub struct {
 	due            []domainreminder.Reminder
+	pending        []domainreminder.Reminder
+	pendingErr     error
+	claimCalls     int
 	sent           []string
 	sentClaims     []time.Time
 	released       []string
 	releasedClaims []time.Time
 }
 
+func (s *schedulerRepositoryStub) ListPendingForNotification(context.Context) ([]domainreminder.Reminder, error) {
+	return append([]domainreminder.Reminder(nil), s.pending...), s.pendingErr
+}
+
 func (s *schedulerRepositoryStub) ClaimDueForNotification(_ context.Context, now, _ time.Time, _ int) ([]domainreminder.Reminder, error) {
+	s.claimCalls++
 	due := append([]domainreminder.Reminder(nil), s.due...)
 	for i := range due {
 		claimedAt := now
 		due[i].NotificationClaimedAt = &claimedAt
 	}
 	return due, nil
+}
+
+type dueReminderIndexStub struct {
+	hasDue      bool
+	hasDueErr   error
+	ids         []string
+	upserts     []reminderIndexWrite
+	bulkUpserts []domainreminder.Reminder
+	removed     []string
+	bulkRemoved []string
+}
+
+func (s *dueReminderIndexStub) Upsert(_ context.Context, id string, scheduledAt time.Time) error {
+	s.upserts = append(s.upserts, reminderIndexWrite{id: id, scheduledAt: scheduledAt})
+	return nil
+}
+
+func (s *dueReminderIndexStub) Remove(_ context.Context, id string) error {
+	s.removed = append(s.removed, id)
+	return nil
+}
+
+func (s *dueReminderIndexStub) HasDue(context.Context, time.Time) (bool, error) {
+	return s.hasDue, s.hasDueErr
+}
+
+func (s *dueReminderIndexStub) AllIDs(context.Context) ([]string, error) {
+	return append([]string(nil), s.ids...), nil
+}
+
+func (s *dueReminderIndexStub) UpsertMany(_ context.Context, reminders []domainreminder.Reminder) error {
+	s.bulkUpserts = append([]domainreminder.Reminder(nil), reminders...)
+	return nil
+}
+
+func (s *dueReminderIndexStub) RemoveMany(_ context.Context, ids []string) error {
+	s.bulkRemoved = append([]string(nil), ids...)
+	return nil
 }
 
 func (s *schedulerRepositoryStub) MarkNotificationSent(_ context.Context, reminderID string, claimedAt, _ time.Time) error {
@@ -88,7 +134,93 @@ func (s *identityResolverStub) FindActiveByUserID(_ context.Context, _, userID s
 }
 
 func newScheduler(reminders *schedulerRepositoryStub, sender interfacenotification.NotificationSender, memberships *membershipResolverStub, identities *identityResolverStub) *ReminderScheduler {
-	return NewReminderScheduler(reminders, identities, memberships, map[string]interfacenotification.NotificationSender{"whatsapp": sender}, time.Minute, time.Minute, 10)
+	return NewReminderScheduler(reminders, identities, memberships, map[string]interfacenotification.NotificationSender{"whatsapp": sender}, ReminderSchedulerOptions{Interval: time.Minute, Lease: time.Minute, BatchSize: 10})
+}
+
+func TestReminderSchedulerSkipsPostgresWhenRedisHasNoDueReminder(t *testing.T) {
+	reminders := &schedulerRepositoryStub{due: []domainreminder.Reminder{{ID: "reminder-1"}}}
+	index := &dueReminderIndexStub{}
+	scheduler := NewReminderScheduler(reminders, nil, nil, nil, ReminderSchedulerOptions{DueIndex: index})
+
+	if err := scheduler.RunOnce(context.Background(), time.Date(2026, 9, 28, 8, 0, 0, 0, time.UTC)); err != nil {
+		t.Fatalf("run once: %v", err)
+	}
+	if reminders.claimCalls != 0 {
+		t.Fatalf("PostgreSQL claims = %d, want 0", reminders.claimCalls)
+	}
+}
+
+func TestReminderSchedulerClaimsFromPostgresWhenRedisHasDueReminder(t *testing.T) {
+	now := time.Date(2026, 9, 28, 8, 0, 0, 0, time.UTC)
+	reminders := &schedulerRepositoryStub{due: []domainreminder.Reminder{{ID: "reminder-1", Title: "Feed", DeliveryProvider: "whatsapp", DeliveryTarget: "chat-1"}}}
+	index := &dueReminderIndexStub{hasDue: true}
+	sender := &schedulerSenderStub{}
+	scheduler := NewReminderScheduler(reminders, nil, nil, map[string]interfacenotification.NotificationSender{"whatsapp": sender}, ReminderSchedulerOptions{DueIndex: index})
+
+	if err := scheduler.RunOnce(context.Background(), now); err != nil {
+		t.Fatalf("run once: %v", err)
+	}
+	if reminders.claimCalls != 1 || len(sender.messages) != 1 {
+		t.Fatalf("claims=%d sent=%d, want one each", reminders.claimCalls, len(sender.messages))
+	}
+	if len(index.removed) != 1 || index.removed[0] != "reminder-1" {
+		t.Fatalf("removed index IDs = %v", index.removed)
+	}
+}
+
+func TestReminderSchedulerFallsBackToPostgresOncePerMinuteOnRedisFailure(t *testing.T) {
+	start := time.Date(2026, 9, 28, 8, 0, 0, 0, time.UTC)
+	reminders := &schedulerRepositoryStub{}
+	index := &dueReminderIndexStub{hasDueErr: errors.New("redis unavailable")}
+	scheduler := NewReminderScheduler(reminders, nil, nil, nil, ReminderSchedulerOptions{DueIndex: index})
+
+	for _, now := range []time.Time{start, start.Add(30 * time.Second), start.Add(time.Minute)} {
+		if err := scheduler.RunOnce(context.Background(), now); err != nil {
+			t.Fatalf("run once at %s: %v", now, err)
+		}
+	}
+	if reminders.claimCalls != 2 {
+		t.Fatalf("PostgreSQL fallback claims = %d, want 2", reminders.claimCalls)
+	}
+}
+
+func TestReminderSchedulerReconcilesIndexAfterRedisRecovery(t *testing.T) {
+	start := time.Date(2026, 9, 28, 8, 0, 0, 0, time.UTC)
+	reminders := &schedulerRepositoryStub{pending: []domainreminder.Reminder{{ID: "missed-during-outage"}}}
+	index := &dueReminderIndexStub{ids: []string{"stale-reminder"}, hasDueErr: errors.New("redis unavailable")}
+	scheduler := NewReminderScheduler(reminders, nil, nil, nil, ReminderSchedulerOptions{DueIndex: index})
+
+	if err := scheduler.RunOnce(context.Background(), start); err != nil {
+		t.Fatalf("run during Redis outage: %v", err)
+	}
+	index.hasDueErr = nil
+	if err := scheduler.RunOnce(context.Background(), start.Add(time.Minute)); err != nil {
+		t.Fatalf("run after Redis recovery: %v", err)
+	}
+	if len(index.bulkUpserts) != 1 || index.bulkUpserts[0].ID != "missed-during-outage" {
+		t.Fatalf("reconciled reminders after recovery = %+v", index.bulkUpserts)
+	}
+}
+
+func TestReminderSchedulerReconcilesRedisIndexAndRemovesStaleIDs(t *testing.T) {
+	reminders := &schedulerRepositoryStub{
+		pending: []domainreminder.Reminder{
+			{ID: "reminder-1"},
+			{ID: "reminder-2"},
+		},
+	}
+	index := &dueReminderIndexStub{ids: []string{"reminder-1", "stale-reminder"}}
+	scheduler := NewReminderScheduler(reminders, nil, nil, nil, ReminderSchedulerOptions{DueIndex: index})
+
+	if err := scheduler.reconcileReminderIndex(context.Background()); err != nil {
+		t.Fatalf("reconcile reminder index: %v", err)
+	}
+	if len(index.bulkUpserts) != 2 || index.bulkUpserts[0].ID != "reminder-1" || index.bulkUpserts[1].ID != "reminder-2" {
+		t.Fatalf("reconciled reminders = %+v", index.bulkUpserts)
+	}
+	if len(index.bulkRemoved) != 1 || index.bulkRemoved[0] != "stale-reminder" {
+		t.Fatalf("stale IDs removed = %v", index.bulkRemoved)
+	}
 }
 
 func TestReminderSchedulerFormatsNotificationAndMarksSent(t *testing.T) {

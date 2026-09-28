@@ -6,6 +6,7 @@ import (
 	"errors"
 	"family-assistant/infrastructure/database"
 	notificationInfra "family-assistant/infrastructure/notification"
+	reminderCache "family-assistant/internal/cache/reminder"
 	domainidentity "family-assistant/internal/domain/identity"
 	domainspace "family-assistant/internal/domain/space"
 	mcpHandler "family-assistant/internal/handlers/mcp"
@@ -81,6 +82,7 @@ func run() error {
 	confID := config.GetAppConf("CONFIG_ID", "", nil)
 	logger.WriteLog(logger.LogLevelDebug, fmt.Sprintf("ConfigID: %s", confID))
 	mcpConfig := config.LoadMCPConfig()
+	reminderSchedulerConfig := config.LoadReminderSchedulerConfig()
 	FailOnError(config.ValidateStartupConfig(port), "Invalid app configuration")
 
 	if runMigrate {
@@ -118,9 +120,13 @@ func run() error {
 	identityLink := identityService.NewLinkService(identityRepository, audit, config.LoadIdentityConfig())
 	var accountRegistrar interfaceonboarding.ServiceOnboardingInterface = onboardingService.NewService(onboardingRepo.NewRepository(routes.DB), roleRepository, audit)
 	identityResolver := identityService.NewResolver(identityRepository, spaceRepository, permissions)
+	var reminderDueIndex interfacereminder.DueReminderIndex
+	if reminderSchedulerConfig.Enabled {
+		reminderDueIndex = reminderCache.NewRedisDueReminderIndex(database.GetRedisClient())
+	}
 	reminderRepository := reminderRepo.NewRepository(routes.DB)
 	reminderSchedulerRepository := reminderRepo.NewSchedulerRepository(routes.DB)
-	reminders := reminderService.NewReminderService(reminderRepository, spaceRepository, authorizationService.NewAuthorizer(), audit)
+	reminders := reminderService.NewReminderService(reminderRepository, spaceRepository, authorizationService.NewAuthorizer(), audit, reminderDueIndex)
 	activities := activityService.NewService(
 		activityRepo.NewRepository(routes.DB), spaceRepository, authorizationService.NewAuthorizer(), audit,
 	)
@@ -136,7 +142,7 @@ func run() error {
 
 	serverContext, stopSignals := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stopSignals()
-	if _, err := startReminderScheduler(serverContext, config.LoadReminderSchedulerConfig(), reminderSchedulerRepository, identityRepository, spaceRepository); err != nil {
+	if _, err := startReminderScheduler(serverContext, reminderSchedulerConfig, reminderSchedulerRepository, identityRepository, spaceRepository, reminderDueIndex); err != nil {
 		return fmt.Errorf("start reminder scheduler: %w", err)
 	}
 
@@ -173,6 +179,7 @@ func startReminderScheduler(
 	reminders interfacereminder.SchedulerRepository,
 	identities schedulerIdentityLookup,
 	members schedulerMembershipLookup,
+	dueIndex interfacereminder.DueReminderIndex,
 ) (*reminderService.ReminderScheduler, error) {
 	if !cfg.Enabled {
 		return nil, nil
@@ -184,7 +191,9 @@ func startReminderScheduler(
 	scheduler := reminderService.NewReminderScheduler(
 		reminders, identities, members,
 		map[string]interfacenotification.NotificationSender{"whatsapp": sender, "whatsapp_cloud": sender},
-		cfg.Interval, cfg.Lease, cfg.BatchSize,
+		reminderService.ReminderSchedulerOptions{
+			Interval: cfg.Interval, Lease: cfg.Lease, BatchSize: cfg.BatchSize, DueIndex: dueIndex,
+		},
 	)
 	go scheduler.Run(ctx)
 	return scheduler, nil
