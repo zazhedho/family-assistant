@@ -29,8 +29,8 @@ type ActivityCreateInput struct {
 type ActivityReminderInput struct {
 	Title            string `json:"title"`
 	Description      string `json:"description,omitempty"`
-	ScheduledAt      string `json:"scheduled_at,omitempty"`
-	AfterMinutes     *int64 `json:"after_minutes,omitempty"`
+	ScheduledAt      string `json:"scheduled_at,omitempty" jsonschema:"absolute RFC3339 timestamp; provide exactly one of scheduled_at or after_minutes"`
+	AfterMinutes     *int64 `json:"after_minutes,omitempty" jsonschema:"positive integer minutes after activity.occurred_at; provide exactly one of scheduled_at or after_minutes"`
 	AssigneeMemberID string `json:"assignee_member_id,omitempty"`
 }
 

@@ -268,6 +268,47 @@ func TestHTTPHandlerDescribesActivityToolSelection(t *testing.T) {
 	}
 }
 
+func TestHTTPHandlerDescribesActivityReminderSchedulingSchema(t *testing.T) {
+	handler := NewHTTPHandler(config.MCPConfig{ServerKey: "secret"}, &resolverStub{}, nil, nil, nil, nil, ToolServices{})
+	server := httptest.NewServer(handler)
+	t.Cleanup(server.Close)
+
+	initializeMCPServer(t, server.URL)
+	response := callMCPServer(t, server.URL, "new-profile", "secret", "tools/list", map[string]any{})
+	if response.Error != nil || response.Result == nil {
+		t.Fatalf("tools/list failed: %+v", response)
+	}
+	var inputSchema json.RawMessage
+	for _, tool := range response.Result.Tools {
+		if tool.Name == "activity_create_with_reminder" {
+			inputSchema = tool.InputSchema
+			break
+		}
+	}
+	if len(inputSchema) == 0 {
+		t.Fatal("activity_create_with_reminder schema not found")
+	}
+	var schema struct {
+		Properties map[string]struct {
+			Properties map[string]struct {
+				Description string `json:"description"`
+			} `json:"properties"`
+		} `json:"properties"`
+	}
+	if err := json.Unmarshal(inputSchema, &schema); err != nil {
+		t.Fatalf("decode input schema: %v", err)
+	}
+	reminderProperties := schema.Properties["reminder"].Properties
+	scheduledAt := strings.ToLower(reminderProperties["scheduled_at"].Description)
+	afterMinutes := strings.ToLower(reminderProperties["after_minutes"].Description)
+	if !strings.Contains(scheduledAt, "rfc3339") || !strings.Contains(scheduledAt, "exactly one of scheduled_at or after_minutes") {
+		t.Errorf("scheduled_at schema description = %q", scheduledAt)
+	}
+	if !strings.Contains(afterMinutes, "positive integer") || !strings.Contains(afterMinutes, "activity.occurred_at") || !strings.Contains(afterMinutes, "exactly one of scheduled_at or after_minutes") {
+		t.Errorf("after_minutes schema description = %q", afterMinutes)
+	}
+}
+
 func TestHTTPHandlerToolOutputSchemasUseHermesObjectRoot(t *testing.T) {
 	handler := NewHTTPHandler(config.MCPConfig{ServerKey: "secret"}, &resolverStub{}, nil, nil, nil, nil, ToolServices{})
 	server := httptest.NewServer(handler)
