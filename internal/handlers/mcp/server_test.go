@@ -103,6 +103,7 @@ type mcpServerResponse struct {
 		IsError          bool            `json:"isError"`
 		Tools            []struct {
 			Name         string          `json:"name"`
+			Description  string          `json:"description"`
 			InputSchema  json.RawMessage `json:"inputSchema"`
 			OutputSchema json.RawMessage `json:"outputSchema"`
 		} `json:"tools"`
@@ -239,9 +240,31 @@ func TestHTTPHandlerExposesOnlyCurrentMCPToolsWhenRemindersAreAbsent(t *testing.
 		got = append(got, tool.Name)
 	}
 	sort.Strings(got)
-	want := []string{"account_link", "account_register", "activity_create", "activity_delete", "activity_list", "activity_update", "identity_link", "identity_revoke", "invitation_accept", "invitation_create", "invitation_list", "invitation_revoke", "member_remove", "member_update_role", "reminder_complete", "reminder_create", "reminder_delete", "reminder_list", "reminder_update", "space_archive", "space_create", "space_get_members", "space_list", "space_update"}
+	want := []string{"account_link", "account_register", "activity_create", "activity_create_with_reminder", "activity_delete", "activity_list", "activity_update", "identity_link", "identity_revoke", "invitation_accept", "invitation_create", "invitation_list", "invitation_revoke", "member_remove", "member_update_role", "reminder_complete", "reminder_create", "reminder_delete", "reminder_list", "reminder_update", "space_archive", "space_create", "space_get_members", "space_list", "space_update"}
 	if strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Fatalf("tools = %v, want %v", got, want)
+	}
+}
+
+func TestHTTPHandlerDescribesActivityToolSelection(t *testing.T) {
+	handler := NewHTTPHandler(config.MCPConfig{ServerKey: "secret"}, &resolverStub{}, nil, nil, nil, nil, ToolServices{})
+	server := httptest.NewServer(handler)
+	t.Cleanup(server.Close)
+
+	initializeMCPServer(t, server.URL)
+	response := callMCPServer(t, server.URL, "new-profile", "secret", "tools/list", map[string]any{})
+	if response.Error != nil || response.Result == nil {
+		t.Fatalf("tools/list failed: %+v", response)
+	}
+	descriptions := make(map[string]string, len(response.Result.Tools))
+	for _, tool := range response.Result.Tools {
+		descriptions[tool.Name] = strings.ToLower(tool.Description)
+	}
+	if !strings.Contains(descriptions["activity_create"], "only an activity") || !strings.Contains(descriptions["activity_create"], "activity_create_with_reminder") {
+		t.Errorf("activity_create description does not direct standalone requests: %q", descriptions["activity_create"])
+	}
+	if !strings.Contains(descriptions["activity_create_with_reminder"], "both are requested") || !strings.Contains(descriptions["activity_create_with_reminder"], "activity_create for activity only") {
+		t.Errorf("activity_create_with_reminder description does not direct paired requests: %q", descriptions["activity_create_with_reminder"])
 	}
 }
 

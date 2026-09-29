@@ -42,7 +42,7 @@ func NewHTTPHandler(cfg config.MCPConfig, resolver interfaceidentity.Resolver, l
 	registerSpaceTools(sdkServer, resolver, spaceService)
 	registerReminderTools(sdkServer, reminderService, resolver)
 	registerInvitationTools(sdkServer, resolver, toolServices.Invitation)
-	registerActivityTools(sdkServer, resolver, toolServices.Activity)
+	registerActivityTools(sdkServer, resolver, toolServices.Activity, reminderService)
 
 	sdkHandler := mcpsdk.NewStreamableHTTPHandler(func(*http.Request) *mcpsdk.Server {
 		return sdkServer
