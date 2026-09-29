@@ -153,9 +153,13 @@ Personal and Shared Space settings:
 
 Reminder delivery:
 - Set `REMINDER_SCHEDULER_ENABLED=true` and point `REMINDER_WHATSAPP_BRIDGE_URL` at the
-  Hermes WhatsApp bridge. The backend checks due reminders every 30 seconds by default.
+  Hermes WhatsApp bridge. The backend checks due reminders every 2 minutes by default.
 - `REMINDER_SCHEDULER_INTERVAL`, `REMINDER_SCHEDULER_BATCH_SIZE`, and
   `REMINDER_SCHEDULER_LEASE` tune the poll interval, batch size, and retry lease.
+- `REMINDER_SCHEDULER_DATABASE_FALLBACK_INTERVAL` controls PostgreSQL polling during Redis
+  failures (default `1m`); `REMINDER_SCHEDULER_INDEX_RECONCILE_INTERVAL` controls Redis index
+  reconciliation (default `1h`); `REMINDER_SCHEDULER_INDEX_BATCH_SIZE` controls Redis write
+  batches (default `1000`).
 - A reminder created from a WhatsApp DM or group stores that chat target. Older reminders
   without a target fall back to the active Hermes identity of the assignee, then creator.
 - Reminder status is `PENDING` before delivery, `SENT` after the bridge accepts the
@@ -344,7 +348,7 @@ alone do not trigger an image build or deploy.
    MCP_IDENTITY_SECRET=<different random HMAC secret>
    REMINDER_SCHEDULER_ENABLED=true
    REMINDER_WHATSAPP_BRIDGE_URL=http://host.docker.internal:3011
-   REMINDER_SCHEDULER_INTERVAL=30s
+   REMINDER_SCHEDULER_INTERVAL=2m
    ```
 
    Set Redis variables only when Redis is available. Keep `MCP_SERVER_KEY`,

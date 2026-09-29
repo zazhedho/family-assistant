@@ -16,18 +16,20 @@ import (
 )
 
 const (
-	defaultSchedulerInterval       = 30 * time.Second
-	defaultSchedulerLease          = 2 * time.Minute
-	defaultSchedulerBatch          = 50
-	databaseFallbackInterval       = time.Minute
-	reminderIndexReconcileInterval = time.Hour
+	defaultSchedulerInterval        = 2 * time.Minute
+	defaultSchedulerLease           = 2 * time.Minute
+	defaultSchedulerBatch           = 50
+	defaultDatabaseFallbackInterval = time.Minute
+	defaultIndexReconcileInterval   = time.Hour
 )
 
 type ReminderSchedulerOptions struct {
-	Interval  time.Duration
-	Lease     time.Duration
-	BatchSize int
-	DueIndex  interfacereminder.DueReminderIndex
+	Interval                 time.Duration
+	Lease                    time.Duration
+	BatchSize                int
+	DatabaseFallbackInterval time.Duration
+	IndexReconcileInterval   time.Duration
+	DueIndex                 interfacereminder.DueReminderIndex
 }
 
 type reminderIdentityResolver interface {
@@ -39,16 +41,18 @@ type reminderMembershipResolver interface {
 }
 
 type ReminderScheduler struct {
-	reminders            interfacereminder.SchedulerRepository
-	identities           reminderIdentityResolver
-	members              reminderMembershipResolver
-	senders              map[string]interfacenotification.NotificationSender
-	index                interfacereminder.DueReminderIndex
-	interval             time.Duration
-	lease                time.Duration
-	batchSize            int
-	lastDatabaseFallback time.Time
-	indexDegraded        bool
+	reminders                interfacereminder.SchedulerRepository
+	identities               reminderIdentityResolver
+	members                  reminderMembershipResolver
+	senders                  map[string]interfacenotification.NotificationSender
+	index                    interfacereminder.DueReminderIndex
+	interval                 time.Duration
+	lease                    time.Duration
+	batchSize                int
+	databaseFallbackInterval time.Duration
+	indexReconcileInterval   time.Duration
+	lastDatabaseFallback     time.Time
+	indexDegraded            bool
 }
 
 func NewReminderScheduler(
@@ -67,9 +71,16 @@ func NewReminderScheduler(
 	if options.BatchSize <= 0 {
 		options.BatchSize = defaultSchedulerBatch
 	}
+	if options.DatabaseFallbackInterval <= 0 {
+		options.DatabaseFallbackInterval = defaultDatabaseFallbackInterval
+	}
+	if options.IndexReconcileInterval <= 0 {
+		options.IndexReconcileInterval = defaultIndexReconcileInterval
+	}
 	return &ReminderScheduler{
 		reminders: reminders, identities: identities, members: members, senders: senders,
 		index: options.DueIndex, interval: options.Interval, lease: options.Lease, batchSize: options.BatchSize,
+		databaseFallbackInterval: options.DatabaseFallbackInterval, indexReconcileInterval: options.IndexReconcileInterval,
 	}
 }
 
@@ -96,7 +107,7 @@ func (s *ReminderScheduler) Run(ctx context.Context) {
 	}
 	ticker := time.NewTicker(s.interval)
 	defer ticker.Stop()
-	reconcileTicker := time.NewTicker(reminderIndexReconcileInterval)
+	reconcileTicker := time.NewTicker(s.indexReconcileInterval)
 	defer reconcileTicker.Stop()
 	for {
 		select {
@@ -161,7 +172,7 @@ func (s *ReminderScheduler) RunOnce(ctx context.Context, now time.Time) error {
 }
 
 func (s *ReminderScheduler) useDatabaseFallback(now time.Time) bool {
-	if !s.lastDatabaseFallback.IsZero() && now.Sub(s.lastDatabaseFallback) < databaseFallbackInterval {
+	if !s.lastDatabaseFallback.IsZero() && now.Sub(s.lastDatabaseFallback) < s.databaseFallbackInterval {
 		return false
 	}
 	s.lastDatabaseFallback = now

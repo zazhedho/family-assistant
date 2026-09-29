@@ -16,7 +16,7 @@ import (
 
 func TestRedisDueReminderIndexUsesSortedSetForScheduling(t *testing.T) {
 	client, mock := redismock.NewClientMock()
-	index := NewRedisDueReminderIndex(client)
+	index := NewRedisDueReminderIndex(client, 1000)
 	now := time.Date(2026, 9, 28, 8, 0, 0, 0, time.UTC)
 	scheduledAt := now.Add(time.Hour)
 
@@ -45,7 +45,7 @@ func TestRedisDueReminderIndexUsesSortedSetForScheduling(t *testing.T) {
 
 func TestRedisDueReminderIndexListsAndReconcilesEntries(t *testing.T) {
 	client, mock := redismock.NewClientMock()
-	index := NewRedisDueReminderIndex(client)
+	index := NewRedisDueReminderIndex(client, 1000)
 	firstAt := time.Date(2026, 9, 28, 9, 0, 0, 0, time.UTC)
 	secondAt := firstAt.Add(time.Hour)
 
@@ -78,9 +78,33 @@ func TestRedisDueReminderIndexListsAndReconcilesEntries(t *testing.T) {
 	}
 }
 
+func TestRedisDueReminderIndexUsesConfiguredBatchSize(t *testing.T) {
+	client, mock := redismock.NewClientMock()
+	index := NewRedisDueReminderIndex(client, 1)
+	firstAt := time.Date(2026, 9, 28, 9, 0, 0, 0, time.UTC)
+	secondAt := firstAt.Add(time.Hour)
+
+	mock.ExpectZAdd(reminderDueIndexKey, redis.Z{Score: float64(firstAt.UnixMilli()), Member: "reminder-1"}).SetVal(1)
+	mock.ExpectZAdd(reminderDueIndexKey, redis.Z{Score: float64(secondAt.UnixMilli()), Member: "reminder-2"}).SetVal(1)
+	mock.ExpectZRem(reminderDueIndexKey, "reminder-1").SetVal(1)
+	mock.ExpectZRem(reminderDueIndexKey, "reminder-2").SetVal(1)
+	if err := index.UpsertMany(context.Background(), []domainreminder.Reminder{
+		{ID: "reminder-1", ScheduledAt: firstAt},
+		{ID: "reminder-2", ScheduledAt: secondAt},
+	}); err != nil {
+		t.Fatalf("bulk upsert reminders: %v", err)
+	}
+	if err := index.RemoveMany(context.Background(), []string{"reminder-1", "reminder-2"}); err != nil {
+		t.Fatalf("bulk remove reminders: %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("redis expectations: %v", err)
+	}
+}
+
 func TestRedisDueReminderIndexRequiresReconciliationAfterWriteFailure(t *testing.T) {
 	client, mock := redismock.NewClientMock()
-	index := NewRedisDueReminderIndex(client)
+	index := NewRedisDueReminderIndex(client, 1000)
 	now := time.Date(2026, 9, 28, 8, 0, 0, 0, time.UTC)
 	scheduledAt := now.Add(time.Hour)
 	writeErr := errors.New("redis unavailable")

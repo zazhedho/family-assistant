@@ -13,17 +13,24 @@ import (
 )
 
 type schedulerRepositoryStub struct {
-	due            []domainreminder.Reminder
-	pending        []domainreminder.Reminder
-	pendingErr     error
-	claimCalls     int
-	sent           []string
-	sentClaims     []time.Time
-	released       []string
-	releasedClaims []time.Time
+	due              []domainreminder.Reminder
+	pending          []domainreminder.Reminder
+	pendingErr       error
+	pendingListCalls chan struct{}
+	claimCalls       int
+	sent             []string
+	sentClaims       []time.Time
+	released         []string
+	releasedClaims   []time.Time
 }
 
 func (s *schedulerRepositoryStub) ListPendingForNotification(context.Context) ([]domainreminder.Reminder, error) {
+	if s.pendingListCalls != nil {
+		select {
+		case s.pendingListCalls <- struct{}{}:
+		default:
+		}
+	}
 	return append([]domainreminder.Reminder(nil), s.pending...), s.pendingErr
 }
 
@@ -168,13 +175,15 @@ func TestReminderSchedulerClaimsFromPostgresWhenRedisHasDueReminder(t *testing.T
 	}
 }
 
-func TestReminderSchedulerFallsBackToPostgresOncePerMinuteOnRedisFailure(t *testing.T) {
+func TestReminderSchedulerUsesConfiguredPostgresFallbackIntervalOnRedisFailure(t *testing.T) {
 	start := time.Date(2026, 9, 28, 8, 0, 0, 0, time.UTC)
 	reminders := &schedulerRepositoryStub{}
 	index := &dueReminderIndexStub{hasDueErr: errors.New("redis unavailable")}
-	scheduler := NewReminderScheduler(reminders, nil, nil, nil, ReminderSchedulerOptions{DueIndex: index})
+	scheduler := NewReminderScheduler(reminders, nil, nil, nil, ReminderSchedulerOptions{
+		DueIndex: index, DatabaseFallbackInterval: 2 * time.Minute,
+	})
 
-	for _, now := range []time.Time{start, start.Add(30 * time.Second), start.Add(time.Minute)} {
+	for _, now := range []time.Time{start, start.Add(time.Minute), start.Add(2 * time.Minute)} {
 		if err := scheduler.RunOnce(context.Background(), now); err != nil {
 			t.Fatalf("run once at %s: %v", now, err)
 		}
@@ -182,6 +191,32 @@ func TestReminderSchedulerFallsBackToPostgresOncePerMinuteOnRedisFailure(t *test
 	if reminders.claimCalls != 2 {
 		t.Fatalf("PostgreSQL fallback claims = %d, want 2", reminders.claimCalls)
 	}
+}
+
+func TestReminderSchedulerUsesConfiguredIndexReconcileInterval(t *testing.T) {
+	reminders := &schedulerRepositoryStub{pendingListCalls: make(chan struct{}, 2)}
+	scheduler := NewReminderScheduler(reminders, nil, nil, nil, ReminderSchedulerOptions{
+		Interval: time.Hour, DatabaseFallbackInterval: time.Minute,
+		IndexReconcileInterval: 10 * time.Millisecond, DueIndex: &dueReminderIndexStub{},
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		scheduler.Run(ctx)
+		close(done)
+	}()
+
+	for i := 0; i < 2; i++ {
+		select {
+		case <-reminders.pendingListCalls:
+		case <-time.After(time.Second):
+			cancel()
+			<-done
+			t.Fatal("expected startup and periodic reconciliation")
+		}
+	}
+	cancel()
+	<-done
 }
 
 func TestReminderSchedulerReconcilesIndexAfterRedisRecovery(t *testing.T) {

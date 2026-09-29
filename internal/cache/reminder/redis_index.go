@@ -15,23 +15,27 @@ import (
 )
 
 const (
-	reminderDueIndexKey    = "family-assistant:reminders:due"
-	reminderIndexBatchSize = 1000
+	reminderDueIndexKey           = "family-assistant:reminders:due"
+	defaultReminderIndexBatchSize = 1000
 )
 
 var errReminderIndexNeedsReconciliation = errors.New("reminder index requires reconciliation")
 
 type redisDueReminderIndex struct {
 	client            redis.UniversalClient
+	batchSize         int
 	dirtyVersion      atomic.Uint64
 	reconciledVersion atomic.Uint64
 }
 
-func NewRedisDueReminderIndex(client redis.UniversalClient) interfacereminder.DueReminderIndex {
+func NewRedisDueReminderIndex(client redis.UniversalClient, batchSize int) interfacereminder.DueReminderIndex {
 	if client == nil {
 		return nil
 	}
-	return &redisDueReminderIndex{client: client}
+	if batchSize <= 0 {
+		batchSize = defaultReminderIndexBatchSize
+	}
+	return &redisDueReminderIndex{client: client, batchSize: batchSize}
 }
 
 func (r *redisDueReminderIndex) Upsert(ctx context.Context, reminderID string, scheduledAt time.Time) error {
@@ -75,8 +79,8 @@ func (r *redisDueReminderIndex) AllIDs(ctx context.Context) ([]string, error) {
 }
 
 func (r *redisDueReminderIndex) UpsertMany(ctx context.Context, reminders []domainreminder.Reminder) error {
-	for start := 0; start < len(reminders); start += reminderIndexBatchSize {
-		end := min(start+reminderIndexBatchSize, len(reminders))
+	for start := 0; start < len(reminders); start += r.batchSize {
+		end := min(start+r.batchSize, len(reminders))
 		members := make([]redis.Z, 0, end-start)
 		for _, reminder := range reminders[start:end] {
 			members = append(members, redis.Z{Score: float64(reminder.ScheduledAt.UnixMilli()), Member: reminder.ID})
@@ -93,8 +97,8 @@ func (r *redisDueReminderIndex) RemoveMany(ctx context.Context, reminderIDs []st
 	if len(reminderIDs) == 0 {
 		return nil
 	}
-	for start := 0; start < len(reminderIDs); start += reminderIndexBatchSize {
-		end := min(start+reminderIndexBatchSize, len(reminderIDs))
+	for start := 0; start < len(reminderIDs); start += r.batchSize {
+		end := min(start+r.batchSize, len(reminderIDs))
 		members := make([]any, 0, end-start)
 		for _, reminderID := range reminderIDs[start:end] {
 			members = append(members, reminderID)

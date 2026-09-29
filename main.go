@@ -122,7 +122,7 @@ func run() error {
 	identityResolver := identityService.NewResolver(identityRepository, spaceRepository, permissions)
 	var reminderDueIndex interfacereminder.DueReminderIndex
 	if reminderSchedulerConfig.Enabled {
-		reminderDueIndex = reminderCache.NewRedisDueReminderIndex(database.GetRedisClient())
+		reminderDueIndex = reminderCache.NewRedisDueReminderIndex(database.GetRedisClient(), reminderSchedulerConfig.IndexBatchSize)
 	}
 	reminderRepository := reminderRepo.NewRepository(routes.DB)
 	reminderSchedulerRepository := reminderRepo.NewSchedulerRepository(routes.DB)
@@ -192,7 +192,9 @@ func startReminderScheduler(
 		reminders, identities, members,
 		map[string]interfacenotification.NotificationSender{"whatsapp": sender, "whatsapp_cloud": sender},
 		reminderService.ReminderSchedulerOptions{
-			Interval: cfg.Interval, Lease: cfg.Lease, BatchSize: cfg.BatchSize, DueIndex: dueIndex,
+			Interval: cfg.Interval, Lease: cfg.Lease, BatchSize: cfg.BatchSize,
+			DatabaseFallbackInterval: cfg.DatabaseFallbackInterval, IndexReconcileInterval: cfg.IndexReconcileInterval,
+			DueIndex: dueIndex,
 		},
 	)
 	go scheduler.Run(ctx)
