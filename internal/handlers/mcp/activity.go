@@ -25,11 +25,12 @@ type ActivityCreateInput struct {
 }
 
 type ActivityListInput struct {
-	Space string `json:"space,omitempty" jsonschema:"Space UUID or exact user-facing name; blank selects Personal Space"`
-	Kind  string `json:"kind,omitempty" jsonschema:"optional event type filter"`
-	From  string `json:"from,omitempty" jsonschema:"optional RFC3339 lower bound"`
-	To    string `json:"to,omitempty" jsonschema:"optional RFC3339 upper bound"`
-	Limit int    `json:"limit,omitempty" jsonschema:"optional maximum results, capped at 100"`
+	Space  string `json:"space,omitempty" jsonschema:"Space UUID or exact user-facing name; blank selects Personal Space"`
+	Kind   string `json:"kind,omitempty" jsonschema:"optional event type filter"`
+	Search string `json:"search,omitempty" jsonschema:"optional case-insensitive literal substring search in note; combine with kind and time filters"`
+	From   string `json:"from,omitempty" jsonschema:"optional RFC3339 lower bound"`
+	To     string `json:"to,omitempty" jsonschema:"optional RFC3339 upper bound"`
+	Limit  int    `json:"limit,omitempty" jsonschema:"optional maximum results, capped at 100"`
 }
 
 type ActivityUpdateInput struct {
@@ -89,7 +90,7 @@ func ActivityList(ctx context.Context, resolver interfaceidentity.Resolver, serv
 	if service == nil {
 		return nil, MapToolError(errors.New("activity service is not configured"))
 	}
-	listInput := dto.ActivityListInput{Space: actor.SpaceID, Kind: input.Kind, Limit: input.Limit}
+	listInput := dto.ActivityListInput{Space: actor.SpaceID, Kind: input.Kind, Search: input.Search, Limit: input.Limit}
 	if listInput.From, err = utils.ParseRFC3339(input.From, "from", false); err != nil {
 		return nil, MapToolError(err)
 	}
@@ -163,7 +164,7 @@ func registerActivityTools(server *mcpsdk.Server, resolver interfaceidentity.Res
 		return ActivityCreate(ctx, resolver, service, input)
 	})
 	addTool(server, &mcpsdk.Tool{
-		Name: "activity_list", Description: "List timestamped notes and care events from an authorized Space.",
+		Name: "activity_list", Description: "List or search timestamped notes and care events from an authorized Space. Use search for case-insensitive text in notes; combine with kind and time filters.",
 	}, func(ctx context.Context, input ActivityListInput) (ActivityListOutput, error) {
 		output, err := ActivityList(ctx, resolver, service, input)
 		return ActivityListOutput{Activities: output}, err

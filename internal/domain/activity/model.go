@@ -31,6 +31,7 @@ type Activity struct {
 type ListFilter struct {
 	SpaceID string
 	Kind    string
+	Search  string
 	From    *time.Time
 	To      *time.Time
 	Limit   int

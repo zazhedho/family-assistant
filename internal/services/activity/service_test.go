@@ -43,8 +43,8 @@ func (s *activityRepositoryStub) FindByIDInSpace(_ context.Context, _, _ string)
 	if s.found == nil {
 		return nil, gorm.ErrRecordNotFound
 	}
-	copy := *s.found
-	return &copy, nil
+	snapshot := *s.found
+	return &snapshot, nil
 }
 
 func (s *activityRepositoryStub) Update(_ context.Context, _, activityID string, fields domainactivity.UpdateFields, _ time.Time) error {
@@ -144,12 +144,41 @@ func TestListActivityScopesFilterAndRequiresMembership(t *testing.T) {
 	spaces := &activitySpaceRepositoryStub{members: []domainspace.ResolvedMembership{{ID: "member-1", SpaceID: "space-1", UserID: "user-1", Status: domainspace.StatusActive}}}
 	service := activityService(repo, spaces, &activityAuditStub{})
 
-	got, err := service.List(context.Background(), activityActor("space-1", "member-1", "activities:list"), dto.ActivityListInput{Space: "space-1", Kind: " diaper ", From: &from, To: &to, Limit: 20})
+	got, err := service.List(context.Background(), activityActor("space-1", "member-1", "activities:list"), dto.ActivityListInput{Space: "space-1", Kind: " diaper ", Search: " wet diaper ", From: &from, To: &to, Limit: 20})
 	if err != nil {
 		t.Fatalf("list activity: %v", err)
 	}
 	if len(got) != 1 || repo.filter.SpaceID != "space-1" || repo.filter.Kind != "diaper" || repo.filter.From == nil || repo.filter.To == nil || repo.filter.Limit != 20 {
 		t.Fatalf("list filter/result = %+v/%+v", repo.filter, got)
+	}
+	if repo.filter.Search != "wet diaper" {
+		t.Fatalf("search = %q, want trimmed search", repo.filter.Search)
+	}
+}
+
+func TestListSearchRequiresPermissionAndActiveSpaceMembership(t *testing.T) {
+	for _, scenario := range []struct {
+		name, permission, memberSpace, memberStatus string
+		wantErr                                     error
+	}{
+		{name: "missing permission", memberSpace: "space-1", memberStatus: domainspace.StatusActive, wantErr: authorization.ErrForbidden},
+		{name: "other space", permission: "activities:list", memberSpace: "space-2", memberStatus: domainspace.StatusActive, wantErr: authorization.ErrNotFound},
+		{name: "inactive member", permission: "activities:list", memberSpace: "space-1", memberStatus: "removed", wantErr: authorization.ErrNotFound},
+	} {
+		t.Run(scenario.name, func(t *testing.T) {
+			repo := &activityRepositoryStub{}
+			spaces := &activitySpaceRepositoryStub{members: []domainspace.ResolvedMembership{
+				{ID: "member-1", SpaceID: scenario.memberSpace, UserID: "user-1", Status: scenario.memberStatus},
+			}}
+			service := activityService(repo, spaces, &activityAuditStub{})
+			_, err := service.List(context.Background(), activityActor("space-1", "member-1", scenario.permission), dto.ActivityListInput{Search: "milk"})
+			if !errors.Is(err, scenario.wantErr) {
+				t.Fatalf("error = %v, want %v", err, scenario.wantErr)
+			}
+			if repo.filter.SpaceID != "" {
+				t.Fatal("unauthorized search reached activity repository")
+			}
+		})
 	}
 }
 

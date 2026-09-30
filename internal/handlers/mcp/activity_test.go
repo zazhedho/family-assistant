@@ -139,13 +139,16 @@ func TestActivityListPassesSpaceKindAndDateRange(t *testing.T) {
 	service := &mcpActivityServiceStub{listed: []domainactivity.Activity{{ID: "activity-1", SpaceID: spaceID, Kind: "diaper"}}}
 
 	got, err := ActivityList(mcpExternalContext(), resolver, service, ActivityListInput{
-		Space: "Baby", Kind: " diaper ", From: "2026-09-22T00:00:00Z", To: "2026-09-23T00:00:00Z", Limit: 10,
+		Space: "Baby", Kind: " diaper ", Search: "wet diaper", From: "2026-09-22T00:00:00Z", To: "2026-09-23T00:00:00Z", Limit: 10,
 	})
 	if err != nil {
 		t.Fatalf("activity_list: %v", err)
 	}
 	if len(got) != 1 || service.listCalls != 1 || service.listInput.Space != spaceID || service.listInput.Kind != " diaper " || service.listInput.Limit != 10 || service.listInput.From == nil || service.listInput.To == nil {
 		t.Fatalf("output/service args = %+v/%+v", got, service)
+	}
+	if service.listInput.Search != "wet diaper" {
+		t.Fatalf("search = %q, want wet diaper", service.listInput.Search)
 	}
 }
 

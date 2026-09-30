@@ -21,6 +21,11 @@ const (
 	defaultConfigPublicRegistrationEnabled = "auth.public_registration_enabled"
 	defaultConfigRegisterOTPEnabled        = "auth.register_otp_enabled"
 	defaultConfigPasswordResetEmailEnabled = "auth.password_reset_email_enabled"
+	userNotFoundMessage                    = "user not found"
+	publicRegistrationDisabledMessage      = "Public registration is currently disabled."
+	registrationOTPNotConfiguredMessage    = "registration OTP service is not configured"
+	passwordResetNotConfiguredMessage      = "password reset email service is not configured"
+	loginSessionRenewalFailedMessage       = "Failed to renew login session"
 )
 
 func (h *HandlerUser) respondTooManyLoginAttempts(ctx *gin.Context, logId uuid.UUID, ttl time.Duration) {
@@ -76,7 +81,7 @@ func buildAuthTokenResponse(accessToken string, refreshToken string) map[string]
 
 func userMutationErrorResponse(logId uuid.UUID, err error) (int, *response.ApiResponse) {
 	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return http.StatusNotFound, response.ErrorResponse(http.StatusNotFound, messages.MsgNotFound, logId, "user not found")
+		return http.StatusNotFound, response.ErrorResponse(http.StatusNotFound, messages.MsgNotFound, logId, userNotFoundMessage)
 	}
 	if errors.Is(err, gorm.ErrDuplicatedKey) {
 		return http.StatusBadRequest, response.ErrorResponse(http.StatusBadRequest, messages.MsgExists, logId, "email or phone already exists")
@@ -84,8 +89,8 @@ func userMutationErrorResponse(logId uuid.UUID, err error) (int, *response.ApiRe
 
 	errMsg := err.Error()
 	switch {
-	case errMsg == "user not found":
-		return http.StatusNotFound, response.ErrorResponse(http.StatusNotFound, messages.MsgNotFound, logId, "user not found")
+	case errMsg == userNotFoundMessage:
+		return http.StatusNotFound, response.ErrorResponse(http.StatusNotFound, messages.MsgNotFound, logId, userNotFoundMessage)
 	case errMsg == "invalid or expired token":
 		return http.StatusBadRequest, response.ErrorResponse(http.StatusBadRequest, messages.MsgSomethingWrong, logId, "invalid or expired reset token")
 	case strings.HasPrefix(errMsg, "access denied:"),
@@ -106,7 +111,7 @@ func userMutationErrorResponse(logId uuid.UUID, err error) (int, *response.ApiRe
 
 func impersonationErrorResponse(logId uuid.UUID, err error) (int, *response.ApiResponse) {
 	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return http.StatusNotFound, response.ErrorResponse(http.StatusNotFound, messages.MsgNotFound, logId, "user not found")
+		return http.StatusNotFound, response.ErrorResponse(http.StatusNotFound, messages.MsgNotFound, logId, userNotFoundMessage)
 	}
 
 	errMsg := err.Error()

@@ -96,6 +96,48 @@ func TestListScopesBySpaceKindAndOccurredAt(t *testing.T) {
 	}
 }
 
+func TestListSearchCombinesLiteralNoteSearchWithExistingFilters(t *testing.T) {
+	for _, scenario := range []struct {
+		name, search, pattern string
+	}{
+		{name: "case insensitive substring", search: "  Susu Zeia  ", pattern: "%Susu Zeia%"},
+		{name: "literal wildcards and backslash", search: `50%_\`, pattern: `%50\%\_\\%`},
+		{name: "parameterized text", search: `milk' OR 1=1 --`, pattern: `%milk' OR 1=1 --%`},
+	} {
+		t.Run(scenario.name, func(t *testing.T) {
+			db, mock := newActivityMockDB(t)
+			from := time.Date(2026, 9, 30, 0, 0, 0, 0, time.UTC)
+			to := from.Add(24 * time.Hour)
+			mock.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM "space_activities" WHERE space_id = $1 AND kind = $2 AND LOWER(note) LIKE LOWER($3) AND occurred_at >= $4 AND occurred_at <= $5 AND "space_activities"."deleted_at" IS NULL ORDER BY occurred_at DESC LIMIT $6`)).
+				WithArgs(spaceID, "note", scenario.pattern, from, to, 20).
+				WillReturnRows(sqlmock.NewRows(activityColumns()))
+
+			_, err := NewRepository(db).List(context.Background(), domainactivity.ListFilter{
+				SpaceID: spaceID, Kind: "note", Search: scenario.search, From: &from, To: &to, Limit: 20,
+			})
+			if err != nil {
+				t.Fatalf("search activities: %v", err)
+			}
+			if err := mock.ExpectationsWereMet(); err != nil {
+				t.Fatalf("sql expectations: %v", err)
+			}
+		})
+	}
+}
+
+func TestListIgnoresBlankSearch(t *testing.T) {
+	db, mock := newActivityMockDB(t)
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM "space_activities" WHERE space_id = $1 AND "space_activities"."deleted_at" IS NULL ORDER BY occurred_at DESC`)).
+		WithArgs(spaceID).
+		WillReturnRows(sqlmock.NewRows(activityColumns()))
+	if _, err := NewRepository(db).List(context.Background(), domainactivity.ListFilter{SpaceID: spaceID, Search: " \t "}); err != nil {
+		t.Fatalf("list activities: %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("sql expectations: %v", err)
+	}
+}
+
 func TestUpdateScopesBySpaceAndActivityID(t *testing.T) {
 	db, mock := newActivityMockDB(t)
 	repo := NewRepository(db)

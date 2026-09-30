@@ -128,7 +128,7 @@ func (s *service) List(ctx context.Context, actor domainidentity.ActorContext, i
 		return nil, serviceauthorization.ErrNotFound
 	}
 	activities, err = s.activities.List(ctx, domainactivity.ListFilter{
-		SpaceID: spaceID, Kind: strings.TrimSpace(input.Kind), From: input.From, To: input.To, Limit: limit,
+		SpaceID: spaceID, Kind: strings.TrimSpace(input.Kind), Search: strings.TrimSpace(input.Search), From: input.From, To: input.To, Limit: limit,
 	})
 	if err != nil {
 		return nil, err

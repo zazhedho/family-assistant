@@ -298,7 +298,7 @@ Hermes adds its MCP server prefix to tool names:
 | `invitation_revoke` | Revoke a pending invitation. |
 | `activity_create` | Record an activity/note without creating a reminder. |
 | `activity_create_with_reminder` | Record an activity and create its reminder in one tool call. |
-| `activity_list` | List activities with kind/time filters. |
+| `activity_list` | Search note text and list activities with kind/time filters. |
 | `activity_update` | Update an activity's kind, note, or event time. |
 | `activity_delete` | Soft-delete an activity. |
 | `reminder_create` | Create a reminder, optionally assigned to a member. |
@@ -306,6 +306,26 @@ Hermes adds its MCP server prefix to tool names:
 | `reminder_complete` | Mark the task completed. |
 | `reminder_update` | Update a pending reminder's details, schedule, or assignee. |
 | `reminder_delete` | Cancel and soft-delete a reminder. |
+
+For requests such as "find Zeia's milk notes from yesterday", use `activity_list`
+with optional `search` and the appropriate event-time bounds in RFC3339:
+
+```json
+{
+  "space": "Family",
+  "search": "susu Zeia",
+  "from": "2026-09-29T00:00:00+07:00",
+  "to": "2026-09-29T23:59:59.999999+07:00",
+  "limit": 20
+}
+```
+
+`search` matches a literal substring in `note`, case-insensitively; it is not
+semantic/fuzzy search. Leading/trailing whitespace is ignored, and `%`, `_`, and
+backslashes are literal characters, not wildcards. Omitted/blank search keeps
+the existing list behavior. It combines with `kind`, `from`, `to`, and `limit`
+within the selected authorized Space, excluding deleted activities. Results are
+ordered by event time descending; the default limit is 50 and maximum is 100.
 
 For an activity that also needs a reminder, use `activity_create_with_reminder`
 instead of separate `activity_create` and `reminder_create` calls. Generic example:

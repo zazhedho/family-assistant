@@ -16,6 +16,7 @@ import (
 	interfacespace "family-assistant/internal/interfaces/space"
 	serviceauthorization "family-assistant/internal/services/authorization"
 	"family-assistant/utils"
+
 	"gorm.io/gorm"
 )
 
@@ -28,6 +29,7 @@ const (
 	memberUpdatePermission = "members:update"
 	memberDeletePermission = "members:delete"
 	spaceOwnerRole         = "space_owner"
+	requiredReason         = "is required"
 )
 
 var (
@@ -75,7 +77,7 @@ func NewService(spaces interfacespace.RepoSpaceInterface, roles roleRepository, 
 func (s *service) List(ctx context.Context, userID string) ([]domainspace.ResolvedMembership, error) {
 	userID = strings.TrimSpace(userID)
 	if userID == "" {
-		return nil, &serviceauthorization.ValidationError{Field: "user_id", Reason: "is required"}
+		return nil, &serviceauthorization.ValidationError{Field: "user_id", Reason: requiredReason}
 	}
 
 	memberships, err := s.spaces.ListActiveByUserID(ctx, userID)
@@ -101,7 +103,7 @@ func (s *service) List(ctx context.Context, userID string) ([]domainspace.Resolv
 	if len(memberships) > 0 && len(allowed) == 0 {
 		err := ErrForbidden
 		spaceID, memberID, metadata := auditCandidateDetails(denied)
-		s.writeFailureWithDetails(ctx, "list", spaceID, memberID, "", userID, metadata, err)
+		s.writeFailureWithDetails(ctx, s.newAuditEvent(ctx, "list", spaceID, memberID, "", userID), metadata, err)
 		return nil, err
 	}
 	spaceID, memberID := "", ""
@@ -125,13 +127,13 @@ func (s *service) List(ctx context.Context, userID string) ([]domainspace.Resolv
 func (s *service) Create(ctx context.Context, userID string, input dto.SpaceCreateInput) (created *domainspace.Space, err error) {
 	userID = strings.TrimSpace(userID)
 	if userID == "" {
-		err = &serviceauthorization.ValidationError{Field: "user_id", Reason: "is required"}
+		err = &serviceauthorization.ValidationError{Field: "user_id", Reason: requiredReason}
 		s.writeFailure(ctx, domainaudit.ActionCreate, "", "", userID, err)
 		return nil, err
 	}
 	name := strings.TrimSpace(input.Name)
 	if name == "" {
-		err = &serviceauthorization.ValidationError{Field: "name", Reason: "is required"}
+		err = &serviceauthorization.ValidationError{Field: "name", Reason: requiredReason}
 		s.writeFailure(ctx, domainaudit.ActionCreate, "", "", userID, err)
 		return nil, err
 	}
@@ -154,7 +156,7 @@ func (s *service) Create(ctx context.Context, userID string, input dto.SpaceCrea
 		if permissionErr != nil {
 			denied = append(denied, memberships[i])
 			spaceID, memberID, metadata := auditCandidateDetails(denied)
-			s.writeFailureWithDetails(ctx, domainaudit.ActionCreate, spaceID, memberID, "", userID, metadata, permissionErr)
+			s.writeFailureWithDetails(ctx, s.newAuditEvent(ctx, domainaudit.ActionCreate, spaceID, memberID, "", userID), metadata, permissionErr)
 			return nil, permissionErr
 		}
 		if ok {
@@ -166,7 +168,7 @@ func (s *service) Create(ctx context.Context, userID string, input dto.SpaceCrea
 	if actorMembership == nil {
 		err = ErrForbidden
 		spaceID, memberID, metadata := auditCandidateDetails(denied)
-		s.writeFailureWithDetails(ctx, domainaudit.ActionCreate, spaceID, memberID, "", userID, metadata, err)
+		s.writeFailureWithDetails(ctx, s.newAuditEvent(ctx, domainaudit.ActionCreate, spaceID, memberID, "", userID), metadata, err)
 		return nil, err
 	}
 
@@ -205,7 +207,7 @@ func (s *service) Create(ctx context.Context, userID string, input dto.SpaceCrea
 		CreatedAt: now,
 	}
 	if err = s.spaces.CreateWithOwner(ctx, created, owner); err != nil {
-		s.writeFailureWithDetails(ctx, domainaudit.ActionCreate, created.ID, actorMembership.ID, owner.ID, userID, nil, err)
+		s.writeFailureWithDetails(ctx, s.newAuditEvent(ctx, domainaudit.ActionCreate, created.ID, actorMembership.ID, owner.ID, userID), nil, err)
 		return nil, err
 	}
 
@@ -220,12 +222,12 @@ func (s *service) Members(ctx context.Context, userID, spaceID string) ([]domain
 	userID = strings.TrimSpace(userID)
 	spaceID = strings.TrimSpace(spaceID)
 	if userID == "" {
-		err := &serviceauthorization.ValidationError{Field: "user_id", Reason: "is required"}
+		err := &serviceauthorization.ValidationError{Field: "user_id", Reason: requiredReason}
 		s.writeFailure(ctx, "list", spaceID, "", userID, err)
 		return nil, err
 	}
 	if spaceID == "" {
-		err := &serviceauthorization.ValidationError{Field: "space_id", Reason: "is required"}
+		err := &serviceauthorization.ValidationError{Field: "space_id", Reason: requiredReason}
 		s.writeFailure(ctx, "list", spaceID, "", userID, err)
 		return nil, err
 	}
@@ -278,7 +280,7 @@ func (s *service) Update(ctx context.Context, userID, spaceID string, input dto.
 	if fields.Name != nil {
 		value := strings.TrimSpace(*fields.Name)
 		if value == "" {
-			err = &serviceauthorization.ValidationError{Field: "name", Reason: "is required"}
+			err = &serviceauthorization.ValidationError{Field: "name", Reason: requiredReason}
 			s.writeFailure(ctx, domainaudit.ActionUpdate, spaceID, actor.ID, userID, err)
 			return nil, err
 		}
@@ -332,7 +334,7 @@ func (s *service) UpdateMemberRole(ctx context.Context, userID, spaceID, memberI
 	}
 	memberID = strings.TrimSpace(memberID)
 	if memberID == "" {
-		err = &serviceauthorization.ValidationError{Field: "member_id", Reason: "is required"}
+		err = &serviceauthorization.ValidationError{Field: "member_id", Reason: requiredReason}
 		s.writeFailure(ctx, domainaudit.ActionUpdate, spaceID, actor.ID, userID, err)
 		return nil, err
 	}
@@ -385,7 +387,7 @@ func (s *service) RemoveMember(ctx context.Context, userID, spaceID, memberID st
 	}
 	memberID = strings.TrimSpace(memberID)
 	if memberID == "" {
-		err = &serviceauthorization.ValidationError{Field: "member_id", Reason: "is required"}
+		err = &serviceauthorization.ValidationError{Field: "member_id", Reason: requiredReason}
 		s.writeFailure(ctx, domainaudit.ActionDelete, spaceID, actor.ID, userID, err)
 		return nil, err
 	}
@@ -423,10 +425,10 @@ func (s *service) mutableSpaceMembership(ctx context.Context, userID, spaceID, p
 	userID = strings.TrimSpace(userID)
 	spaceID = strings.TrimSpace(spaceID)
 	if userID == "" {
-		return nil, &serviceauthorization.ValidationError{Field: "user_id", Reason: "is required"}
+		return nil, &serviceauthorization.ValidationError{Field: "user_id", Reason: requiredReason}
 	}
 	if spaceID == "" {
-		return nil, &serviceauthorization.ValidationError{Field: "space_id", Reason: "is required"}
+		return nil, &serviceauthorization.ValidationError{Field: "space_id", Reason: requiredReason}
 	}
 	actor, err := s.spaces.FindActiveMembership(ctx, userID, spaceID)
 	if err != nil {
@@ -518,11 +520,10 @@ func (s *service) writeSuccess(ctx context.Context, action, spaceID, memberID, u
 }
 
 func (s *service) writeFailure(ctx context.Context, action, spaceID, memberID, userID string, err error) {
-	s.writeFailureWithDetails(ctx, action, spaceID, memberID, "", userID, nil, err)
+	s.writeFailureWithDetails(ctx, s.newAuditEvent(ctx, action, spaceID, memberID, "", userID), nil, err)
 }
 
-func (s *service) writeFailureWithDetails(ctx context.Context, action, spaceID, memberID, ownerMemberID, userID string, metadata map[string]any, err error) {
-	event := s.newAuditEvent(ctx, action, spaceID, memberID, ownerMemberID, userID)
+func (s *service) writeFailureWithDetails(ctx context.Context, event domainaudit.AuditEvent, metadata map[string]any, err error) {
 	event.Status = domainaudit.StatusFailed
 	event.Metadata = utils.MergeMetadata(event.Metadata, metadata)
 	event.ErrorMessage = FailureCategory(err)

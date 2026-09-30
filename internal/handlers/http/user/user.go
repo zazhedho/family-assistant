@@ -46,15 +46,19 @@ type HandlerUser struct {
 	ResetService     interfacereset.ServicePasswordResetInterface
 }
 
+type AuthServices struct {
+	AppConfigService interfaceappconfig.ServiceAppConfigInterface
+	OTPService       interfaceotp.ServiceOTPInterface
+	ResetService     interfacereset.ServicePasswordResetInterface
+}
+
 func NewUserHandler(
 	s interfaceuser.ServiceUserInterface,
 	blacklistRepo interfaceauth.RepoAuthInterface,
 	sessionSvc interfacesession.ServiceSessionInterface,
 	limiter security.LoginLimiter,
 	auditService interfaceaudit.ServiceAuditInterface,
-	appConfigService interfaceappconfig.ServiceAppConfigInterface,
-	otpService interfaceotp.ServiceOTPInterface,
-	resetService interfacereset.ServicePasswordResetInterface,
+	authServices AuthServices,
 ) *HandlerUser {
 	return &HandlerUser{
 		Service:          s,
@@ -62,9 +66,9 @@ func NewUserHandler(
 		SessionSvc:       sessionSvc,
 		LoginLimiter:     limiter,
 		AuditWriter:      handlercommon.NewAuditWriter(auditService, "UserHandler"),
-		AppConfigService: appConfigService,
-		OTPService:       otpService,
-		ResetService:     resetService,
+		AppConfigService: authServices.AppConfigService,
+		OTPService:       authServices.OTPService,
+		ResetService:     authServices.ResetService,
 	}
 }
 
@@ -82,7 +86,7 @@ func (h *HandlerUser) Register(ctx *gin.Context) {
 		return
 	}
 	if !registerEnabled {
-		res := response.Forbidden(logId, "Public registration is currently disabled.")
+		res := response.Forbidden(logId, publicRegistrationDisabledMessage)
 		ctx.JSON(http.StatusForbidden, res)
 		return
 	}
@@ -107,7 +111,7 @@ func (h *HandlerUser) Register(ctx *gin.Context) {
 		}
 		if h.OTPService == nil {
 			res := response.Response(http.StatusServiceUnavailable, messages.MsgSomethingWrong, logId, nil)
-			res.Error = response.Errors{Code: http.StatusServiceUnavailable, Message: "registration OTP service is not configured"}
+			res.Error = response.Errors{Code: http.StatusServiceUnavailable, Message: registrationOTPNotConfiguredMessage}
 			ctx.JSON(http.StatusServiceUnavailable, res)
 			return
 		}
@@ -129,7 +133,7 @@ func (h *HandlerUser) Register(ctx *gin.Context) {
 			}
 			if errors.Is(err, serviceotp.ErrOTPNotConfigured) {
 				statusCode = http.StatusServiceUnavailable
-				message = "registration OTP service is not configured"
+				message = registrationOTPNotConfiguredMessage
 			}
 			res := response.Response(statusCode, messages.MsgSomethingWrong, logId, nil)
 			res.Error = response.Errors{Code: statusCode, Message: message}
@@ -223,7 +227,7 @@ func (h *HandlerUser) SendRegisterOTP(ctx *gin.Context) {
 		return
 	}
 	if !registerEnabled {
-		res := response.Forbidden(logId, "Public registration is currently disabled.")
+		res := response.Forbidden(logId, publicRegistrationDisabledMessage)
 		ctx.JSON(http.StatusForbidden, res)
 		return
 	}
@@ -246,7 +250,7 @@ func (h *HandlerUser) SendRegisterOTP(ctx *gin.Context) {
 	}
 	if h.OTPService == nil {
 		res := response.Response(http.StatusServiceUnavailable, messages.MsgSomethingWrong, logId, nil)
-		res.Error = response.Errors{Code: http.StatusServiceUnavailable, Message: "registration OTP service is not configured"}
+		res.Error = response.Errors{Code: http.StatusServiceUnavailable, Message: registrationOTPNotConfiguredMessage}
 		ctx.JSON(http.StatusServiceUnavailable, res)
 		return
 	}
@@ -586,7 +590,7 @@ func (h *HandlerUser) GoogleLogin(ctx *gin.Context) {
 		case errors.Is(err, serviceuser.ErrGoogleEmailMissing):
 			res = response.ErrorResponse(statusCode, messages.MsgSomethingWrong, logId, "Google account email is not available.")
 		case errors.Is(err, serviceuser.ErrPublicRegistrationDisabled):
-			res = response.Forbidden(logId, "Public registration is currently disabled.")
+			res = response.Forbidden(logId, publicRegistrationDisabledMessage)
 		case strings.HasPrefix(err.Error(), "birth_date "),
 			strings.HasPrefix(err.Error(), "account holder must be at least "):
 			res = response.ErrorResponse(http.StatusBadRequest, messages.MsgSomethingWrong, logId, err.Error())
@@ -671,7 +675,7 @@ func (h *HandlerUser) RefreshToken(ctx *gin.Context) {
 			Action:       domainaudit.ActionRefresh,
 			Resource:     "auth_token",
 			Status:       domainaudit.StatusFailed,
-			Message:      "Failed to renew login session",
+			Message:      loginSessionRenewalFailedMessage,
 			ErrorMessage: "The refresh token is invalid or expired",
 		})
 		res := response.Response(http.StatusUnauthorized, messages.MsgSomethingWrong, logId, nil)
@@ -687,7 +691,7 @@ func (h *HandlerUser) RefreshToken(ctx *gin.Context) {
 			Action:       domainaudit.ActionRefresh,
 			Resource:     "auth_token",
 			Status:       domainaudit.StatusFailed,
-			Message:      "Failed to renew login session",
+			Message:      loginSessionRenewalFailedMessage,
 			ErrorMessage: "The provided token is not a refresh token",
 		})
 		res := response.Response(http.StatusUnauthorized, messages.MsgSomethingWrong, logId, nil)
@@ -719,7 +723,7 @@ func (h *HandlerUser) RefreshToken(ctx *gin.Context) {
 			Action:       domainaudit.ActionRefresh,
 			Resource:     "auth_token",
 			Status:       domainaudit.StatusFailed,
-			Message:      "Failed to renew login session",
+			Message:      loginSessionRenewalFailedMessage,
 			ErrorMessage: "The refresh token has already been revoked",
 		})
 		res := response.Response(http.StatusUnauthorized, messages.MsgSomethingWrong, logId, nil)
@@ -739,7 +743,7 @@ func (h *HandlerUser) RefreshToken(ctx *gin.Context) {
 			Resource:     "auth_token",
 			ResourceID:   userID,
 			Status:       domainaudit.StatusFailed,
-			Message:      "Failed to renew login session",
+			Message:      loginSessionRenewalFailedMessage,
 			ErrorMessage: "The token owner user account was not found",
 		})
 		statusCode := http.StatusInternalServerError
@@ -747,7 +751,7 @@ func (h *HandlerUser) RefreshToken(ctx *gin.Context) {
 			statusCode = http.StatusNotFound
 		}
 		res := response.Response(statusCode, messages.MsgSomethingWrong, logId, nil)
-		res.Error = "user not found"
+		res.Error = userNotFoundMessage
 		ctx.JSON(statusCode, res)
 		return
 	}
@@ -799,7 +803,7 @@ func (h *HandlerUser) RefreshToken(ctx *gin.Context) {
 				Resource:     "auth_token",
 				ResourceID:   userID,
 				Status:       domainaudit.StatusFailed,
-				Message:      "Failed to renew login session",
+				Message:      loginSessionRenewalFailedMessage,
 				ErrorMessage: "No active session was found for the refresh token",
 			})
 			logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; SessionSvc.GetSessionByRefreshToken; ERROR: %s;", logPrefix, sessionErr))
@@ -931,7 +935,7 @@ func (h *HandlerUser) GetUserById(ctx *gin.Context) {
 		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; Service.GetUserByID; ERROR: %s;", logPrefix, err))
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			res := response.Response(http.StatusNotFound, messages.MsgNotFound, logId, nil)
-			res.Error = response.Errors{Code: http.StatusNotFound, Message: "user not found"}
+			res.Error = response.Errors{Code: http.StatusNotFound, Message: userNotFoundMessage}
 			ctx.JSON(http.StatusNotFound, res)
 			return
 		}
@@ -963,7 +967,7 @@ func (h *HandlerUser) GetUserByAuth(ctx *gin.Context) {
 		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; Service.GetUserByAuth; ERROR: %s;", logPrefix, err))
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			res := response.Response(http.StatusNotFound, messages.MsgNotFound, logId, nil)
-			res.Error = response.Errors{Code: http.StatusNotFound, Message: "user not found"}
+			res.Error = response.Errors{Code: http.StatusNotFound, Message: userNotFoundMessage}
 			ctx.JSON(http.StatusNotFound, res)
 			return
 		}
@@ -1142,7 +1146,7 @@ func (h *HandlerUser) Update(ctx *gin.Context) {
 		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; Service.Update; ERROR: %s;", logPrefix, err))
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			res := response.Response(http.StatusNotFound, messages.MsgNotFound, logId, nil)
-			res.Error = response.Errors{Code: http.StatusNotFound, Message: "user not found"}
+			res.Error = response.Errors{Code: http.StatusNotFound, Message: userNotFoundMessage}
 			ctx.JSON(http.StatusNotFound, res)
 			return
 		}
@@ -1197,7 +1201,7 @@ func (h *HandlerUser) UpdateUserById(ctx *gin.Context) {
 		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; Service.Update; ERROR: %s;", logPrefix, err))
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			res := response.Response(http.StatusNotFound, messages.MsgNotFound, logId, nil)
-			res.Error = response.Errors{Code: http.StatusNotFound, Message: "user not found"}
+			res.Error = response.Errors{Code: http.StatusNotFound, Message: userNotFoundMessage}
 			ctx.JSON(http.StatusNotFound, res)
 			return
 		}
@@ -1253,7 +1257,7 @@ func (h *HandlerUser) ChangePassword(ctx *gin.Context) {
 		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; Service.ChangePassword; ERROR: %s;", logPrefix, err))
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			res := response.Response(http.StatusNotFound, messages.MsgNotFound, logId, nil)
-			res.Error = response.Errors{Code: http.StatusNotFound, Message: "user not found"}
+			res.Error = response.Errors{Code: http.StatusNotFound, Message: userNotFoundMessage}
 			ctx.JSON(http.StatusNotFound, res)
 			return
 		}
@@ -1305,7 +1309,7 @@ func (h *HandlerUser) ForgotPassword(ctx *gin.Context) {
 	if emailResetEnabled {
 		if h.ResetService == nil {
 			res := response.Response(http.StatusServiceUnavailable, messages.MsgSomethingWrong, logId, nil)
-			res.Error = response.Errors{Code: http.StatusServiceUnavailable, Message: "password reset email service is not configured"}
+			res.Error = response.Errors{Code: http.StatusServiceUnavailable, Message: passwordResetNotConfiguredMessage}
 			ctx.JSON(http.StatusServiceUnavailable, res)
 			return
 		}
@@ -1418,7 +1422,7 @@ func (h *HandlerUser) ResetPassword(ctx *gin.Context) {
 	if emailResetEnabled {
 		if h.ResetService == nil {
 			res := response.Response(http.StatusServiceUnavailable, messages.MsgSomethingWrong, logId, nil)
-			res.Error = response.Errors{Code: http.StatusServiceUnavailable, Message: "password reset email service is not configured"}
+			res.Error = response.Errors{Code: http.StatusServiceUnavailable, Message: passwordResetNotConfiguredMessage}
 			ctx.JSON(http.StatusServiceUnavailable, res)
 			return
 		}
@@ -1436,7 +1440,7 @@ func (h *HandlerUser) ResetPassword(ctx *gin.Context) {
 			message := "invalid or expired reset token"
 			if errors.Is(err, servicereset.ErrResetNotConfigured) {
 				statusCode = http.StatusServiceUnavailable
-				message = "password reset email service is not configured"
+				message = passwordResetNotConfiguredMessage
 			}
 			res := response.Response(statusCode, messages.MsgSomethingWrong, logId, nil)
 			res.Error = response.Errors{Code: statusCode, Message: message}
@@ -1595,7 +1599,7 @@ func (h *HandlerUser) Delete(ctx *gin.Context) {
 		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; Service.Delete; ERROR: %s;", logPrefix, err))
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			res := response.Response(http.StatusNotFound, messages.MsgNotFound, logId, nil)
-			res.Error = response.Errors{Code: http.StatusNotFound, Message: "user not found"}
+			res.Error = response.Errors{Code: http.StatusNotFound, Message: userNotFoundMessage}
 			ctx.JSON(http.StatusNotFound, res)
 			return
 		}
@@ -1642,7 +1646,7 @@ func (h *HandlerUser) DeleteUserById(ctx *gin.Context) {
 		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; Service.Delete; ERROR: %s;", logPrefix, err))
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			res := response.Response(http.StatusNotFound, messages.MsgNotFound, logId, nil)
-			res.Error = response.Errors{Code: http.StatusNotFound, Message: "user not found"}
+			res.Error = response.Errors{Code: http.StatusNotFound, Message: userNotFoundMessage}
 			ctx.JSON(http.StatusNotFound, res)
 			return
 		}

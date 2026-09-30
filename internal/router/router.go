@@ -151,7 +151,11 @@ func (r *Routes) UserRoutes() {
 		}
 	}
 
-	h := userHandler.NewUserHandler(uc, blacklistRepo, userSessionSvc, loginLimiter, r.auditService(), svcAppConfig, registerOTPService, passwordResetService)
+	h := userHandler.NewUserHandler(uc, blacklistRepo, userSessionSvc, loginLimiter, r.auditService(), userHandler.AuthServices{
+		AppConfigService: svcAppConfig,
+		OTPService:       registerOTPService,
+		ResetService:     passwordResetService,
+	})
 	mdw := middlewares.NewMiddleware(blacklistRepo, pRepo)
 
 	// Setup register rate limiter

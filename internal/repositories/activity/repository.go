@@ -7,6 +7,7 @@ import (
 
 	domainactivity "family-assistant/internal/domain/activity"
 	interfaceactivity "family-assistant/internal/interfaces/activity"
+	repositorygeneric "family-assistant/internal/repositories/generic"
 	"family-assistant/utils"
 
 	"gorm.io/gorm"
@@ -42,6 +43,10 @@ func (r *Repository) List(ctx context.Context, filter domainactivity.ListFilter)
 	query := r.DB.WithContext(ctx).Where("space_id = ?", strings.TrimSpace(filter.SpaceID))
 	if kind := strings.TrimSpace(filter.Kind); kind != "" {
 		query = query.Where("kind = ?", kind)
+	}
+	if search := strings.TrimSpace(filter.Search); search != "" {
+		search = strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(search)
+		query = repositorygeneric.BuildSearchFunc("note")(query, search)
 	}
 	if filter.From != nil {
 		query = query.Where("occurred_at >= ?", *filter.From)

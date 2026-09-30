@@ -10,11 +10,12 @@ type ActivityCreateInput struct {
 }
 
 type ActivityListInput struct {
-	Space string
-	Kind  string
-	From  *time.Time
-	To    *time.Time
-	Limit int
+	Space  string
+	Kind   string
+	Search string
+	From   *time.Time
+	To     *time.Time
+	Limit  int
 }
 
 type ActivityUpdateInput struct {

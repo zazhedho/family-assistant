@@ -49,8 +49,7 @@ func MapToolError(err error, logger ...*slog.Logger) error {
 		return nil
 	}
 
-	var mapped *MCPError
-	if errors.As(err, &mapped) {
+	if mapped, ok := errors.AsType[*MCPError](err); ok {
 		return mapped
 	}
 
