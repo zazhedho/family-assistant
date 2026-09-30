@@ -820,10 +820,78 @@ Before step 1:
    a new conversation; use it deliberately, not as a daily time fix. Refreshing
    time is handled by `live-time` and the signed message context.
 
-   On later updates, deploy the backend first, copy the identity plugin files
-   to **both profiles**, and restart the single gateway. The application image
-   update does not update Hermes plugins. `SOUL.md`/model settings in the admin
-   clone also do not automatically follow later default-profile edits.
+   For later releases, follow the [existing VPS update checklist](#updating-an-existing-vps).
+
+### Updating an existing VPS
+
+The backend image and Hermes plugins are separate deployment artifacts.
+Updating the image does **not** update the plugins. When plugin files change,
+complete every step below using the same release checkout as the backend.
+
+1. **VPS — deploy the backend first.** If CI already deployed it, verify the
+   health check instead of deploying again. This order lets the backend accept
+   the new signed identity envelope before the plugin starts sending it.
+
+   ```sh
+   cd /opt/apps/family-assistant
+   docker compose pull backend
+   docker compose up -d backend
+   curl -f http://127.0.0.1:8086/healthcheck
+   ```
+
+2. **Deployment workstation — update the plugin files.** Run from the
+   repository root; replace `<server>` with the VPS address. Copy only these
+   files, not the repository, `.env`, or WhatsApp sessions.
+
+   ```sh
+   ssh root@<server> 'mkdir -p /root/.hermes/plugins/family-assistant-identity'
+   scp integrations/hermes/family_assistant_identity/plugin.py \
+     integrations/hermes/family_assistant_identity/plugin.yaml \
+     integrations/hermes/family_assistant_identity/__init__.py \
+     root@<server>:/root/.hermes/plugins/family-assistant-identity/
+   ```
+
+3. **VPS — update the admin profile too.** Do not clone the profile again;
+   preserve its configuration, credentials, and existing conversations.
+
+   ```sh
+   mkdir -p /root/.hermes/profiles/admin/plugins/family-assistant-identity
+   cp /root/.hermes/plugins/family-assistant-identity/plugin.py \
+     /root/.hermes/plugins/family-assistant-identity/plugin.yaml \
+     /root/.hermes/plugins/family-assistant-identity/__init__.py \
+     /root/.hermes/profiles/admin/plugins/family-assistant-identity/
+   hermes plugins doctor /root/.hermes/plugins/family-assistant-identity
+   hermes -p admin plugins doctor /root/.hermes/profiles/admin/plugins/family-assistant-identity
+   hermes plugins list --plain --no-bundled
+   hermes -p admin plugins list --plain --no-bundled
+   ```
+
+   Confirm `family-assistant-identity` remains enabled with its
+   `allow_tool_override: true` grant in both profiles. Changes to default-profile
+   `SOUL.md` or model settings do not automatically update the admin clone;
+   apply those separately when the release changes them.
+
+4. **VPS — restart the single gateway and check MCP.**
+
+   ```sh
+   hermes gateway restart
+   hermes gateway status
+   hermes status
+   hermes mcp test family_assistant
+   hermes -p admin mcp test family_assistant
+   ```
+
+   If the gateway runs manually with `hermes gateway run`, stop that process
+   in its owning terminal and run it again instead. Do not start a second
+   gateway or a separate admin gateway.
+
+5. **WhatsApp — verify actual behavior in a group and the admin DM.** Test
+   linking and an activity without an explicit time; confirm `occurred_at`
+   matches the original message time. Test a relative reminder and confirm
+   delivery to the originating chat. A successful MCP connection alone does
+   not prove the updated timestamp plugin is running. Use `/new` only if a
+   changed tool catalog needs a fresh conversation; it resets chat history
+   and is not a substitute for updating the plugin or restarting the gateway.
 
 Default health check:
 

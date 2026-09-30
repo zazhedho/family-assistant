@@ -4,6 +4,10 @@ This is a standalone Hermes plugin. It does not modify the Hermes installation.
 
 For an image-only VPS, follow the [production deployment guide](../../../README.md)
 and copy the plugin files; the application repository is not required there.
+For later releases, follow the [VPS update checklist](../../../README.md#updating-an-existing-vps):
+deploy the backend first, update the copied plugin files in both profiles,
+then restart the single gateway. An application image update does not update
+this plugin.
 For a local checkout, install it as a symlink so project updates are picked up:
 
 ```sh
