@@ -88,6 +88,26 @@ func TestActivityCreateWithReminderCreatesActivityAndReminder(t *testing.T) {
 	}
 }
 
+func TestActivityCreateWithReminderUsesSignedMessageTimeAcrossMidnight(t *testing.T) {
+	activityService := &mcpActivityServiceStub{created: &domainactivity.Activity{ID: "activity-1", SpaceID: mcpSpaceID}}
+	reminderService := &reminderToolServiceStub{}
+	server := activityReminderHTTPServer(t, activityReminderResolver(), activityService, reminderService, "identity-secret")
+	messageAt := time.Now().UTC().Truncate(24 * time.Hour).Add(-time.Minute)
+	identity := newSignedIdentityEnvelope("identity-secret", time.Now())
+	identity.Version, identity.MessageAt = "v2", messageAt.Unix()
+	identity.Signature = signIdentityEnvelope("identity-secret", identity)
+	arguments := activityReminderArguments(map[string]any{"title": "Follow up", "after_minutes": 240})
+	delete(arguments["activity"].(map[string]any), "occurred_at")
+	arguments[identityArgumentName] = identity
+	response := callActivityReminderTool(t, server.URL, arguments)
+	if response.Error != nil || response.Result == nil || response.Result.IsError {
+		t.Fatalf("response = %+v", response)
+	}
+	if !activityService.createInput.OccurredAt.Equal(messageAt) || !reminderService.createInput.ScheduledAt.Equal(messageAt.Add(4*time.Hour)) {
+		t.Fatalf("activity = %s, reminder = %s, message = %s", activityService.createInput.OccurredAt, reminderService.createInput.ScheduledAt, messageAt)
+	}
+}
+
 func TestActivityCreateWithReminderRejectsInvalidSchedulingBeforeWrites(t *testing.T) {
 	validTime := "2026-09-29T11:00:00Z"
 	for _, tt := range []struct {

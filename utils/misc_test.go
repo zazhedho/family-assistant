@@ -7,6 +7,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/go-playground/validator/v10"
@@ -60,6 +61,70 @@ func TestGenerateLogIdAndRequestID(t *testing.T) {
 	ctx.Set(CtxKeyId, " request-id ")
 	if got := GetRequestID(ctx); got != "request-id" {
 		t.Fatalf("expected trimmed request id, got %q", got)
+	}
+}
+
+func TestParseUUIDPreservesRequiredAndOptionalInputs(t *testing.T) {
+	const id = "00000000-0000-0000-0000-000000000101"
+	for _, tt := range []struct {
+		name     string
+		input    string
+		required bool
+		want     string
+		invalid  bool
+	}{
+		{name: "blank optional"},
+		{name: "blank required", required: true, invalid: true},
+		{name: "invalid optional", input: "invalid", invalid: true},
+		{name: "invalid required", input: "invalid", required: true, invalid: true},
+		{name: "trimmed UUID", input: " " + id + " ", required: true, want: id},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := ParseUUID(tt.input, "resource_id", tt.required)
+			if !tt.invalid {
+				if err != nil || got != tt.want {
+					t.Fatalf("ParseUUID = %q, %v; want %q", got, err, tt.want)
+				}
+				return
+			}
+			if !errors.Is(err, ErrInvalidUUID) || !strings.Contains(err.Error(), "resource_id") {
+				t.Fatalf("expected UUID validation error with field context, got %v", err)
+			}
+		})
+	}
+}
+
+func TestParseRFC3339PreservesRequiredAndOptionalInputs(t *testing.T) {
+	for _, tt := range []struct {
+		name     string
+		input    string
+		required bool
+		invalid  bool
+	}{
+		{name: "blank optional"},
+		{name: "blank required", required: true, invalid: true},
+		{name: "invalid timestamp", input: "tomorrow", invalid: true},
+		{name: "timestamp with timezone", input: "2026-09-30T08:00:00+07:00", required: true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := ParseRFC3339(tt.input, "scheduled_at", tt.required)
+			if tt.invalid {
+				if !errors.Is(err, ErrInvalidTime) || !strings.Contains(err.Error(), "scheduled_at") {
+					t.Fatalf("expected time validation error with field context, got %v", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("parse time: %v", err)
+			}
+			if tt.input == "" {
+				if got != nil {
+					t.Fatalf("expected nil for optional timestamp, got %v", got)
+				}
+			} else if got == nil || got.Format(time.RFC3339) != tt.input {
+				t.Fatalf("timestamp changed: got %v, want %s", got, tt.input)
+			}
+		})
 	}
 }
 

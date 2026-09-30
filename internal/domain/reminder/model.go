@@ -2,6 +2,7 @@ package domainreminder
 
 import (
 	"errors"
+	"strings"
 	"time"
 
 	"gorm.io/gorm"
@@ -13,6 +14,7 @@ var (
 	ErrReminderIDRequired     = errors.New("reminder_id is required")
 	ErrReminderUpdateRequired = errors.New("reminder update is required")
 	ErrStatusConflict         = errors.New("reminder status conflict")
+	ErrInvalidStatus          = errors.New("status is invalid")
 )
 
 type Status string
@@ -28,6 +30,20 @@ const (
 	StatusCompleted Status = "COMPLETED"
 	StatusCancelled Status = "CANCELLED" //nolint:misspell // persisted API enum; preserve spelling.
 )
+
+func ParseStatus(value string) (*Status, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return nil, nil
+	}
+	status := Status(value)
+	switch status {
+	case StatusPending, StatusSent, StatusCompleted, StatusCancelled:
+		return &status, nil
+	default:
+		return nil, ErrInvalidStatus
+	}
+}
 
 type ListFilter struct {
 	SpaceID string

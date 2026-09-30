@@ -31,6 +31,7 @@ type IdentityEnvelope struct {
 	ChatID     string `json:"chat_id,omitempty"`
 	ChatType   string `json:"chat_type,omitempty"`
 	IssuedAt   int64  `json:"issued_at"`
+	MessageAt  int64  `json:"message_at,omitempty"`
 	Nonce      string `json:"nonce"`
 	Signature  string `json:"signature"`
 }
@@ -113,13 +114,17 @@ func (v *IdentityVerifier) Verify(req *mcpsdk.CallToolRequest) (ExternalRequest,
 		return ExternalRequest{}, serviceidentity.ErrUnauthenticated
 	}
 
-	return ExternalRequest{
+	request := ExternalRequest{
 		Provider:   strings.ToLower(strings.TrimSpace(envelope.Provider)),
 		ExternalID: strings.TrimSpace(envelope.ExternalID),
 		Channel:    strings.ToLower(strings.TrimSpace(envelope.Channel)),
 		ChatID:     strings.TrimSpace(envelope.ChatID),
 		ChatType:   strings.ToLower(strings.TrimSpace(envelope.ChatType)),
-	}, nil
+	}
+	if envelope.MessageAt > 0 {
+		request.MessageAt = time.Unix(envelope.MessageAt, 0).UTC()
+	}
+	return request, nil
 }
 
 func (v *IdentityVerifier) consumeNonce(nonce string, now time.Time) bool {
@@ -143,7 +148,7 @@ func (v *IdentityVerifier) consumeNonce(nonce string, now time.Time) bool {
 }
 
 func (v *IdentityVerifier) valid(envelope IdentityEnvelope) bool {
-	if envelope.Version != identityEnvelopeVersion || !safeIdentityPart(envelope.Provider) ||
+	if !validIdentityMessageTime(envelope) || !safeIdentityPart(envelope.Provider) ||
 		!safeIdentityPart(envelope.ExternalID) || !safeIdentityPart(envelope.Channel) ||
 		!safeIdentityPart(envelope.Nonce) || envelope.IssuedAt <= 0 || envelope.Signature == "" {
 		return false
@@ -181,9 +186,21 @@ func safeIdentityPart(value string) bool {
 	return value != "" && len(value) <= 512 && !strings.ContainsAny(value, "\x00\r\n")
 }
 
+func validIdentityMessageTime(envelope IdentityEnvelope) bool {
+	switch envelope.Version {
+	case identityEnvelopeVersion:
+		// The legacy signature does not authenticate message_at.
+		return envelope.MessageAt == 0
+	case "v2":
+		return envelope.MessageAt > 0 && !time.Unix(envelope.MessageAt, 0).After(time.Unix(envelope.IssuedAt, 0).Add(identityClockSkew))
+	default:
+		return false
+	}
+}
+
 func signIdentityEnvelope(secret string, envelope IdentityEnvelope) string {
 	payload := strings.Join([]string{
-		identityEnvelopeVersion,
+		envelope.Version,
 		envelope.Provider,
 		envelope.ExternalID,
 		envelope.Channel,
@@ -192,6 +209,9 @@ func signIdentityEnvelope(secret string, envelope IdentityEnvelope) string {
 		strconv.FormatInt(envelope.IssuedAt, 10),
 		envelope.Nonce,
 	}, "\x00")
+	if envelope.Version == "v2" {
+		payload += "\x00" + strconv.FormatInt(envelope.MessageAt, 10)
+	}
 	mac := hmac.New(sha256.New, []byte(secret))
 	_, _ = mac.Write([]byte(payload))
 	return hex.EncodeToString(mac.Sum(nil))

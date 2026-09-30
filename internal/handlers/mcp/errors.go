@@ -6,9 +6,11 @@ import (
 
 	domainidentity "family-assistant/internal/domain/identity"
 	domaininvitation "family-assistant/internal/domain/invitation"
+	domainreminder "family-assistant/internal/domain/reminder"
 	serviceauthorization "family-assistant/internal/services/authorization"
 	serviceidentity "family-assistant/internal/services/identity"
 	servicereminder "family-assistant/internal/services/reminder"
+	"family-assistant/utils"
 
 	"gorm.io/gorm"
 )
@@ -60,6 +62,9 @@ func MapToolError(err error, logger ...*slog.Logger) error {
 	case errors.Is(err, serviceauthorization.ErrNotFound), errors.Is(err, gorm.ErrRecordNotFound):
 		return &MCPError{Code: "not_found", Message: ErrMCPNotFound.Error(), cause: err}
 	case errors.Is(err, serviceauthorization.ErrInvalidResource),
+		errors.Is(err, utils.ErrInvalidUUID),
+		errors.Is(err, utils.ErrInvalidTime),
+		errors.Is(err, domainreminder.ErrInvalidStatus),
 		errors.Is(err, serviceidentity.ErrInvalidResource),
 		errors.Is(err, serviceidentity.ErrInvalidIdentityProvider),
 		errors.Is(err, serviceidentity.ErrInvalidExternalIdentity),

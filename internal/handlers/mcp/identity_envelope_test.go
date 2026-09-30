@@ -43,6 +43,48 @@ func TestIdentityVerifierAcceptsValidEnvelopeAndOverridesHeaderIdentity(t *testi
 	}
 }
 
+func TestIdentityVerifierAcceptsSignedMessageTime(t *testing.T) {
+	now := time.Unix(1_800_000_000, 0)
+	verifier := &IdentityVerifier{secret: []byte("identity-secret"), now: func() time.Time { return now }}
+	envelope := newSignedIdentityEnvelope("identity-secret", now)
+	envelope.Version = "v2"
+	envelope.MessageAt = now.Add(-10 * time.Minute).Unix()
+	envelope.Signature = signIdentityEnvelope("identity-secret", envelope)
+	if envelope.Signature != "f531954fea544f2ba8aa50901e448e837182ac4f68ef6ea5c4952c69836d5606" {
+		t.Fatalf("v2 signature does not match Python wire format: %s", envelope.Signature)
+	}
+	request, err := verifier.Verify(toolRequestWithEnvelope(t, envelope))
+	if err != nil || !request.MessageAt.Equal(time.Unix(envelope.MessageAt, 0)) {
+		t.Fatalf("message time = %s, error = %v", request.MessageAt, err)
+	}
+}
+
+func TestIdentityVerifierRejectsInvalidMessageTime(t *testing.T) {
+	now := time.Unix(1_800_000_000, 0)
+	for _, scenario := range []string{"tampered", "unsigned legacy", "missing", "future"} {
+		t.Run(scenario, func(t *testing.T) {
+			verifier := &IdentityVerifier{secret: []byte("identity-secret"), now: func() time.Time { return now }}
+			envelope := newSignedIdentityEnvelope("identity-secret", now)
+			envelope.Version, envelope.MessageAt = "v2", now.Add(-time.Minute).Unix()
+			switch scenario {
+			case "unsigned legacy":
+				envelope.Version = "v1"
+			case "missing":
+				envelope.MessageAt = 0
+			case "future":
+				envelope.MessageAt = now.Add(time.Hour).Unix()
+			}
+			envelope.Signature = signIdentityEnvelope("identity-secret", envelope)
+			if scenario == "tampered" {
+				envelope.MessageAt--
+			}
+			if _, err := verifier.Verify(toolRequestWithEnvelope(t, envelope)); !errors.Is(err, serviceidentity.ErrUnauthenticated) {
+				t.Fatalf("error = %v, want unauthenticated", err)
+			}
+		})
+	}
+}
+
 func TestIdentityVerifierRejectsMissingEnvelope(t *testing.T) {
 	verifier := &IdentityVerifier{
 		secret: []byte("identity-secret"),

@@ -21,7 +21,6 @@ import (
 	"family-assistant/utils"
 
 	"github.com/gin-gonic/gin"
-	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
 
@@ -59,17 +58,17 @@ func (h *ReminderHandler) Create(ctx *gin.Context) {
 		h.writeError(ctx, &serviceauthorization.ValidationError{Field: "body", Reason: "is invalid"})
 		return
 	}
-	spaceID, err := parseUUID(request.SpaceID, "space_id")
+	spaceID, err := utils.ParseUUID(request.SpaceID, "space_id", false)
 	if err != nil {
 		h.writeError(ctx, err)
 		return
 	}
-	scheduledAt, err := parseHTTPTime(request.ScheduledAt, "scheduled_at", true)
+	scheduledAt, err := utils.ParseRFC3339(request.ScheduledAt, "scheduled_at", true)
 	if err != nil {
 		h.writeError(ctx, err)
 		return
 	}
-	assigneeID, err := parseOptionalUUID(request.AssigneeMemberID, "assignee_member_id")
+	assigneeID, err := utils.ParseOptionalUUID(request.AssigneeMemberID, "assignee_member_id")
 	if err != nil {
 		h.writeError(ctx, err)
 		return
@@ -95,7 +94,7 @@ func (h *ReminderHandler) Create(ctx *gin.Context) {
 }
 
 func (h *ReminderHandler) List(ctx *gin.Context) {
-	spaceID, err := parseUUID(ctx.Query("space_id"), "space_id")
+	spaceID, err := utils.ParseUUID(ctx.Query("space_id"), "space_id", false)
 	if err != nil {
 		h.writeError(ctx, err)
 		return
@@ -105,7 +104,7 @@ func (h *ReminderHandler) List(ctx *gin.Context) {
 		h.writeError(ctx, err)
 		return
 	}
-	status, err := statusFilter(ctx.Query("status"))
+	status, err := domainreminder.ParseStatus(ctx.Query("status"))
 	if err != nil {
 		h.writeError(ctx, err)
 		return
@@ -113,11 +112,11 @@ func (h *ReminderHandler) List(ctx *gin.Context) {
 	input := dto.ReminderListInput{
 		Space: actor.SpaceID, Status: status,
 	}
-	if input.From, err = parseHTTPTime(ctx.Query("from"), "from", false); err != nil {
+	if input.From, err = utils.ParseRFC3339(ctx.Query("from"), "from", false); err != nil {
 		h.writeError(ctx, err)
 		return
 	}
-	if input.To, err = parseHTTPTime(ctx.Query("to"), "to", false); err != nil {
+	if input.To, err = utils.ParseRFC3339(ctx.Query("to"), "to", false); err != nil {
 		h.writeError(ctx, err)
 		return
 	}
@@ -138,12 +137,12 @@ func (h *ReminderHandler) List(ctx *gin.Context) {
 }
 
 func (h *ReminderHandler) Complete(ctx *gin.Context) {
-	spaceID, err := parseUUID(ctx.Query("space_id"), "space_id")
+	spaceID, err := utils.ParseUUID(ctx.Query("space_id"), "space_id", false)
 	if err != nil {
 		h.writeError(ctx, err)
 		return
 	}
-	reminderID, err := parseUUID(ctx.Param("reminder_id"), "reminder_id")
+	reminderID, err := utils.ParseUUID(ctx.Param("reminder_id"), "reminder_id", false)
 	if err != nil {
 		h.writeError(ctx, err)
 		return
@@ -215,28 +214,14 @@ func reminderHTTPError(err error) (int, string) {
 		return http.StatusForbidden, "forbidden"
 	case errors.Is(err, serviceauthorization.ErrNotFound), errors.Is(err, gorm.ErrRecordNotFound):
 		return http.StatusNotFound, "not found"
-	case errors.Is(err, serviceauthorization.ErrInvalidResource):
+	case errors.Is(err, serviceauthorization.ErrInvalidResource), errors.Is(err, utils.ErrInvalidUUID),
+		errors.Is(err, utils.ErrInvalidTime), errors.Is(err, domainreminder.ErrInvalidStatus):
 		return http.StatusBadRequest, "invalid input"
 	case errors.Is(err, servicereminder.ErrConflict):
 		return http.StatusConflict, "conflict"
 	default:
 		return http.StatusInternalServerError, "internal server error"
 	}
-}
-
-func parseHTTPTime(value, field string, required bool) (*time.Time, error) {
-	value = strings.TrimSpace(value)
-	if value == "" {
-		if required {
-			return nil, &serviceauthorization.ValidationError{Field: field, Reason: "is required"}
-		}
-		return nil, nil
-	}
-	parsed, err := time.Parse(time.RFC3339, value)
-	if err != nil {
-		return nil, &serviceauthorization.ValidationError{Field: field, Reason: "must be RFC3339"}
-	}
-	return &parsed, nil
 }
 
 func decodeSingleJSON(ctx *gin.Context, destination any) error {
@@ -253,39 +238,6 @@ func decodeSingleJSON(ctx *gin.Context, destination any) error {
 		return err
 	}
 	return nil
-}
-
-func statusFilter(value string) (*domainreminder.Status, error) {
-	value = strings.TrimSpace(value)
-	if value == "" {
-		return nil, nil
-	}
-	status := domainreminder.Status(value)
-	switch status {
-	case domainreminder.StatusPending, domainreminder.StatusSent, domainreminder.StatusCompleted, domainreminder.StatusCancelled:
-		return &status, nil
-	default:
-		return nil, &serviceauthorization.ValidationError{Field: "status", Reason: "is invalid"}
-	}
-}
-
-func parseUUID(value, field string) (string, error) {
-	value = strings.TrimSpace(value)
-	if value == "" {
-		return "", nil
-	}
-	if _, err := uuid.Parse(value); err != nil {
-		return "", &serviceauthorization.ValidationError{Field: field, Reason: "must be a valid UUID"}
-	}
-	return value, nil
-}
-
-func parseOptionalUUID(value, field string) (*string, error) {
-	value, err := parseUUID(value, field)
-	if err != nil || value == "" {
-		return nil, err
-	}
-	return &value, nil
 }
 
 func toResponse(reminder *domainreminder.Reminder) reminderResponse {

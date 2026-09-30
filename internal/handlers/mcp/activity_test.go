@@ -94,6 +94,40 @@ func TestActivityCreateSelectsSpaceAndNormalizesTime(t *testing.T) {
 	}
 }
 
+func TestActivityCreateUsesMessageTimeOnlyWhenEventTimeOmitted(t *testing.T) {
+	messageAt := time.Date(2026, 9, 29, 23, 59, 0, 0, time.FixedZone("WIB", 7*60*60))
+	for _, scenario := range []struct {
+		name, occurredAt string
+		messageAt        time.Time
+		want             time.Time
+		invalid          bool
+	}{
+		{name: "now", messageAt: messageAt, want: messageAt},
+		{name: "explicit", occurredAt: "2026-09-28T08:25:00+07:00", messageAt: messageAt, want: time.Date(2026, 9, 28, 1, 25, 0, 0, time.UTC)},
+		{name: "missing trusted time", invalid: true},
+		{name: "invalid explicit", occurredAt: "tomorrow", messageAt: messageAt, invalid: true},
+	} {
+		t.Run(scenario.name, func(t *testing.T) {
+			resolver := activityReminderResolver()
+			service := &mcpActivityServiceStub{created: &domainactivity.Activity{ID: "activity-1", SpaceID: mcpSpaceID}}
+			request, _ := ExternalRequestFromContext(mcpExternalContext())
+			request.MessageAt = scenario.messageAt
+			ctx := WithExternalRequest(context.Background(), request)
+			_, err := ActivityCreate(ctx, resolver, service, ActivityCreateInput{Kind: "note", Note: "event", OccurredAt: scenario.occurredAt})
+			if scenario.invalid {
+				var mapped *MCPError
+				if !errors.As(err, &mapped) || mapped.Code != "invalid_input" || service.createCalls != 0 {
+					t.Fatalf("error = %v, calls = %d", err, service.createCalls)
+				}
+				return
+			}
+			if err != nil || service.createCalls != 1 || !service.createInput.OccurredAt.Equal(scenario.want) {
+				t.Fatalf("occurred_at = %s, want %s; error = %v", service.createInput.OccurredAt, scenario.want, err)
+			}
+		})
+	}
+}
+
 func TestActivityListPassesSpaceKindAndDateRange(t *testing.T) {
 	spaceID := "00000000-0000-0000-0000-000000000501"
 	resolver := &mcpExternalResolverStub{

@@ -1,11 +1,15 @@
 package utils
 
 import (
+	"errors"
+	"fmt"
 	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 )
+
+var ErrInvalidUUID = errors.New("must be a valid UUID")
 
 func CreateUUID() string {
 	var id string
@@ -44,15 +48,29 @@ func GenerateLogId(ctx *gin.Context) uuid.UUID {
 	return logId
 }
 
-func NormalizeUUIDPointer(input string) *string {
-	value := strings.TrimSpace(input)
-	if value == "" {
-		return nil
+func ParseUUID(value, field string, required bool) (string, error) {
+	value = strings.TrimSpace(value)
+	if value == "" && !required {
+		return "", nil
 	}
-
 	if _, err := uuid.Parse(value); err != nil {
+		return "", fmt.Errorf("%s: %w", field, ErrInvalidUUID)
+	}
+	return value, nil
+}
+
+func ParseOptionalUUID(value, field string) (*string, error) {
+	parsed, err := ParseUUID(value, field, false)
+	if err != nil || parsed == "" {
+		return nil, err
+	}
+	return &parsed, nil
+}
+
+func NormalizeUUIDPointer(input string) *string {
+	value, err := ParseOptionalUUID(input, "")
+	if err != nil {
 		return nil
 	}
-
-	return &value
+	return value
 }

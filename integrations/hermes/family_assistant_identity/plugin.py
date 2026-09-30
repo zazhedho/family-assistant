@@ -13,6 +13,7 @@ import os
 import secrets
 import time
 from contextvars import ContextVar
+from datetime import datetime, timezone
 from typing import Any
 
 
@@ -27,6 +28,7 @@ _current_identity: ContextVar[dict[str, str] | None] = ContextVar(
 
 def register(ctx: Any) -> None:
     ctx.register_hook("pre_gateway_dispatch", capture_gateway_identity)
+    ctx.register_hook("pre_llm_call", inject_message_time)
     ctx.register_middleware("tool_request", inject_identity)
 
 
@@ -45,8 +47,50 @@ def capture_gateway_identity(event: Any, **_: Any) -> None:
         return None
     chat_id = _text(getattr(source, "chat_id", "")) or external_id
     chat_type = _text(getattr(source, "chat_type", ""))
-    _current_identity.set(_identity(platform, external_id, chat_id, chat_type))
+    identity = _identity(platform, external_id, chat_id, chat_type)
+    message_at = _message_timestamp(event)
+    if message_at is not None:
+        identity["message_at"] = str(message_at)
+    _current_identity.set(identity)
     return None
+
+
+def inject_message_time(**_: Any) -> dict[str, str] | None:
+    identity = _current_identity.get()
+    if not identity or not identity.get("message_at"):
+        return None
+    timestamp = datetime.fromtimestamp(int(identity["message_at"]), timezone.utc).isoformat()
+    return {"context": (
+        f"[Family Assistant] Original WhatsApp message time: {timestamp}. "
+        "This is not processing time. For event requests, resolve today/yesterday "
+        "and time-only dates from this message time in the configured timezone "
+        "shown by live-time, unless the user specifies a date. Omit occurred_at "
+        "for now/no stated time: backend uses the signed message timestamp. "
+        "Never reuse an old record's created_at/updated_at as a new event time."
+    )}
+
+
+def _message_timestamp(event: Any) -> int | None:
+    raw = getattr(event, "raw_message", None)
+    value = raw.get("timestamp") if isinstance(raw, dict) else None
+    if value is None:
+        timestamp = getattr(event, "timestamp", None)
+        if not isinstance(timestamp, datetime):
+            return None
+        value = int(timestamp.timestamp())
+    if isinstance(value, dict):
+        low, high = value.get("low"), value.get("high")
+        if type(low) is not int or type(high) is not int:
+            return None
+        value = (high << 32) | (low & 0xFFFFFFFF)
+    if isinstance(value, bool) or not isinstance(value, (int, str)):
+        return None
+    try:
+        parsed = int(value)
+        datetime.fromtimestamp(parsed, timezone.utc)
+    except (ValueError, OverflowError, OSError):
+        return None
+    return parsed if parsed > 0 else None
 
 
 def inject_identity(tool_name: str = "", args: dict[str, Any] | None = None, **_: Any) -> dict[str, Any] | None:
@@ -69,6 +113,9 @@ def inject_identity(tool_name: str = "", args: dict[str, Any] | None = None, **_
         "issued_at": int(time.time()),
         "nonce": secrets.token_urlsafe(18),
     }
+    if identity.get("message_at"):
+        envelope["version"] = "v2"
+        envelope["message_at"] = int(identity["message_at"])
     envelope["signature"] = _sign(secret, envelope)
     rewritten = dict(args or {})
     # Overwrite any model-supplied value; the model never chooses its identity.
@@ -118,13 +165,13 @@ def _session_identity() -> dict[str, str] | None:
 
 def _is_target_tool(tool_name: str) -> bool:
     server = os.environ.get(_TARGET_SERVER_ENV, "family_assistant").strip() or "family_assistant"
-    return tool_name.startswith(f"mcp_{server}_") or tool_name.startswith(f"mcp__{server}__")
+    return tool_name.startswith((f"mcp_{server}_", f"mcp__{server}__"))
 
 
 def _sign(secret: str, envelope: dict[str, Any]) -> str:
     payload = "\x00".join(
         (
-            IDENTITY_VERSION,
+            str(envelope.get("version") or IDENTITY_VERSION),
             str(envelope.get("provider") or ""),
             str(envelope.get("external_id") or ""),
             str(envelope.get("channel") or ""),
@@ -134,6 +181,8 @@ def _sign(secret: str, envelope: dict[str, Any]) -> str:
             str(envelope.get("nonce") or ""),
         )
     )
+    if envelope.get("version") == "v2":
+        payload += "\x00" + str(envelope.get("message_at") or "")
     return hmac.new(secret.encode(), payload.encode(), hashlib.sha256).hexdigest()
 
 

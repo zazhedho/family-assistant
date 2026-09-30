@@ -13,8 +13,8 @@ import (
 	interfaceinvitation "family-assistant/internal/interfaces/invitation"
 	serviceauthorization "family-assistant/internal/services/authorization"
 	serviceidentity "family-assistant/internal/services/identity"
+	"family-assistant/utils"
 
-	"github.com/google/uuid"
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -120,9 +120,9 @@ func InvitationRevoke(ctx context.Context, resolver interfaceidentity.Resolver, 
 	if err != nil {
 		return nil, MapToolError(err)
 	}
-	invitationID := strings.TrimSpace(input.InvitationID)
-	if _, err := uuid.Parse(invitationID); err != nil {
-		return nil, MapToolError(&serviceauthorization.ValidationError{Field: "invitation_id", Reason: "must be a valid UUID"})
+	invitationID, err := utils.ParseUUID(input.InvitationID, "invitation_id", true)
+	if err != nil {
+		return nil, MapToolError(err)
 	}
 	revoked, err := service.Revoke(ctx, actor.UserID, selected.SpaceID, invitationID)
 	if err != nil {
@@ -134,26 +134,23 @@ func InvitationRevoke(ctx context.Context, resolver interfaceidentity.Resolver, 
 func registerInvitationTools(server *mcpsdk.Server, resolver interfaceidentity.Resolver, service interfaceinvitation.ServiceInvitationInterface) {
 	addTool(server, &mcpsdk.Tool{
 		Name: "invitation_create", Description: "Create a one-time invitation for an authorized shared Space. Leave invited_email blank for a WhatsApp bearer invitation; treat the returned token as sensitive.",
-	}, func(ctx context.Context, _ *mcpsdk.CallToolRequest, input InvitationCreateInput) (*mcpsdk.CallToolResult, InvitationCreateOutput, error) {
-		output, err := InvitationCreate(ctx, resolver, service, input)
-		return nil, output, err
+	}, func(ctx context.Context, input InvitationCreateInput) (InvitationCreateOutput, error) {
+		return InvitationCreate(ctx, resolver, service, input)
 	})
 	addTool(server, &mcpsdk.Tool{
 		Name: "invitation_accept", Description: "Accept a one-time Space invitation token for the authenticated WhatsApp account.",
-	}, func(ctx context.Context, _ *mcpsdk.CallToolRequest, input InvitationAcceptInput) (*mcpsdk.CallToolResult, *domainspace.Member, error) {
-		output, err := InvitationAccept(ctx, resolver, service, input)
-		return nil, output, err
+	}, func(ctx context.Context, input InvitationAcceptInput) (*domainspace.Member, error) {
+		return InvitationAccept(ctx, resolver, service, input)
 	})
 	addTool(server, &mcpsdk.Tool{
 		Name: "invitation_list", Description: "List pending invitations for an authorized shared Space without exposing invitation tokens.",
-	}, func(ctx context.Context, _ *mcpsdk.CallToolRequest, input InvitationListInput) (*mcpsdk.CallToolResult, InvitationListOutput, error) {
+	}, func(ctx context.Context, input InvitationListInput) (InvitationListOutput, error) {
 		output, err := InvitationList(ctx, resolver, service, input)
-		return nil, InvitationListOutput{Invitations: output}, err
+		return InvitationListOutput{Invitations: output}, err
 	})
 	addTool(server, &mcpsdk.Tool{
 		Name: "invitation_revoke", Description: "Revoke a pending invitation in an authorized shared Space.",
-	}, func(ctx context.Context, _ *mcpsdk.CallToolRequest, input InvitationRevokeInput) (*mcpsdk.CallToolResult, *domaininvitation.Invitation, error) {
-		output, err := InvitationRevoke(ctx, resolver, service, input)
-		return nil, output, err
+	}, func(ctx context.Context, input InvitationRevokeInput) (*domaininvitation.Invitation, error) {
+		return InvitationRevoke(ctx, resolver, service, input)
 	})
 }

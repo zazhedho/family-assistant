@@ -79,14 +79,12 @@ func IdentityRevoke(ctx context.Context, resolver interfaceidentity.Resolver, se
 func registerIdentityTools(server *mcpsdk.Server, resolver interfaceidentity.Resolver, service interfaceidentity.LinkService) {
 	addTool(server, &mcpsdk.Tool{
 		Name: "identity_link", Description: "Link this Hermes profile with a one-time identity code.",
-	}, func(ctx context.Context, _ *mcpsdk.CallToolRequest, input IdentityLinkInput) (*mcpsdk.CallToolResult, IdentityLinkOutput, error) {
-		output, err := IdentityLink(ctx, service, input)
-		return nil, output, err
+	}, func(ctx context.Context, input IdentityLinkInput) (IdentityLinkOutput, error) {
+		return IdentityLink(ctx, service, input)
 	})
 	addTool(server, &mcpsdk.Tool{
 		Name: "identity_revoke", Description: "Revoke the currently authenticated Hermes identity link.",
-	}, func(ctx context.Context, _ *mcpsdk.CallToolRequest, input IdentityRevokeInput) (*mcpsdk.CallToolResult, IdentityRevokeOutput, error) {
-		output, err := IdentityRevoke(ctx, resolver, service, input)
-		return nil, output, err
+	}, func(ctx context.Context, input IdentityRevokeInput) (IdentityRevokeOutput, error) {
+		return IdentityRevoke(ctx, resolver, service, input)
 	})
 }

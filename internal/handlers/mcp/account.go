@@ -63,15 +63,13 @@ func registerAccountTools(server *mcpsdk.Server, registrar interfaceonboarding.S
 	addTool(server, &mcpsdk.Tool{
 		Name:        "account_register",
 		Description: "Ask for the user's name and birth date in YYYY-MM-DD format. Explain that the birth date is used for age-policy validation, show a summary, obtain explicit confirmation, then call with consent=true.",
-	}, func(ctx context.Context, _ *mcpsdk.CallToolRequest, input AccountRegisterInput) (*mcpsdk.CallToolResult, AccountRegisterOutput, error) {
-		output, err := AccountRegister(ctx, registrar, input)
-		return nil, output, err
+	}, func(ctx context.Context, input AccountRegisterInput) (AccountRegisterOutput, error) {
+		return AccountRegister(ctx, registrar, input)
 	})
 	addTool(server, &mcpsdk.Tool{
 		Name:        "account_link",
 		Description: "Link the current WhatsApp number to an existing account without asking for a password or one-time code.",
-	}, func(ctx context.Context, _ *mcpsdk.CallToolRequest, _ struct{}) (*mcpsdk.CallToolResult, AccountRegisterOutput, error) {
-		output, err := AccountLink(ctx, registrar)
-		return nil, output, err
+	}, func(ctx context.Context, _ struct{}) (AccountRegisterOutput, error) {
+		return AccountLink(ctx, registrar)
 	})
 }

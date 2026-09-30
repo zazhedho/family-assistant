@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -15,8 +16,6 @@ import (
 	"family-assistant/utils"
 
 	"log/slog"
-
-	"github.com/gin-gonic/gin"
 )
 
 const (
@@ -44,82 +43,111 @@ var (
 	appLogger  *slog.Logger
 )
 
+type logMetadataKey uint8
+
+const (
+	logIDKey logMetadataKey = iota
+	userIDKey
+)
+
+// WithLogMetadata adds request and user identifiers to a log context.
+func WithLogMetadata(ctx context.Context, logID, userID string) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	ctx = context.WithValue(ctx, logIDKey, logID)
+	return context.WithValue(ctx, userIDKey, userID)
+}
+
 func WriteLog(level int, msg ...any) {
+	writeLog(context.Background(), level, 5, fmt.Sprint(msg...))
+}
+
+func WriteLogWithContext(ctx context.Context, level int, msg ...any) {
+	writeLog(ctx, level, 6, fmt.Sprint(msg...))
+}
+
+func WriteLogWithAttrs(ctx context.Context, level int, msg string, attrs ...slog.Attr) {
+	writeLog(ctx, level, 6, msg, attrs...)
+}
+
+func writeLog(ctx context.Context, level int, defaultLogLevel int, msg string, extraAttrs ...slog.Attr) {
 	if _, ok := logLevelMap[level]; !ok {
 		return
 	}
 
-	if logLevel, _ := strconv.Atoi(utils.GetEnv("LOG_LEVEL", "5")); logLevel < level {
+	if logLevel, _ := strconv.Atoi(utils.GetEnv("LOG_LEVEL", strconv.Itoa(defaultLogLevel))); logLevel < level {
 		return
 	}
 
-	logger := getLogger()
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
 	attrs := []slog.Attr{
 		slog.String("server_ip", utils.GetEnv("ServerIP", "")),
 	}
-	attrs = append(attrs, callerAttrs(2)...)
+	attrs = append(attrs, callerAttrs(3)...)
 	if node := utils.GetEnv("NODE", ""); node != "" {
 		attrs = append(attrs, slog.String("node", node))
 	}
+
+	if logID := LogIDFromContext(ctx); logID != "" {
+		attrs = append(attrs, slog.String("log_id", logID))
+	}
+	if value, ok := contextValue(ctx, "userId"); ok {
+		if userID := fmt.Sprint(value); userID != "" {
+			attrs = append(attrs, slog.String("user_id", userID))
+		}
+	}
+	attrs = append(attrs, extraAttrs...)
 
 	fields := make([]any, 0, len(attrs))
 	for _, attr := range attrs {
 		fields = append(fields, attr)
 	}
 
-	logger.Log(
-		context.Background(),
+	getLogger().Log(
+		ctx,
 		mapLevelToSlog(level),
-		fmt.Sprint(msg...),
+		msg,
 		fields...,
 	)
 }
 
-func WriteLogWithContext(ctx *gin.Context, level int, msg ...any) {
-	if _, ok := logLevelMap[level]; !ok {
-		return
+func contextValue(ctx context.Context, key string) (any, bool) {
+	if ctx == nil {
+		return nil, false
 	}
-
-	if logLevel, _ := strconv.Atoi(utils.GetEnv("LOG_LEVEL", "6")); logLevel < level {
-		return
-	}
-
-	logger := getLogger()
-	attrs := []slog.Attr{
-		slog.String("server_ip", utils.GetEnv("ServerIP", "")),
-	}
-	attrs = append(attrs, callerAttrs(2)...)
-	if node := utils.GetEnv("NODE", ""); node != "" {
-		attrs = append(attrs, slog.String("node", node))
-	}
-
-	if ctx != nil {
-		logID := utils.GenerateLogId(ctx)
-		attrs = append(attrs, slog.String("log_id", logID.String()))
-
-		if val, ok := ctx.Get("userId"); ok {
-			if userID := utils.InterfaceString(val); userID != "" {
-				attrs = append(attrs, slog.String("user_id", userID))
-			}
+	if key == utils.CtxKeyId {
+		if value := ctx.Value(logIDKey); value != nil {
+			return value, true
 		}
 	}
-
-	logCtx := context.Background()
-	if ctx != nil && ctx.Request != nil {
-		logCtx = ctx.Request.Context()
+	if key == "userId" {
+		if value := ctx.Value(userIDKey); value != nil {
+			return value, true
+		}
 	}
-
-	fields := make([]any, 0, len(attrs))
-	for _, attr := range attrs {
-		fields = append(fields, attr)
+	if value := ctx.Value(key); value != nil {
+		return value, true
 	}
+	if values, ok := ctx.(interface{ Get(string) (any, bool) }); ok {
+		return values.Get(key)
+	}
+	return nil, false
+}
 
-	logger.Log(
-		logCtx,
-		mapLevelToSlog(level),
-		fmt.Sprint(msg...),
-		fields...,
-	)
+func LogIDFromContext(ctx context.Context) string {
+	value, ok := contextValue(ctx, utils.CtxKeyId)
+	if !ok {
+		return ""
+	}
+	logID := fmt.Sprint(value)
+	if logID == "<nil>" {
+		return ""
+	}
+	return logID
 }
 
 func getLogger() *slog.Logger {
@@ -241,15 +269,27 @@ func (h *stringHandler) Handle(_ context.Context, record slog.Record) error {
 	})
 
 	level := strings.ToUpper(record.Level.String())
-	prefix := fmt.Sprintf("[%s][%s][%s]", fields["server_ip"], fields["node"], level)
+	prefix := fmt.Appendf(nil, "[%s][%s][%s]", fields["server_ip"], fields["node"], level)
 	if logID := fields["log_id"]; logID != "" {
-		prefix += fmt.Sprintf("[%s]", logID)
+		prefix = fmt.Appendf(prefix, "[%s]", logID)
 	}
 	if userID := fields["user_id"]; userID != "" {
-		prefix += fmt.Sprintf("[%s]", userID)
+		prefix = fmt.Appendf(prefix, "[%s]", userID)
 	}
 	if sourceFile := fields["source_file"]; sourceFile != "" {
-		prefix += fmt.Sprintf("[%s:%s]", sourceFile, fields["source_line"])
+		prefix = fmt.Appendf(prefix, "[%s:%s]", sourceFile, fields["source_line"])
+	}
+	fieldKeys := make([]string, 0, len(fields))
+	for key := range fields {
+		switch key {
+		case "server_ip", "node", "log_id", "user_id", "source_file", "source_line", "source_function":
+			continue
+		}
+		fieldKeys = append(fieldKeys, key)
+	}
+	sort.Strings(fieldKeys)
+	for _, key := range fieldKeys {
+		prefix = fmt.Appendf(prefix, "[%s=%s]", key, fields[key])
 	}
 
 	ts := record.Time

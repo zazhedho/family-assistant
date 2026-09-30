@@ -307,6 +307,27 @@ from changes on `main`, then deploys the `backend` service from
 access to the GHCR package if it is private. README and Hermes plugin changes
 alone do not trigger an image build or deploy.
 
+Follow steps 1–8 in order for a fresh server. Commands run on the VPS as the
+service administrator (`root` in this guide), except the explicitly labelled
+plugin copy commands, which run from a checkout on your deployment workstation.
+Do not copy this server's credentials or WhatsApp session to another server.
+
+Before step 1:
+
+- Install Docker Engine with the Compose plugin using the
+  [official OS-specific instructions](https://docs.docker.com/engine/install/),
+  and install Nginx, curl, and OpenSSL with the VPS package manager.
+- Verify `docker compose version` and `nginx -v`. Create the application and
+  log directories with `mkdir -p /opt/apps/family-assistant /var/log/apps/family-assistant`.
+- Provision a PostgreSQL database and obtain its TLS connection URL. Redis is
+  optional; provision it only if you want the cache/index features.
+- Ensure the backend image has been published. For a private GHCR package,
+  run `docker login ghcr.io -u <github-user>` on the VPS and enter a token with
+  package-read permission at the password prompt, never in a committed file.
+- Generate separate values for `JWT_KEY`, `MCP_SERVER_KEY`, and
+  `MCP_IDENTITY_SECRET` (for example, run `openssl rand -hex 32` separately for
+  each). The MCP bearer key and identity HMAC secret must not be the same.
+
 1. Create `/opt/apps/family-assistant/docker-compose.yml` on the VPS. This is
    the current image-only layout; replace the Docker gateway address if the new
    server uses a different network:
@@ -356,9 +377,56 @@ alone do not trigger an image build or deploy.
    Fresh databases migrate on first container start; the SQL patch above is
    only for databases created before reminder delivery was added.
 
-3. Install Hermes as a host service and pair the dedicated bot number with
-   `hermes whatsapp`. Install its background gateway with
-   `hermes gateway install`. Its WhatsApp bridge listens on host loopback port `3010`.
+3. Install and configure Hermes on the host, not inside the backend container:
+
+   ```sh
+   curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash
+   ```
+
+   Follow the installer's PATH instructions or open a new login shell, then run:
+
+   ```sh
+   hermes --version
+   hermes setup
+   hermes model
+   ```
+
+   In the model picker, select **ChatGPT or Codex Subscription** for the
+   `openai-codex` provider. Open its device-login URL on your own browser,
+   enter the displayed code, and authorize your account. No browser or Codex
+   CLI installation on the VPS is required. Select a tool-capable model from
+   your account's live catalog. The current VPS uses `gpt-6-luna`; availability
+   depends on the account/provider, so do not force an unavailable model ID.
+   If using another provider, configure its credentials through the picker.
+   See [Hermes provider setup](https://hermes-agent.nousresearch.com/docs/integrations/providers).
+
+   Verify the selection and start one CLI conversation before adding WhatsApp:
+
+   ```sh
+   hermes config get model.provider
+   hermes config get model.default
+   hermes
+   ```
+
+   Inside that CLI conversation, use `/reasoning max --global` for the current
+   project's preferred effort, then `/reasoning` to verify it and `/exit` to
+   leave. Higher effort can increase latency; use a supported lower setting
+   if preferred. A stored config value alone does not prove runtime effort:
+   some Hermes versions warn that `agent.reasoning_effort` is unrecognized.
+   Verify `/reasoning` again from WhatsApp after gateway setup.
+
+   If web/browser tools are needed, configure their providers with
+   `hermes setup tools`; enabling a toolset does not provide missing API keys
+   or a browser runtime. Do not enable terminal/file tools on the default
+   WhatsApp profile during the wizard. The explicit allowlist in step 6 is the
+   intended policy. The official [installation guide](https://hermes-agent.nousresearch.com/docs/getting-started/installation)
+   covers installer and PATH troubleshooting.
+
+   Pair a **dedicated bot number** using `hermes whatsapp`: scan the QR from
+   that number's WhatsApp Linked Devices screen. Only the default profile owns
+   this session. Do not start a second gateway for the same bot number.
+   Install/start the background gateway only after step 7.
+   Its WhatsApp bridge listens on host loopback port `3010`.
    The backend container reaches it through a host-only Nginx proxy on `3011`.
    Create the Compose network with `docker compose create backend`, then find
    its gateway with `docker network inspect family-assistant_default`. Use that
@@ -381,11 +449,27 @@ alone do not trigger an image build or deploy.
    off public interfaces. Test Nginx with `nginx -t`, then reload it with
    `systemctl reload nginx`.
 
-4. Install the standalone identity plugin without modifying Hermes source.
+4. Start the backend **before activating the new identity plugin**:
+
+   ```sh
+   cd /opt/apps/family-assistant
+   docker compose pull backend
+   docker compose up -d backend
+   curl -f http://127.0.0.1:8086/healthcheck
+   ```
+
+   Check container logs if startup/migrations fail. A fresh database uses the
+   migrations shipped in the image; do not run the old-database SQL patches
+   above against a fresh install. Hermes is not started yet, so reminder
+   delivery is tested only after step 8.
+
+5. Install the standalone identity plugin without modifying Hermes source.
    From a checkout on the deployment machine, copy `plugin.py`, `plugin.yaml`,
    and `__init__.py` from
    [`integrations/hermes/family_assistant_identity/`](integrations/hermes/family_assistant_identity/)
    to `/root/.hermes/plugins/family-assistant-identity/` on the VPS:
+
+   Run these commands on the **deployment workstation**, from the repository root:
 
    ```sh
    ssh root@<server> 'mkdir -p /root/.hermes/plugins/family-assistant-identity'
@@ -406,7 +490,7 @@ alone do not trigger an image build or deploy.
    FAMILY_ASSISTANT_IDENTITY_SECRET=<same value as MCP_IDENTITY_SECRET>
    ```
 
-5. Merge these blocks into `/root/.hermes/config.yaml` (do not replace the
+6. Merge these blocks into `/root/.hermes/config.yaml` (do not replace the
    rest of Hermes' configuration). Substitute the actual group JID and admin
    number; use the bridge logs to discover the group JID. `group_allow_from`
    limits groups, `WHATSAPP_ALLOWED_USERS` limits senders (including group
@@ -414,6 +498,8 @@ alone do not trigger an image build or deploy.
    user's number to the sender allowlist before expecting onboarding replies:
 
    ```yaml
+   timezone: Asia/Jakarta
+
    mcp_servers:
      family_assistant:
        url: http://127.0.0.1:8087/mcp
@@ -473,21 +559,155 @@ alone do not trigger an image build or deploy.
    Never claim a tool action succeeded if it failed.
    Use Family Assistant MCP for data; backend scheduler delivers reminders.
    Do not create Hermes cron jobs for Family Assistant reminders.
+   Distinguish event time from database created_at/updated_at and processing time.
+   Never reuse a previous record's timestamp for a new event. Use the current
+   live-time context for today's date, not the session-start date.
+   If activity_create or activity_create_with_reminder allows occurred_at to be
+   omitted, omit it for "now" or no stated time: the backend uses the signed
+   WhatsApp message timestamp. If the user specifies a time, send that explicit
+   RFC3339 event time with its timezone; ask when the date/time is ambiguous.
+   For relative reminders, use after_minutes so the backend calculates the
+   schedule from the event time. Report occurred_at from the tool response,
+   not created_at/updated_at. Do not change event time without a user request.
+   Resolve today/yesterday and time-only event dates from the original message
+   time in the configured timezone; an explicit user date takes priority.
    ```
+
+   Keep the existing identity/personality text in `SOUL.md`; append these
+   rules instead of replacing the entire file. If creating it for the first
+   time, include the Family Assistant identity and these rules. The admin
+   profile is cloned after this step so it starts with the same rules.
+
+   Enable current-time context without modifying Hermes source:
+
+   ```sh
+   hermes config set timezone Asia/Jakarta
+   hermes plugins install live-time --enable
+   ```
+
+   Preserve other enabled plugins when merging `plugins.enabled`; the
+   `live-time` installer enables its own entry. Configure the admin profile
+   only after it is created in step 7. Do not restart/start the gateway yet.
+
+   `live-time` is a community plugin in the Hermes catalog. It refreshes the
+   current time before each model call; it is not the event timestamp. For
+   queued/delayed messages, the event time comes from the WhatsApp gateway event.
+   The identity plugin prefers the original bridge message timestamp; when it
+   is absent it uses gateway receipt time, never the model's completion time.
+   It also injects that original message time before each model call. Resolve
+   "today", "yesterday", and time-only event dates from the message's date in
+   the configured timezone, not the later processing date. Explicit dates win.
+   The identity plugin signs that message time in a `v2` envelope. Deploy the
+   backend first (it accepts both `v1` and `v2`), then copy the updated identity
+   plugin files and restart Hermes. An older backend cannot verify `v2`.
+   Legacy `v1` calls still work with explicit event times; an omitted event time
+   without a signed message timestamp is rejected rather than guessed.
 
    Review old `/root/.hermes/memories/MEMORY.md` and `USER.md` before copying
    them to another server: stale link-code or Hermes cron instructions can
    override the intended flow.
 
-6. Start and check services:
+7. Create and configure the administrator profile before starting the gateway.
+
+   Keep group chats on the shared `default` profile, with web/browser and
+   Family Assistant MCP only. Route only the administrator's direct WhatsApp
+   chat to `admin`. On the VPS:
 
    ```sh
-   cd /opt/apps/family-assistant
-   docker compose pull backend
-   docker compose up -d backend
+   hermes profile create admin --clone
+   mkdir -p /root/.hermes/profiles/admin/plugins/family-assistant-identity
+   cp /root/.hermes/plugins/family-assistant-identity/plugin.py \
+      /root/.hermes/plugins/family-assistant-identity/plugin.yaml \
+      /root/.hermes/plugins/family-assistant-identity/__init__.py \
+      /root/.hermes/profiles/admin/plugins/family-assistant-identity/
+   hermes -p admin plugins enable family-assistant-identity
+   hermes -p admin config set timezone Asia/Jakarta
+   hermes -p admin plugins install live-time --enable
+   hermes -p admin config set terminal.backend local
+   ```
+
+   Cloning config is not a substitute for installing standalone plugin files
+   in the new profile. Do not copy the WhatsApp session, use `--clone-channels`,
+   or run `hermes -p admin gateway install`. The admin profile is served by the
+   default profile's multiplexed gateway. OAuth logins are shared through
+   Hermes' root auth store; do not manually copy single-use refresh tokens.
+   See [Hermes profile cloning](https://hermes-agent.nousresearch.com/docs/user-guide/profiles).
+
+   Verify `hermes -p admin config get model.provider` and
+   `hermes -p admin config get model.default`. On a fresh setup they inherit
+   the default model. If changing providers later, run `hermes -p admin model`
+   too; changing the default profile does not keep the admin config in sync.
+   Review the admin `.env` for the MCP bearer/HMAC keys and `SOUL.md` for the
+   same onboarding/time rules. Do not expose those values in logs.
+
+   Merge this **only into the default profile's** `/root/.hermes/config.yaml`,
+   substituting the admin number/JID:
+
+   ```yaml
+   group_sessions_per_user: false
+   gateway:
+     multiplex_profiles: true
+     profile_routes:
+       - name: admin-whatsapp-dm
+         platform: whatsapp
+         chat_id: "<admin-number>@s.whatsapp.net"
+         profile: admin
+   ```
+
+   In `/root/.hermes/profiles/admin/config.yaml`, merge the admin WhatsApp
+   toolsets. The following matches the capabilities enabled on the current
+   VPS; optional tool providers still require their own setup:
+
+   ```yaml
+   platform_toolsets:
+     whatsapp:
+       - a2a
+       - browser
+       - clarify
+       - code_execution
+       - computer_use
+       - connections
+       - context_engine
+       - cronjob
+       - delegation
+       - file
+       - homeassistant
+       - image_gen
+       - kanban
+       - mcp-family_assistant
+       - memory
+       - session_search
+       - skills
+       - spotify
+       - stt
+       - terminal
+       - todo
+       - tts
+       - video
+       - video_gen
+       - vision
+       - web
+       - x_search
+       - yuanbao
+   ```
+
+   A group—including the admin's group messages—stays on `default`. Never add
+   a group route to `admin`. Sender allowlists still apply to group members.
+   `terminal.backend: local` executes on the host; when Hermes runs as `root`,
+   admin DM terminal access is **root access to the VPS**, not Docker isolation.
+
+8. Install/start the single gateway and verify the complete flow:
+
+   ```sh
    curl -f http://127.0.0.1:8086/healthcheck
+   hermes gateway install
    hermes gateway restart
    hermes gateway status
+   hermes status
+   hermes plugins list --plain --no-bundled
+   hermes -p admin plugins list --plain --no-bundled
+   hermes plugins doctor /root/.hermes/plugins/family-assistant-identity
+   hermes plugins doctor /root/.hermes/plugins/live-time
    hermes mcp test family_assistant
    ```
 
@@ -500,51 +720,33 @@ alone do not trigger an image build or deploy.
    `authentication required`, compare the deployed plugin files with this
    repository and check both shared-secret pairs and the capability grant.
 
-### Hermes WhatsApp profile and tool access
+   Verify both profiles appear in `hermes status`; the private plugins must
+   be enabled and the WhatsApp bridge connected. Then test from WhatsApp:
 
-Keep group chats on the shared `default` profile, with web/browser and Family
-Assistant MCP only. Route only the administrator's direct WhatsApp chat to a
-separate `admin` profile. Do not copy WhatsApp credentials into that profile.
+   - An allowlisted unregistered sender says `halo`: offer onboarding, accept
+     a natural birth date, and register only after consent.
+   - An existing sender links through `account_link` without a web login or
+     externally generated link code.
+   - Send an activity without a time: its `occurred_at` matches the original
+     message time, not completion time or another record's `updated_at`.
+   - Send an explicit earlier time: it is preserved; an ambiguous date prompts
+     a question. Add a relative reminder and verify it is calculated from the
+     event time and delivered to the originating DM/group.
+   - Group participants share one session; terminal/file/code-execution tools
+     are unavailable there, including to the admin. Only the admin DM targets
+     `admin`. A sender outside the allowlist receives no bot reply.
+   - WhatsApp replies show neither reasoning nor tool-progress messages.
+     `/reasoning` reports the intended effort in the admin DM.
 
-In `/root/.hermes/config.yaml`, merge this into the default profile config and
-replace the placeholder with the administrator's phone number or JID:
+   A fresh install has no old conversation to reset. After changing toolsets
+   on an existing installation, `/new` reloads the session's schema but starts
+   a new conversation; use it deliberately, not as a daily time fix. Refreshing
+   time is handled by `live-time` and the signed message context.
 
-```yaml
-group_sessions_per_user: false
-
-gateway:
-  multiplex_profiles: true
-  profile_routes:
-    - name: admin-whatsapp-dm
-      platform: whatsapp
-      chat_id: "<admin-number>@s.whatsapp.net"
-      profile: admin
-```
-
-Create the isolated admin profile from the default profile, then set its
-WhatsApp tools and terminal backend:
-
-```sh
-hermes profile create admin --clone
-hermes -p admin tools enable hermes-whatsapp --platform whatsapp
-hermes -p admin tools enable mcp-family_assistant --platform whatsapp
-hermes -p admin tools enable a2a --platform whatsapp
-hermes -p admin config set terminal.backend local
-hermes gateway restart
-```
-
-The admin profile must be served by the default profile's multiplexed gateway.
-After restarting, verify `hermes status` lists both `default` and `admin`, and
-that only the admin DM route targets `admin`. A group chat—including messages
-sent by the administrator—stays on `default`; therefore terminal, file, and
-code-execution tools remain unavailable in groups. All sender allowlists still
-apply, including to group participants. Send `/new` in the admin DM and group
-after changing toolsets so each session reloads its tool schema.
-
-`terminal.backend: local` executes on the Hermes host without container
-isolation. If the gateway runs as `root`, terminal access from the administrator
-DM is root access to the VPS. Keep this route private and never add a group
-route to the admin profile.
+   On later updates, deploy the backend first, copy the identity plugin files
+   to **both profiles**, and restart the single gateway. The application image
+   update does not update Hermes plugins. `SOUL.md`/model settings in the admin
+   clone also do not automatically follow later default-profile edits.
 
 Default health check:
 
