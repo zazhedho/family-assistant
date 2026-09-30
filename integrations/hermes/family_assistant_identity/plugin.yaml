@@ -10,5 +10,6 @@ requires_env:
     secret: true
 provides_hooks:
   - pre_gateway_dispatch
+  - pre_llm_call
 provides_middleware:
   - tool_request
