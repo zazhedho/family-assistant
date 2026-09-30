@@ -7,6 +7,8 @@ Backend service for a private assistant with personal and shared Spaces:
 - permission-first RBAC
 - runtime application configurations from database
 - optional Redis-based session management and rate limiting
+- WhatsApp onboarding and signed Hermes MCP identity
+- personal/shared Spaces, activities, and backend-delivered reminders
 
 This repository is intended to be the foundation for future projects. The current structure is generic on purpose and should be extended by adding new business modules on top of the existing patterns.
 
@@ -79,6 +81,10 @@ System modules currently included:
 - Locations
 - Sessions when Redis is enabled
 - Media upload and owner-controlled deletion when `MEDIA_ENABLED=true`
+- WhatsApp account registration, phone-based account linking, and external identity management
+- Personal and shared Spaces, memberships, and invitations
+- Activities (generic notes and event records), including creation with a reminder
+- Reminders and optional WhatsApp delivery scheduler, with a Redis due-time index
 
 ## Project Structure
 
@@ -90,7 +96,10 @@ family-assistant/
 ├── internal/
 │   ├── domain/
 │   ├── dto/
-│   ├── handlers/http/
+│   ├── cache/
+│   ├── handlers/
+│   │   ├── http/
+│   │   └── mcp/
 │   ├── interfaces/
 │   ├── repositories/
 │   ├── router/
@@ -141,7 +150,7 @@ Optional but recommended:
 - Permission cache settings such as `PERMISSION_CACHE_TTL` or `PERMISSION_CACHE_TTL_SECONDS` (default `5m`). These only apply when Redis is available; otherwise permission checks read from the database. Cache entries are invalidated after role-permission, permission, user-role, and user-delete mutations; TTL remains the fallback when Redis invalidation fails.
 - Location Service settings: `LOCATION_SERVICE_BASE_URL` (default `https://location-service-y7si.onrender.com`) and `LOCATION_SERVICE_TIMEOUT_SECONDS` (default `20`). Location sync imports from this shared service.
 - media/storage settings for file upload use cases. Set `MEDIA_ENABLED=true` to register media routes. Storage remains optional while disabled; enabling media requires valid MinIO or Cloudflare R2 credentials and an explicit `STORAGE_BASE_URL`.
-- `MEDIA_MAX_FILE_SIZE_MB` controls maximum file size (default `10`). `MEDIA_ALLOWED_CONTENT_TYPES` controls accepted MIME types after server-side byte sniffing; client extensions and `Content-Type` headers are not trusted.
+- `MEDIA_MAX_FILE_SIZE_MB` controls maximum file size (code default `5`; an explicit env value overrides it). `MEDIA_ALLOWED_CONTENT_TYPES` controls accepted MIME types after server-side byte sniffing; client extensions and `Content-Type` headers are not trusted.
 - media upload rate limiting uses Redis when available. Configure `MEDIA_UPLOAD_RATE_LIMIT` and `MEDIA_UPLOAD_RATE_WINDOW_SECONDS`; without Redis it degrades safely to no distributed rate limit.
 - `GOOGLE_CLIENT_ID` or `GOOGLE_CLIENT_IDS` for Google login
 - SMTP settings for register OTP and password reset email flows. These stay optional; when SMTP connection env is set, `SMTP_HOST`, `SMTP_PASS`, `SMTP_FROM`, and `SMTP_PORT` format are validated.
@@ -150,6 +159,14 @@ Personal and Shared Space settings:
 - `MIN_INDEPENDENT_ACCOUNT_AGE` sets the minimum registration age (default `18`).
 - `SPACE_INVITATION_TTL_SECONDS` controls pending invitation expiry (default `259200`).
 - `IDENTITY_LINK_TTL_SECONDS` controls one-time Hermes identity-link expiry (default `600`).
+
+MCP settings:
+
+- `MCP_ENABLED` defaults to `false`; enable it for Hermes.
+- `MCP_ADDR` defaults to `127.0.0.1:8081`; use `0.0.0.0:8081` inside Docker with a loopback-only published port.
+- `MCP_SERVER_KEY` is required when MCP is enabled. It authenticates the Hermes service, not individual users.
+- `MCP_IDENTITY_SECRET` verifies signed WhatsApp sender/chat/time context. Configure it for WhatsApp deployments; use a different secret from the bearer key.
+- `MCP_PROFILE_HEADER` defaults to `X-Hermes-Profile`; signed sender identity takes precedence over this fallback.
 
 Reminder delivery:
 - Set `REMINDER_SCHEDULER_ENABLED=true` and point `REMINDER_WHATSAPP_BRIDGE_URL` at the
@@ -160,39 +177,42 @@ Reminder delivery:
   failures (default `1m`); `REMINDER_SCHEDULER_INDEX_RECONCILE_INTERVAL` controls Redis index
   reconciliation (default `1h`); `REMINDER_SCHEDULER_INDEX_BATCH_SIZE` controls Redis write
   batches (default `1000`).
-- A reminder created from a WhatsApp DM or group stores that chat target. Older reminders
-  without a target fall back to the active Hermes identity of the assignee, then creator.
+- A reminder created from a WhatsApp DM or group stores that chat target. Reminders
+  created outside WhatsApp without a target fall back to the active Hermes identity of
+  the assignee, then creator.
 - Reminder status is `PENDING` before delivery, `SENT` after the bridge accepts the
   notification, and `COMPLETED` only after a user confirms the task is done.
 
-If `reminders` was already created before delivery scheduling was added, apply this once
-before enabling the scheduler (fresh installs get these columns from migration `000009`):
+This guide assumes a fresh database. Migration `000009` already creates the delivery
+columns, due-reminder index, and `PENDING`, `SENT`, `COMPLETED`, `CANCELLED` status constraint;
+no manual schema patch is needed.
 
-```sql
-ALTER TABLE reminders
-    ADD COLUMN IF NOT EXISTS delivery_provider VARCHAR(64) NOT NULL DEFAULT '',
-    ADD COLUMN IF NOT EXISTS delivery_target VARCHAR(255) NOT NULL DEFAULT '',
-    ADD COLUMN IF NOT EXISTS notification_claimed_at TIMESTAMPTZ NULL,
-    ADD COLUMN IF NOT EXISTS notified_at TIMESTAMPTZ NULL;
+| Scheduler variable | Default |
+| --- | --- |
+| `REMINDER_SCHEDULER_ENABLED` | `false` |
+| `REMINDER_WHATSAPP_BRIDGE_URL` | unset; required when enabled |
+| `REMINDER_SCHEDULER_INTERVAL` | `2m` |
+| `REMINDER_SCHEDULER_BATCH_SIZE` | `50` |
+| `REMINDER_SCHEDULER_LEASE` | `2m` |
+| `REMINDER_SCHEDULER_DATABASE_FALLBACK_INTERVAL` | `1m` |
+| `REMINDER_SCHEDULER_INDEX_RECONCILE_INTERVAL` | `1h` |
+| `REMINDER_SCHEDULER_INDEX_BATCH_SIZE` | `1000` |
 
-CREATE INDEX IF NOT EXISTS ix_reminders_notification_due
-    ON reminders (status, scheduled_at, notification_claimed_at)
-    WHERE notified_at IS NULL AND deleted_at IS NULL;
-```
+PostgreSQL remains the source of truth. When Redis is available, the scheduler checks
+the sorted-set index `family-assistant:reminders:due` first and skips PostgreSQL claims
+when nothing is due. Entries contain reminder IDs and due-time scores, not message bodies.
+They have no TTL: delivery/cancellation/completion removes entries explicitly, while
+startup and hourly reconciliation rebuild pending entries and remove stale ones.
+Use a native `redis://` or TLS `rediss://` connection URL (not an Upstash REST URL).
 
-Before deploying a backend with `SENT` support to an existing database, run this
-once. Editing migration `000009` only affects fresh databases; it does not rerun
-against a live database:
-
-```sql
-BEGIN;
-ALTER TABLE reminders DROP CONSTRAINT ck_reminders_status;
-ALTER TABLE reminders ADD CONSTRAINT ck_reminders_status
-    CHECK (status IN ('PENDING','SENT','COMPLETED','CANCELLED'));
-UPDATE reminders SET status = 'SENT'
-    WHERE status = 'PENDING' AND notified_at IS NOT NULL AND deleted_at IS NULL;
-COMMIT;
-```
+Without Redis, or while the index is degraded, PostgreSQL fallback is rate-limited by
+`REMINDER_SCHEDULER_DATABASE_FALLBACK_INTERVAL`. It still runs on scheduler ticks:
+with a `2m` poll and `1m` fallback setting, checks occur every 2 minutes, not on a separate
+1-minute timer. Delivery can wait up to a poll interval plus processing/retries.
+The scheduler runs inside the backend process; it needs no separate service, port,
+Hermes cronjob, or user authentication session. Bridge acceptance marks `SENT`, not
+proof that the recipient read the message. A send followed by a failed database update
+can be retried after the lease expires; delivery is not guaranteed exactly once.
 
 ### Local PostgreSQL databases
 
@@ -219,12 +239,26 @@ Install dependencies and prepare `.env`, then:
 go run . -migrate
 ```
 
-Or run migration and server separately:
+This applies migrations **and starts the server**; it is not a migration-only command.
+Once the schema is current, start without applying migrations using:
 
 ```bash
-go run . -migrate
-go run .
+go run . -migrate=false
 ```
+
+### Local verification
+
+Run from the repository root:
+
+```sh
+go test ./...
+make lint
+PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s integrations/hermes/family_assistant_identity -p 'test_*.py'
+```
+
+Install the linter with `make lint-install` if needed. PostgreSQL integration tests
+require the dedicated local `FAMILY_ASSISTANT_TEST_DATABASE_URL` described above;
+never point them at the development or production database.
 
 ### Local Hermes MCP wiring
 
@@ -242,33 +276,59 @@ X-Hermes-Profile: <profile fallback; signed plugin identity takes precedence>
 X-Hermes-Channel: whatsapp
 ```
 
-The endpoint is `http://127.0.0.1:8081/mcp` by default. The exact tool allowlist
-is:
+The endpoint is `http://127.0.0.1:8081/mcp` by default. It exposes these **25 tools**;
+Hermes adds its MCP server prefix to tool names:
 
-- `account_register`
-- `account_link`
-- `identity_link`
-- `identity_revoke`
-- `space_create`
-- `space_list`
-- `space_get_members`
-- `space_update`
-- `space_archive`
-- `member_update_role`
-- `member_remove`
-- `invitation_create`
-- `invitation_accept`
-- `invitation_list`
-- `invitation_revoke`
-- `activity_create`
-- `activity_list`
-- `activity_update`
-- `activity_delete`
-- `reminder_create`
-- `reminder_list`
-- `reminder_complete`
-- `reminder_update`
-- `reminder_delete`
+| Tool | Purpose |
+| --- | --- |
+| `account_register` | Register with name, birth date, and explicit consent; create the Personal Space. |
+| `account_link` | Link an existing account matching the signed WhatsApp phone number. |
+| `identity_link` | Link using an account-owner-issued one-time code. |
+| `identity_revoke` | Revoke the current external identity link. |
+| `space_create` | Create a shared Space. |
+| `space_list` | List accessible personal/shared Spaces. |
+| `space_get_members` | List active members of a Space. |
+| `space_update` | Update shared Space details. |
+| `space_archive` | Archive a shared Space. |
+| `member_update_role` | Change a shared Space member's role. |
+| `member_remove` | Remove a shared Space member. |
+| `invitation_create` | Issue an expiring invitation. |
+| `invitation_accept` | Accept an invitation using its token. |
+| `invitation_list` | List pending invitations without exposing their tokens. |
+| `invitation_revoke` | Revoke a pending invitation. |
+| `activity_create` | Record an activity/note without creating a reminder. |
+| `activity_create_with_reminder` | Record an activity and create its reminder in one tool call. |
+| `activity_list` | List activities with kind/time filters. |
+| `activity_update` | Update an activity's kind, note, or event time. |
+| `activity_delete` | Soft-delete an activity. |
+| `reminder_create` | Create a reminder, optionally assigned to a member. |
+| `reminder_list` | List reminders with status/time filters. |
+| `reminder_complete` | Mark the task completed. |
+| `reminder_update` | Update a pending reminder's details, schedule, or assignee. |
+| `reminder_delete` | Cancel and soft-delete a reminder. |
+
+For an activity that also needs a reminder, use `activity_create_with_reminder`
+instead of separate `activity_create` and `reminder_create` calls. Generic example:
+
+```json
+{
+  "activity": {"space": "Family", "kind": "diaper", "note": "Changed diaper"},
+  "reminder": {"title": "Check diaper", "after_minutes": 240}
+}
+```
+
+Omitting `activity.occurred_at` uses the trusted signed WhatsApp message time.
+For a user-specified event time, supply an explicit RFC3339 timestamp with its
+timezone offset. Supply exactly one of `reminder.after_minutes` (positive integer)
+or `reminder.scheduled_at` (RFC3339). Relative minutes are calculated by the backend
+from the resolved activity time, not the model's session date.
+
+The result is `created` or `partial_success`. This is not an all-or-nothing
+transaction: if reminder creation fails after the activity is saved, the result
+contains the activity and `reminder_error`. Do not repeat the whole call blindly;
+create/retry only the missing reminder after checking the result.
+Browser/terminal tools belong to Hermes, not this MCP endpoint. Media upload is
+currently HTTP-only; automatic WhatsApp media ingestion is not implemented.
 
 Mutation permissions are enforced against the selected Space membership. Owners
 and admins can manage shared Space membership and invitations; members can only
@@ -285,8 +345,7 @@ explains that the birth date is used for minimum-age validation, shows a
 confirmation summary, and then calls `account_register` once with
 `consent: true`. Email and password are not requested. Replaying the same
 profile is idempotent and returns the existing account; underage independent
-registration is rejected. `identity_link` remains available for pre-existing
-HTTP or Google accounts.
+registration is rejected.
 
 `identity_link` remains the migration fallback for a different phone number and
 consumes a one-time code issued by an authenticated account owner. The signed
@@ -374,8 +433,7 @@ Before step 1:
 
    Set Redis variables only when Redis is available. Keep `MCP_SERVER_KEY`,
    `MCP_IDENTITY_SECRET`, `JWT_KEY`, and database credentials out of Git.
-   Fresh databases migrate on first container start; the SQL patch above is
-   only for databases created before reminder delivery was added.
+   Fresh databases migrate on first container start; no manual SQL patch is needed.
 
 3. Install and configure Hermes on the host, not inside the backend container:
 
@@ -459,8 +517,7 @@ Before step 1:
    ```
 
    Check container logs if startup/migrations fail. A fresh database uses the
-   migrations shipped in the image; do not run the old-database SQL patches
-   above against a fresh install. Hermes is not started yet, so reminder
+   migrations shipped in the image. Hermes is not started yet, so reminder
    delivery is tested only after step 8.
 
 5. Install the standalone identity plugin without modifying Hermes source.
@@ -758,6 +815,8 @@ GET /healthcheck
 
 The current route set includes:
 
+- `GET /healthcheck`
+- `GET /api/user/register/status`
 - `POST /api/user/register`
 - `POST /api/user/register/otp/send`
 - `POST /api/user/login`
@@ -767,6 +826,15 @@ The current route set includes:
 - `POST /api/user/reset-password`
 - `POST /api/user/logout`
 - `GET /api/user`
+- `POST /api/user`
+- `PUT /api/user`
+- `DELETE /api/user`
+- `GET /api/user/:id`
+- `PUT /api/user/:id`
+- `DELETE /api/user/:id`
+- `PUT /api/user/change/password`
+- `POST /api/user/:id/impersonate`
+- `POST /api/user/stop-impersonation`
 - `GET /api/users`
 
 `POST /api/user/register` requires `birth_date` in `YYYY-MM-DD` format and
@@ -786,12 +854,22 @@ Space-scoped reminder routes:
 - `GET /api/reminders?space_id=<space-id>`
 - `POST /api/reminders/:reminder_id/complete?space_id=<space-id>`
 
+Activity CRUD (including combined activity/reminder creation), Space update/archive,
+member role changes/removal, invitation list/revoke, and reminder update/delete
+are currently MCP-only. Do not assume every MCP tool has a matching HTTP route.
+Resource routes enforce JWT authentication and applicable permissions/membership;
+public authentication and location-read routes have their own access rules.
+
+Roles:
+
 - `GET /api/roles`
 - `POST /api/role`
 - `GET /api/role/:id`
 - `PUT /api/role/:id`
 - `DELETE /api/role/:id`
 - `POST /api/role/:id/permissions`
+
+Permissions:
 
 - `GET /api/permissions`
 - `GET /api/permissions/me`
@@ -800,15 +878,21 @@ Space-scoped reminder routes:
 - `PUT /api/permission/:id`
 - `DELETE /api/permission/:id`
 
+Menus:
+
 - `GET /api/menus/active`
 - `GET /api/menus/me`
 - `GET /api/menus`
 - `GET /api/menu/:id`
 - `PUT /api/menu/:id`
 
+Configurations:
+
 - `GET /api/configs`
 - `GET /api/config/:id`
 - `PUT /api/config/:id`
+
+Locations:
 
 - `GET /api/location/province`
 - `GET /api/location/city?province_code=11`
@@ -816,6 +900,8 @@ Space-scoped reminder routes:
 - `GET /api/location/village?district_code=110101`
 - `POST /api/location/sync`
 - `GET /api/location/sync/:id`
+
+Audits:
 
 - `GET /api/audits`
 - `GET /api/audit/:id`
