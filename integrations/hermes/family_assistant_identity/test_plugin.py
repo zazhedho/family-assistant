@@ -54,6 +54,85 @@ class FamilyAssistantIdentityPluginTest(unittest.TestCase):
         envelope["message_at"] -= 1
         self.assertFalse(plugin.verify_signature("identity-secret", envelope))
 
+    def test_messaging_platforms_sign_distinct_identities_and_message_time(self):
+        message_at = datetime(2026, 9, 29, 23, 59, tzinfo=timezone.utc)
+        for platform in ("telegram", "discord", "slack", "signal", "matrix", "mattermost"):
+            with self.subTest(platform=platform):
+                event = SimpleNamespace(timestamp=message_at, source=SimpleNamespace(
+                    platform=SimpleNamespace(value=platform), user_id="12345",
+                    chat_id="group", chat_type="group",
+                ))
+                plugin.capture_gateway_identity(event)
+                with patch.dict(os.environ, {"FAMILY_ASSISTANT_IDENTITY_SECRET": "identity-secret"}):
+                    result = plugin.inject_identity("mcp_family_assistant_activity_create", {})
+                self.assertIsNotNone(result)
+                envelope = result["args"][plugin.IDENTITY_ARGUMENT_NAME]
+                self.assertEqual(envelope["external_id"], platform + ":12345")
+                self.assertEqual(envelope["channel"], platform)
+                self.assertEqual(envelope["chat_id"], "group")
+                self.assertEqual(envelope["chat_type"], "group")
+                self.assertEqual(envelope["message_at"], 1790726340)
+                self.assertTrue(plugin.verify_signature("identity-secret", envelope))
+                self.assertNotIn("WhatsApp", plugin.inject_message_time()["context"])
+
+    def test_non_whatsapp_session_fallback_uses_the_same_namespace(self):
+        with patch.dict(os.environ, {
+            "HERMES_SESSION_PLATFORM": "telegram", "HERMES_SESSION_USER_ID": "12345",
+            "HERMES_SESSION_CHAT_ID": "group", "HERMES_SESSION_CHAT_TYPE": "group",
+            "FAMILY_ASSISTANT_IDENTITY_SECRET": "identity-secret",
+        }):
+            result = plugin.inject_identity("mcp_family_assistant_space_list", {})
+        self.assertIsNotNone(result)
+        envelope = result["args"][plugin.IDENTITY_ARGUMENT_NAME]
+        self.assertEqual(envelope["external_id"], "telegram:12345")
+        self.assertEqual(envelope["version"], "v1")
+        self.assertNotIn("message_at", envelope)
+
+    def test_unsupported_platform_or_missing_sender_clears_previous_identity(self):
+        for platform, sender in (("local", "12345"), ("api_server", "12345"),
+                                 ("unknown", "12345"), ("", "12345"), ("telegram", "")):
+            with self.subTest(platform=platform, sender=sender):
+                plugin._current_identity.set({"provider": "hermes", "external_id": "previous"})
+                plugin.capture_gateway_identity(SimpleNamespace(source=SimpleNamespace(
+                    platform=platform, user_id=sender,
+                )))
+                self.assertIsNone(plugin._current_identity.get())
+
+    def test_slack_prefers_original_fractional_timestamp(self):
+        event = SimpleNamespace(
+            timestamp=datetime(2026, 9, 30, tzinfo=timezone.utc),
+            raw_message={"ts": "1790726340.123456"},
+            source=SimpleNamespace(platform="slack", user_id="U123", chat_id="C123", chat_type="group"),
+        )
+        plugin.capture_gateway_identity(event)
+        self.assertIsNotNone(plugin._current_identity.get())
+        self.assertEqual(plugin._current_identity.get()["message_at"], "1790726340")
+
+    def test_whatsapp_cloud_retains_existing_raw_identity(self):
+        plugin.capture_gateway_identity(SimpleNamespace(source=SimpleNamespace(
+            platform="whatsapp_cloud", user_id="6285333320090",
+            chat_id="6285333320090", chat_type="dm",
+        )))
+        self.assertEqual(plugin._current_identity.get()["external_id"], "6285333320090")
+
+    def test_invalid_slack_timestamp_does_not_become_receipt_time(self):
+        for timestamp in ("invalid", "NaN", "Infinity", True, "-1", "0"):
+            with self.subTest(timestamp=timestamp):
+                plugin.capture_gateway_identity(SimpleNamespace(
+                    timestamp=datetime(2026, 9, 30, tzinfo=timezone.utc),
+                    raw_message={"ts": timestamp},
+                    source=SimpleNamespace(platform="slack", user_id="U123"),
+                ))
+                self.assertNotIn("message_at", plugin._current_identity.get())
+
+    def test_non_whatsapp_raw_timestamp_does_not_override_normalized_time(self):
+        plugin.capture_gateway_identity(SimpleNamespace(
+            timestamp=datetime(2026, 9, 29, 23, 59, tzinfo=timezone.utc),
+            raw_message={"timestamp": 1},
+            source=SimpleNamespace(platform="telegram", user_id="12345"),
+        ))
+        self.assertEqual(plugin._current_identity.get()["message_at"], "1790726340")
+
     def test_prefers_original_bridge_timestamp_over_gateway_receipt_time(self):
         expected = 1799999400
         for timestamp in (expected, str(expected), {"low": expected, "high": 0, "unsigned": True}):

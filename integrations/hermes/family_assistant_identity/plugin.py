@@ -14,6 +14,7 @@ import secrets
 import time
 from contextvars import ContextVar
 from datetime import datetime, timezone
+from decimal import Decimal, InvalidOperation
 from typing import Any
 
 
@@ -21,6 +22,10 @@ IDENTITY_ARGUMENT_NAME = "__hermes_identity"
 IDENTITY_VERSION = "v1"
 _IDENTITY_SECRET_ENV = "FAMILY_ASSISTANT_IDENTITY_SECRET"
 _TARGET_SERVER_ENV = "FAMILY_ASSISTANT_MCP_SERVER"
+_WHATSAPP_PLATFORMS = {"whatsapp", "whatsapp_cloud"}
+_MESSAGE_PLATFORMS = _WHATSAPP_PLATFORMS | {
+    "telegram", "discord", "slack", "signal", "matrix", "mattermost",
+}
 _current_identity: ContextVar[dict[str, str] | None] = ContextVar(
     "family_assistant_identity", default=None
 )
@@ -35,7 +40,7 @@ def register(ctx: Any) -> None:
 def capture_gateway_identity(event: Any, **_: Any) -> None:
     source = getattr(event, "source", None)
     platform = _text(getattr(source, "platform", ""))
-    if platform not in {"whatsapp", "whatsapp_cloud"}:
+    if platform not in _MESSAGE_PLATFORMS:
         _current_identity.set(None)
         return None
 
@@ -61,7 +66,7 @@ def inject_message_time(**_: Any) -> dict[str, str] | None:
         return None
     timestamp = datetime.fromtimestamp(int(identity["message_at"]), timezone.utc).isoformat()
     return {"context": (
-        f"[Family Assistant] Original WhatsApp message time: {timestamp}. "
+        f"[Family Assistant] Message reference time ({identity['channel']}): {timestamp}. "
         "This is not processing time. For event requests, resolve today/yesterday "
         "and time-only dates from this message time in the configured timezone "
         "shown by live-time, unless the user specifies a date. Omit occurred_at "
@@ -72,12 +77,25 @@ def inject_message_time(**_: Any) -> dict[str, str] | None:
 
 def _message_timestamp(event: Any) -> int | None:
     raw = getattr(event, "raw_message", None)
-    value = raw.get("timestamp") if isinstance(raw, dict) else None
+    platform = _text(getattr(getattr(event, "source", None), "platform", ""))
+    value = None
+    if isinstance(raw, dict):
+        if platform in _WHATSAPP_PLATFORMS:
+            value = raw.get("timestamp")
+        elif platform == "slack" and raw.get("ts") is not None:
+            try:
+                value = int(Decimal(str(raw["ts"])))
+            except (InvalidOperation, ValueError, OverflowError):
+                return None
     if value is None:
         timestamp = getattr(event, "timestamp", None)
         if not isinstance(timestamp, datetime):
             return None
         value = int(timestamp.timestamp())
+    return _parse_message_timestamp(value)
+
+
+def _parse_message_timestamp(value: Any) -> int | None:
     if isinstance(value, dict):
         low, high = value.get("low"), value.get("high")
         if type(low) is not int or type(high) is not int:
@@ -158,7 +176,7 @@ def _session_identity() -> dict[str, str] | None:
         )
         chat_id = _text(os.environ.get("HERMES_SESSION_CHAT_ID", ""))
         chat_type = _text(os.environ.get("HERMES_SESSION_CHAT_TYPE", ""))
-    if platform not in {"whatsapp", "whatsapp_cloud"} or not external_id:
+    if platform not in _MESSAGE_PLATFORMS or not external_id:
         return None
     return _identity(platform, external_id, chat_id or external_id, chat_type)
 
@@ -194,7 +212,7 @@ def _text(value: Any) -> str:
 def _identity(platform: str, external_id: str, chat_id: str, chat_type: str) -> dict[str, str]:
     return {
         "provider": "hermes",
-        "external_id": external_id,
+        "external_id": external_id if platform in _WHATSAPP_PLATFORMS else f"{platform}:{external_id}",
         "channel": platform,
         "chat_id": chat_id,
         "chat_type": chat_type,
