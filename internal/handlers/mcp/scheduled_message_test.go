@@ -227,8 +227,11 @@ func TestScheduledMessageListRejectsSpaceOutsideAuthenticatedMembership(t *testi
 
 func TestScheduledMessageListAndTargetsUseSelectedSpace(t *testing.T) {
 	service := &scheduledMessageServiceStub{
-		listOutput: []dto.ScheduledMessageOutput{{ID: scheduledTestScheduleID}},
-		targets:    []dto.ScheduledMessageTargetOutput{{Kind: domainscheduledmessage.TargetDM, MemberID: stringPointer(scheduledTestMemberID), DisplayName: "Sam"}},
+		listOutput: []dto.ScheduledMessageOutput{{
+			ID:      scheduledTestScheduleID,
+			History: []dto.ScheduledMessageDeliveryOutput{{ID: "delivery-1"}},
+		}},
+		targets: []dto.ScheduledMessageTargetOutput{{Kind: domainscheduledmessage.TargetDM, MemberID: stringPointer(scheduledTestMemberID), DisplayName: "Sam"}},
 	}
 	server := newScheduledMessageMCPServer(t, service, scheduledResolver(scheduledTestSpaceID), scheduledTestSecret)
 	identity := scheduledIdentity("nonce-list")
@@ -240,10 +243,46 @@ func TestScheduledMessageListAndTargetsUseSelectedSpace(t *testing.T) {
 		service.listInput.Status == nil || *service.listInput.Status != domainscheduledmessage.ScheduleStatusActive {
 		t.Fatalf("list response/input = %+v/%+v, calls=%d", list.Result, service.listInput, service.listCalls)
 	}
+	var listOutput struct {
+		Schedules []dto.ScheduledMessageOutput `json:"schedules"`
+	}
+	if err := json.Unmarshal(list.Result.StructuredOutput, &listOutput); err != nil || len(listOutput.Schedules) != 1 ||
+		listOutput.Schedules[0].ID != scheduledTestScheduleID || len(listOutput.Schedules[0].History) != 1 ||
+		listOutput.Schedules[0].History[0].ID != "delivery-1" {
+		t.Fatalf("scheduled_message_list structured output = %s, decode error=%v", list.Result.StructuredOutput, err)
+	}
 
 	targets := callScheduledTool(t, server.URL, "scheduled_message_targets", map[string]any{"space": scheduledTestSpaceID}, ptrScheduledIdentity(scheduledIdentity("nonce-targets")))
 	if targets.Result == nil || targets.Result.IsError || service.targetCalls != 1 || service.targetActor.SpaceID != scheduledTestSpaceID || service.targetSpace != scheduledTestSpaceID {
 		t.Fatalf("targets response/space = %+v/%q, calls=%d", targets.Result, service.targetSpace, service.targetCalls)
+	}
+	var targetsOutput struct {
+		Targets []dto.ScheduledMessageTargetOutput `json:"targets"`
+	}
+	if err := json.Unmarshal(targets.Result.StructuredOutput, &targetsOutput); err != nil || len(targetsOutput.Targets) != 1 ||
+		targetsOutput.Targets[0].DisplayName != "Sam" {
+		t.Fatalf("scheduled_message_targets structured output = %s, decode error=%v", targets.Result.StructuredOutput, err)
+	}
+}
+
+func TestScheduledMessageListAndTargetsReturnEmptyArrays(t *testing.T) {
+	server := newScheduledMessageMCPServer(t, &scheduledMessageServiceStub{}, scheduledResolver(scheduledTestSpaceID), scheduledTestSecret)
+	list := callScheduledTool(t, server.URL, "scheduled_message_list", map[string]any{"space": scheduledTestSpaceID}, ptrScheduledIdentity(scheduledIdentity("nonce-empty-list")))
+	targets := callScheduledTool(t, server.URL, "scheduled_message_targets", map[string]any{"space": scheduledTestSpaceID}, ptrScheduledIdentity(scheduledIdentity("nonce-empty-targets")))
+	if list.Result == nil || list.Result.IsError || targets.Result == nil || targets.Result.IsError {
+		t.Fatalf("empty list responses failed: list=%+v targets=%+v", list.Result, targets.Result)
+	}
+	var listOutput struct {
+		Schedules []json.RawMessage `json:"schedules"`
+	}
+	if err := json.Unmarshal(list.Result.StructuredOutput, &listOutput); err != nil || listOutput.Schedules == nil || len(listOutput.Schedules) != 0 {
+		t.Fatalf("empty scheduled_message_list output = %s, decode error=%v", list.Result.StructuredOutput, err)
+	}
+	var targetsOutput struct {
+		Targets []json.RawMessage `json:"targets"`
+	}
+	if err := json.Unmarshal(targets.Result.StructuredOutput, &targetsOutput); err != nil || targetsOutput.Targets == nil || len(targetsOutput.Targets) != 0 {
+		t.Fatalf("empty scheduled_message_targets output = %s, decode error=%v", targets.Result.StructuredOutput, err)
 	}
 }
 

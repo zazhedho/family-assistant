@@ -310,7 +310,9 @@ func TestHTTPHandlerDescribesActivityReminderSchedulingSchema(t *testing.T) {
 }
 
 func TestHTTPHandlerToolOutputSchemasUseHermesObjectRoot(t *testing.T) {
-	handler := NewHTTPHandler(config.MCPConfig{ServerKey: "secret"}, &resolverStub{}, nil, nil, nil, nil, ToolServices{})
+	handler := NewHTTPHandler(config.MCPConfig{ServerKey: "secret"}, &resolverStub{}, nil, nil, nil, nil, ToolServices{
+		ScheduledMessage: &scheduledMessageServiceStub{},
+	})
 	server := httptest.NewServer(handler)
 	t.Cleanup(server.Close)
 

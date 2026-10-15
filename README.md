@@ -533,14 +533,21 @@ The request's `model` value does not select or isolate a profile.
    After migration, capability, authentication, and connectivity checks pass,
    change `SCHEDULED_MESSAGES_ENABLED=true` and recreate the backend:
 
-   ```sh
+   ```bash
+   set -euo pipefail
    cd /opt/apps/family-assistant
    docker compose up -d backend
    curl -f http://127.0.0.1:8086/healthcheck
+   hermes mcp test family_assistant
    ```
 
    Verify the MCP catalog now has all 32 tools and the scheduled-message worker
-   started. Restart/reconnect Hermes if it cached the earlier 25-tool catalog.
+   started. Use your configured MCP server name if it differs from `family_assistant`.
+   The Hermes connection test must succeed: raw `tools/list` returning 32 entries
+   does not prove the client accepts their schemas. If discovery fails, disable
+   the lane and restore the 25-tool catalog before investigating the reported error.
+   Restart/reconnect Hermes if it cached the earlier 25-tool catalog, then repeat
+   the connection test.
    To disable the lane, set the flag back to `false` and recreate the backend;
    retain migration 12 and its history tables.
 
