@@ -37,6 +37,14 @@ type scheduledMessageListToolInput struct {
 	Status     string `json:"status,omitempty" jsonschema:"optional ACTIVE, SENT, FAILED, CANCELLED, or UNSUBSCRIBED filter"`
 }
 
+type ScheduledMessageListOutput struct {
+	Schedules []dto.ScheduledMessageOutput `json:"schedules"`
+}
+
+type ScheduledMessageTargetsOutput struct {
+	Targets []dto.ScheduledMessageTargetOutput `json:"targets"`
+}
+
 type scheduledMessageUpdateToolInput struct {
 	Space       string  `json:"space,omitempty" jsonschema:"Space UUID or exact name; blank selects Personal Space"`
 	ScheduleID  string  `json:"schedule_id" jsonschema:"schedule UUID"`
@@ -282,14 +290,16 @@ func registerScheduledMessageTools(server *mcpsdk.Server, resolver interfaceiden
 	})
 	addTool(server, &mcpsdk.Tool{Name: "scheduled_message_targets", Description: "List recipients and bound groups available in a Space."}, func(ctx context.Context, input struct {
 		Space string `json:"space,omitempty" jsonschema:"Space UUID or exact name; blank selects Personal Space"`
-	}) ([]dto.ScheduledMessageTargetOutput, error) {
-		return scheduledMessageTargets(ctx, resolver, service, input.Space)
+	}) (ScheduledMessageTargetsOutput, error) {
+		output, err := scheduledMessageTargets(ctx, resolver, service, input.Space)
+		return ScheduledMessageTargetsOutput{Targets: output}, err
 	})
 	addTool(server, &mcpsdk.Tool{Name: "scheduled_message_create", Description: "Schedule a fixed WhatsApp message or AI-generated message from a theme."}, func(ctx context.Context, input scheduledMessageCreateToolInput) (dto.ScheduledMessageOutput, error) {
 		return scheduledMessageCreate(ctx, resolver, service, input)
 	})
-	addTool(server, &mcpsdk.Tool{Name: "scheduled_message_list", Description: "List schedules in an authorized Space, optionally including one schedule's delivery history."}, func(ctx context.Context, input scheduledMessageListToolInput) ([]dto.ScheduledMessageOutput, error) {
-		return scheduledMessageList(ctx, resolver, service, input)
+	addTool(server, &mcpsdk.Tool{Name: "scheduled_message_list", Description: "List schedules in an authorized Space, optionally including one schedule's delivery history."}, func(ctx context.Context, input scheduledMessageListToolInput) (ScheduledMessageListOutput, error) {
+		output, err := scheduledMessageList(ctx, resolver, service, input)
+		return ScheduledMessageListOutput{Schedules: output}, err
 	})
 	addTool(server, &mcpsdk.Tool{Name: "scheduled_message_update", Description: "Update schedule content, recurrence, timezone, or next start time."}, func(ctx context.Context, input scheduledMessageUpdateToolInput) (dto.ScheduledMessageOutput, error) {
 		return scheduledMessageUpdate(ctx, resolver, service, input)
