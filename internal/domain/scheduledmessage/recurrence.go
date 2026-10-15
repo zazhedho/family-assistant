@@ -100,7 +100,7 @@ func civilDate(local time.Time) time.Time {
 	return time.Date(year, month, day, 0, 0, 0, 0, time.UTC)
 }
 
-func sameCivilDate(date time.Time, local time.Time) bool {
+func sameCivilDate(date, local time.Time) bool {
 	year, month, day := local.Date()
 	dy, dm, dd := date.Date()
 	return year == dy && month == dm && day == dd
