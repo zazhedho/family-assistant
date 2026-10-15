@@ -11,6 +11,7 @@ import (
 	interfaceinvitation "family-assistant/internal/interfaces/invitation"
 	interfaceonboarding "family-assistant/internal/interfaces/onboarding"
 	interfacereminder "family-assistant/internal/interfaces/reminder"
+	interfacescheduledmessage "family-assistant/internal/interfaces/scheduledmessage"
 	interfacespace "family-assistant/internal/interfaces/space"
 	"family-assistant/pkg/config"
 
@@ -18,8 +19,9 @@ import (
 )
 
 type ToolServices struct {
-	Invitation interfaceinvitation.ServiceInvitationInterface
-	Activity   interfaceactivity.ServiceActivityInterface
+	Invitation       interfaceinvitation.ServiceInvitationInterface
+	Activity         interfaceactivity.ServiceActivityInterface
+	ScheduledMessage interfacescheduledmessage.Service
 }
 
 type mcpDependencies struct {
@@ -43,6 +45,9 @@ func NewHTTPHandler(cfg config.MCPConfig, resolver interfaceidentity.Resolver, l
 	registerReminderTools(sdkServer, reminderService, resolver)
 	registerInvitationTools(sdkServer, resolver, toolServices.Invitation)
 	registerActivityTools(sdkServer, resolver, toolServices.Activity, reminderService)
+	if toolServices.ScheduledMessage != nil {
+		registerScheduledMessageTools(sdkServer, resolver, toolServices.ScheduledMessage)
+	}
 
 	sdkHandler := mcpsdk.NewStreamableHTTPHandler(func(*http.Request) *mcpsdk.Server {
 		return sdkServer

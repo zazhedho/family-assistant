@@ -26,6 +26,9 @@ func ValidateStartupConfig(port string) error {
 	if err := ValidateReminderSchedulerConfig(); err != nil {
 		problems = append(problems, err.Error())
 	}
+	if err := ValidateScheduledMessageConfig(); err != nil {
+		problems = append(problems, err.Error())
+	}
 	problems = append(problems, validateMCPConfig()...)
 
 	if len(problems) > 0 {

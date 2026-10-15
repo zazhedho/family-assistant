@@ -7,6 +7,7 @@ import (
 	domainidentity "family-assistant/internal/domain/identity"
 	domaininvitation "family-assistant/internal/domain/invitation"
 	domainreminder "family-assistant/internal/domain/reminder"
+	interfacescheduledmessage "family-assistant/internal/interfaces/scheduledmessage"
 	serviceauthorization "family-assistant/internal/services/authorization"
 	serviceidentity "family-assistant/internal/services/identity"
 	servicereminder "family-assistant/internal/services/reminder"
@@ -58,7 +59,7 @@ func MapToolError(err error, logger ...*slog.Logger) error {
 		return &MCPError{Code: "unauthenticated", Message: ErrMCPUnauthenticated.Error(), cause: err}
 	case errors.Is(err, serviceauthorization.ErrForbidden):
 		return &MCPError{Code: "forbidden", Message: ErrMCPForbidden.Error(), cause: err}
-	case errors.Is(err, serviceauthorization.ErrNotFound), errors.Is(err, gorm.ErrRecordNotFound):
+	case errors.Is(err, serviceauthorization.ErrNotFound), errors.Is(err, serviceidentity.ErrNotFound), errors.Is(err, gorm.ErrRecordNotFound):
 		return &MCPError{Code: "not_found", Message: ErrMCPNotFound.Error(), cause: err}
 	case errors.Is(err, serviceauthorization.ErrInvalidResource),
 		errors.Is(err, utils.ErrInvalidUUID),
@@ -67,10 +68,11 @@ func MapToolError(err error, logger ...*slog.Logger) error {
 		errors.Is(err, serviceidentity.ErrInvalidResource),
 		errors.Is(err, serviceidentity.ErrInvalidIdentityProvider),
 		errors.Is(err, serviceidentity.ErrInvalidExternalIdentity),
+		errors.Is(err, interfacescheduledmessage.ErrInvalidWhatsAppIdentity),
 		errors.Is(err, domainidentity.ErrInvalidLinkToken),
 		errors.Is(err, domaininvitation.ErrInvalidInvitation):
 		return &MCPError{Code: "invalid_input", Message: ErrMCPInvalidInput.Error(), cause: err}
-	case errors.Is(err, servicereminder.ErrConflict), errors.Is(err, domainidentity.ErrIdentityConflict), errors.Is(err, domaininvitation.ErrMembershipConflict):
+	case errors.Is(err, servicereminder.ErrConflict), errors.Is(err, interfacescheduledmessage.ErrConflict), errors.Is(err, domainidentity.ErrIdentityConflict), errors.Is(err, domaininvitation.ErrMembershipConflict):
 		return &MCPError{Code: "conflict", Message: ErrMCPConflict.Error(), cause: err}
 	case errors.Is(err, domainidentity.ErrIdentityNotFound):
 		return &MCPError{Code: "not_found", Message: ErrMCPNotFound.Error(), cause: err}

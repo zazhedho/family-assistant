@@ -12,6 +12,7 @@ import (
 	"time"
 
 	domainactivity "family-assistant/internal/domain/activity"
+	"family-assistant/internal/dto"
 	"family-assistant/pkg/config"
 	"family-assistant/pkg/logger"
 
@@ -78,6 +79,19 @@ func TestMCPToolLogAttrsDoNotExposeErrorMessages(t *testing.T) {
 	}
 	if strings.Contains(fmt.Sprint(got), "private persistence detail") {
 		t.Fatalf("log attrs expose error message: %+v", got)
+	}
+}
+
+func TestScheduledMessageLogAttrsDoNotExposeContentOrTheme(t *testing.T) {
+	attrs := mcpToolLogAttrs(
+		"scheduled_message_create",
+		scheduledMessageCreateToolInput{Content: "private scheduled message theme"},
+		dto.ScheduledMessageOutput{ID: "schedule-1", Status: "ACTIVE", Content: "private generated output"},
+		time.Millisecond,
+		nil,
+	)
+	if strings.Contains(fmt.Sprint(mcpLogAttrValues(attrs)), "private") {
+		t.Fatalf("scheduled-message content leaked into logs: %+v", mcpLogAttrValues(attrs))
 	}
 }
 
