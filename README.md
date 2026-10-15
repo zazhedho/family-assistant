@@ -231,6 +231,14 @@ FAMILY_ASSISTANT_TEST_DATABASE_URL=postgres://<user>@127.0.0.1:5432/family_assis
 It refuses non-local hosts or any database other than `family_assistant_test`.
 Keep this URL local and never use it for a development or production database.
 
+The scheduled-message PostgreSQL integration uses a separate `SCHEDULED_MESSAGE_TEST_DATABASE_URL`
+for the exact local database `scheduled_message_integration_test`; it skips when unset
+and refuses non-loopback hosts or other database names:
+
+```text
+SCHEDULED_MESSAGE_TEST_DATABASE_URL=postgres://<user>@127.0.0.1:5432/scheduled_message_integration_test?sslmode=disable
+```
+
 ## Run Locally
 
 Install dependencies and prepare `.env`, then:
@@ -257,8 +265,9 @@ PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s integrations/hermes/fa
 ```
 
 Install the linter with `make lint-install` if needed. PostgreSQL integration tests
-require the dedicated local `FAMILY_ASSISTANT_TEST_DATABASE_URL` described above;
-never point them at the development or production database.
+require their dedicated local URLs: `FAMILY_ASSISTANT_TEST_DATABASE_URL` and, for the
+scheduled-message test, `SCHEDULED_MESSAGE_TEST_DATABASE_URL` described above. Never
+point either one at the development or production database.
 
 ### Local Hermes MCP wiring
 
@@ -276,8 +285,9 @@ X-Hermes-Profile: <profile fallback; signed plugin identity takes precedence>
 X-Hermes-Channel: whatsapp
 ```
 
-The endpoint is `http://127.0.0.1:8081/mcp` by default. It exposes these **25 tools**;
-Hermes adds its MCP server prefix to tool names:
+The endpoint is `http://127.0.0.1:8081/mcp` by default. With scheduled messages
+disabled, it exposes these **25 existing tools**; enabling the feature adds seven
+more, for 32 total. Hermes adds its MCP server prefix to tool names:
 
 | Tool | Purpose |
 | --- | --- |
@@ -306,6 +316,276 @@ Hermes adds its MCP server prefix to tool names:
 | `reminder_complete` | Mark the task completed. |
 | `reminder_update` | Update a pending reminder's details, schedule, or assignee. |
 | `reminder_delete` | Cancel and soft-delete a reminder. |
+
+### Scheduled messages: opt-in rollout
+
+`SCHEDULED_MESSAGES_ENABLED` defaults to `false`. While disabled, the scheduled-message
+worker and seven tools below are absent; the existing 25 tools and reminder lane are
+unaffected. Apply migration 12 before enabling the feature. Fixed messages do not need
+an AI generator; AI-generated content does.
+
+| Tool | Purpose |
+| --- | --- |
+| `space_channel_bind` | Bind the currently verified WhatsApp group to an authorized Space. |
+| `scheduled_message_targets` | List eligible recipients and bound groups in a Space. |
+| `scheduled_message_create` | Create a fixed-content or AI-generated schedule. |
+| `scheduled_message_list` | List schedules and, for one selected schedule, delivery history. |
+| `scheduled_message_update` | Update an active schedule's content, recurrence, timezone, or next start. |
+| `scheduled_message_cancel` | Cancel a DM schedule as its creator, or cancel as an authorized Space owner/admin. |
+| `scheduled_message_unsubscribe` | Let the authenticated recipient unsubscribe their membership from a schedule. |
+
+#### Scheduled-message configuration
+
+| Setting | Default | Notes |
+| --- | --- | --- |
+| `SCHEDULED_MESSAGES_ENABLED` | `false` | Registers the seven tools and starts this worker when enabled. |
+| `SCHEDULED_MESSAGES_GENERATOR_URL` | unset | Optional; for AI schedules, use the private profile's full `/v1/chat/completions` URL. A bare endpoint is accepted only for a verified dedicated isolated profile instance; prefer the named profile route. |
+| `SCHEDULED_MESSAGES_GENERATOR_KEY` | unset | Secret; required together with the URL. Leave blank for fixed-only schedules. |
+| `SCHEDULED_MESSAGES_GENERATOR_MODEL` | `scheduled-messages` | Request model name; the named Hermes profile is the isolation boundary, not this value. |
+| `SCHEDULED_MESSAGES_GENERATOR_TIMEOUT` | `30s` | Maximum generator request time; must be positive. |
+| `SCHEDULED_MESSAGES_GENERATOR_MAX_RESPONSE_BYTES` | `65536` | Maximum response body read; must be positive. |
+| `SCHEDULED_MESSAGES_MAX_OUTPUT_BYTES` | `2000` | Generator output bound in bytes; must be positive. |
+| `SCHEDULED_MESSAGES_GENERATION_MAX_RETRIES` | `3` | Accepted range: 0–3 retries after the initial attempt. |
+| `SCHEDULED_MESSAGES_GENERATION_RETRY_BACKOFF` | `1m` | Delay between generation retries; must be non-negative. |
+| `SCHEDULED_MESSAGES_DELIVERY_MAX_RETRIES` | `3` | Accepted range: 0–3 retries after the initial attempt. |
+| `SCHEDULED_MESSAGES_DELIVERY_RETRY_BACKOFF` | `1m` | Delay between delivery retries; must be non-negative. |
+| `SCHEDULED_MESSAGES_LEASE` | `2m` | Must exceed generator timeout plus 10s bridge timeout and 15s processing margin. |
+| `SCHEDULED_MESSAGES_BATCH_SIZE` | `10` | Must be positive and no greater than concurrency. |
+| `SCHEDULED_MESSAGES_CONCURRENCY` | `10` | Maximum concurrent scheduled-message deliveries; must be positive. |
+| `SCHEDULED_MESSAGES_MAX_TEXT_BYTES` | `2000` | Maximum scheduled text size in bytes; must be positive. |
+| `SCHEDULED_MESSAGES_MAX_LIST_ROWS` | `100` | Maximum list/history result size; must be 1–100. |
+
+The worker shares the existing `REMINDER_SCHEDULER_INTERVAL`, database-fallback,
+index-reconciliation, and index-batch settings described above. Scheduled delivery
+uses `SCHEDULED_MESSAGES_BATCH_SIZE`; `REMINDER_SCHEDULER_BATCH_SIZE` still applies
+to reminders. Scheduled messages require `REMINDER_WHATSAPP_BRIDGE_URL` even when the
+separate `REMINDER_SCHEDULER_ENABLED` reminder worker remains off.
+
+#### Private Hermes API profile and zero-tool gate
+
+The following flow uses the existing VPS gateway with
+`gateway.multiplex_profiles: true`. Its shared API listener belongs to `default`;
+the generator is selected by the `/p/scheduled-messages/` route and has its own key.
+The request's `model` value does not select or isolate a profile.
+
+1. Keep `SCHEDULED_MESSAGES_ENABLED=false` and apply migration 12 before activation.
+   Create a fresh profile without cloning another profile:
+
+   ```sh
+   hermes profile create scheduled-messages --no-skills --no-alias
+   install -d -m 700 /root/.hermes/profiles/scheduled-messages/workspace
+   chmod 700 /root/.hermes/profiles/scheduled-messages
+   ```
+
+   Merge these settings into the new profile's `config.yaml`. Configure a model
+   available to your provider; this VPS uses `openai-codex` with `gpt-6-luna`:
+
+   ```yaml
+   model:
+     provider: openai-codex
+     default: gpt-6-luna
+   platform_toolsets:
+     api_server: []
+   agent:
+     disabled_toolsets:
+       [web, browser, terminal, file, code_execution, vision, video, image_gen,
+        video_gen, x_search, tts, stt, skills, todo, kanban, memory, context_engine,
+        session_search, connections, clarify, delegation, cronjob, yuanbao,
+        computer_use, a2a]
+   memory:
+     memory_enabled: false
+     user_profile_enabled: false
+   mcp_servers: {}
+   plugins:
+     enabled: []
+   terminal:
+     cwd: /root/.hermes/profiles/scheduled-messages/workspace
+   ```
+
+   Do not clone private SOUL, memory, history, skills, messaging adapters, or MCP
+   configuration. Profiles are not filesystem sandboxes; restrict the profile home
+   to the service administrator. Hermes shares Codex OAuth through its supported
+   profile authentication mechanism; do not copy `auth.json`. Other providers may
+   require setup inside this profile. Hermes can retain its mandatory public
+   `hermes-agent` builtin even with `--no-skills`; the `skills` toolset must remain
+   disabled, and no custom/private skills should be installed.
+
+2. Generate **two different API keys** on the VPS, for example by running
+   `openssl rand -hex 32` twice. In the default profile's `.env`, configure the
+   shared listener with the first key:
+
+   ```dotenv
+   API_SERVER_ENABLED=true
+   API_SERVER_HOST=127.0.0.1
+   API_SERVER_PORT=8643
+   API_SERVER_KEY=<listener-key>
+   ```
+
+   Merge `api_server: []` into the default profile's existing `platform_toolsets`
+   map as well; preserve its WhatsApp selection. In
+   `/root/.hermes/profiles/scheduled-messages/.env`, use the second key:
+
+   ```dotenv
+   API_SERVER_ENABLED=true
+   API_SERVER_KEY=<generator-profile-key>
+   ```
+
+   Restrict both files to mode `600`. Named profiles use the shared listener;
+   their own host/port settings do not create another listener. Only the generator
+   key is shared with the backend. Keep the listener key separate from the
+   generator key, `MCP_SERVER_KEY`, and the identity HMAC secret.
+
+3. Add this location inside the existing host-only Nginx server on
+   `172.24.0.1:3011`, before its WhatsApp bridge `location /`:
+
+   ```nginx
+   location /p/scheduled-messages/ {
+       proxy_http_version 1.1;
+       proxy_set_header Host 127.0.0.1:8643;
+       proxy_pass http://127.0.0.1:8643;
+       proxy_read_timeout 45s;
+   }
+   ```
+
+   Preserve the existing `/` proxy to port `3010`. Use the actual Compose gateway
+   address if it differs from `172.24.0.1`. Validate/reload Nginx and restart the
+   multiplexed gateway:
+
+   ```sh
+   nginx -t
+   systemctl reload nginx
+   hermes gateway restart
+   ss -ltn 'sport = :8643'
+   ```
+
+   Port `8643` must listen on `127.0.0.1`; the Nginx listener must remain on the
+   private Docker gateway address. No public API port is required.
+
+4. Verify capabilities before enabling the backend. Using the generator profile
+   key in a temporary shell variable `FA_GENERATOR_KEY`, run:
+
+   ```bash
+   set -euo pipefail
+   read -r -s -p 'Generator API key: ' FA_GENERATOR_KEY
+   printf '\n'
+   curl -fsS -H "Authorization: Bearer ${FA_GENERATOR_KEY}" \
+     http://127.0.0.1:8643/p/scheduled-messages/v1/toolsets \
+     | jq -e '(.data // .) | type == "array" and all(.[]; .enabled != true or (.tools | length) == 0)'
+   read -r -s -p 'Listener API key: ' FA_LISTENER_KEY
+   printf '\n'
+   curl -fsS -H "Authorization: Bearer ${FA_LISTENER_KEY}" \
+     http://127.0.0.1:8643/v1/toolsets \
+     | jq -e '(.data // .) | type == "array" and all(.[]; .enabled != true or (.tools | length) == 0)'
+   test "$(curl -sS -o /dev/null -w '%{http_code}' \
+     -H "Authorization: Bearer ${FA_LISTENER_KEY}" \
+     http://127.0.0.1:8643/p/scheduled-messages/v1/toolsets)" = 401
+   test "$(curl -sS -o /dev/null -w '%{http_code}' \
+     -H "Authorization: Bearer ${FA_GENERATOR_KEY}" \
+     http://127.0.0.1:8643/v1/toolsets)" = 401
+   hermes -p scheduled-messages tools list --platform api_server
+   hermes -p scheduled-messages skills list
+   unset FA_GENERATOR_KEY FA_LISTENER_KEY
+   ```
+
+   Both API checks must return `true`: **enabled** toolsets must expose zero concrete
+   tools. Disabled catalog entries can still list their registered tools. Confirm
+   no MCP servers, active plugins, private skills, or memory stores were configured.
+   The essential public builtin can appear in the skill inventory. Some Hermes
+   versions return `500` from `/v1/skills`; that endpoint failure does not verify
+   skill isolation, so also inspect the profile inventory/configuration above.
+   A listener key used on the named route, or a generator key used on `/v1/...`,
+   must return `401`. Repeat the capability checks after a Hermes/profile update.
+
+5. In `/opt/apps/family-assistant/.env`, configure the same generator profile key:
+
+   ```dotenv
+   SCHEDULED_MESSAGES_ENABLED=false
+   SCHEDULED_MESSAGES_GENERATOR_URL=http://host.docker.internal:3011/p/scheduled-messages/v1/chat/completions
+   SCHEDULED_MESSAGES_GENERATOR_KEY=<generator-profile-key>
+   SCHEDULED_MESSAGES_GENERATOR_MODEL=scheduled-messages
+   ```
+
+   Verify the private proxy from the backend container. Run these Bash commands
+   on the VPS; `jq` runs on the host and `wget` runs inside the backend image:
+
+   ```bash
+   set -euo pipefail
+   cd /opt/apps/family-assistant
+   read -r -s -p 'Generator API key: ' FA_GENERATOR_KEY
+   printf '\n'
+   export FA_GENERATOR_KEY
+   docker compose exec -T -e FA_GENERATOR_KEY backend sh -c \
+     'wget -qO- -T 30 --header "Authorization: Bearer $FA_GENERATOR_KEY" \
+       http://host.docker.internal:3011/p/scheduled-messages/v1/toolsets' \
+     | jq -e '(.data // .) | type == "array" and all(.[]; .enabled != true or (.tools | length) == 0)'
+   time docker compose exec -T -e FA_GENERATOR_KEY backend sh -c \
+     'wget -qO- -T 30 --header "Authorization: Bearer $FA_GENERATOR_KEY" \
+       --header "Content-Type: application/json" \
+       --post-data '\''{"model":"scheduled-messages","messages":[{"role":"user","content":"Write one short, friendly greeting. Return only the greeting."}],"stream":false}'\'' \
+       http://host.docker.internal:3011/p/scheduled-messages/v1/chat/completions' \
+     | jq -e '.choices[0] | .finish_reason == "stop" and (.message.content | type == "string" and length > 0) and ((.message.tool_calls // []) | length == 0)'
+   unset FA_GENERATOR_KEY
+   ```
+
+   Both checks must return `true`. The generation request must finish within
+   `SCHEDULED_MESSAGES_GENERATOR_TIMEOUT`; adjust the example's 30-second client
+   limit if that configured timeout differs. This does not send a WhatsApp message.
+   After migration, capability, authentication, and connectivity checks pass,
+   change `SCHEDULED_MESSAGES_ENABLED=true` and recreate the backend:
+
+   ```sh
+   cd /opt/apps/family-assistant
+   docker compose up -d backend
+   curl -f http://127.0.0.1:8086/healthcheck
+   ```
+
+   Verify the MCP catalog now has all 32 tools and the scheduled-message worker
+   started. Restart/reconnect Hermes if it cached the earlier 25-tool catalog.
+   To disable the lane, set the flag back to `false` and recreate the backend;
+   retain migration 12 and its history tables.
+
+The standalone `family_assistant_identity` plugin is updated separately from the
+backend image. Follow the plugin update flow below when its files change, then
+verify signed tool-name handling; it recognizes the MCP server prefix generically.
+
+Official references: [Hermes API server](https://hermes-agent.nousresearch.com/docs/user-guide/features/api-server/),
+[profiles](https://hermes-agent.nousresearch.com/docs/user-guide/profiles), and
+[toolsets](https://hermes-agent.nousresearch.com/docs/reference/toolsets-reference).
+Repository integration tests do not configure a live Hermes profile; the authenticated
+empty-tools and private connectivity checks are deployment gates.
+
+#### Fresh install, existing VPS, and rollback
+
+- Fresh install: apply all migrations through 12 with `SCHEDULED_MESSAGES_ENABLED=false`.
+  Keep the flag off until the private profile and zero-tool gate are verified.
+- Existing VPS: take the normal database backup, apply migration 12 up using the current
+  migration process while the feature remains off, deploy the compatible backend, and
+  confirm the migration completed before profile verification and flag activation.
+- Enable only after the profile-specific API key, private route, configured model, and
+  zero concrete tools in enabled API toolsets have been checked. Restart/redeploy with the flag set to
+  `true`; leave generator URL/key blank if only fixed messages are required.
+- Rollback: set `SCHEDULED_MESSAGES_ENABLED=false` and restart/redeploy. Keep the
+  additive schema in place; do not run migration 12 down in production.
+
+#### Manual staging smoke checks
+
+Use only consenting staging/test recipients and a non-production group:
+
+From the intended WhatsApp group, an authorized Space owner/admin first calls
+`space_channel_bind` for that Space. `scheduled_message_targets` returns eligible
+member/group IDs, which creation uses instead of raw phone numbers or group JIDs.
+A creator can edit their own group schedule; group cancellation requires a Space
+owner/admin. A DM recipient can call `scheduled_message_unsubscribe` to stop their
+schedule; this terminal choice cannot be undone by an ordinary update.
+
+- Schedule a one-shot fixed DM and a fixed group message; verify accepted delivery and history.
+- Schedule a daily AI DM; verify it uses the named profile and stays within the 2000-byte text limit.
+- Unsubscribe the recipient before the due time; verify the delivery is cancelled and not sent.
+- Verify an ordinary group creator cannot cancel even their own group schedule, while a Space owner/admin can.
+- Force four generator failures: a one-shot schedule should become `FAILED`, and a recurring
+  occurrence should become `SKIPPED`, after the initial attempt plus three retries.
+- Separately force four bridge send failures and verify the delivery retry budget/terminal
+  state. Confirm an existing reminder still delivers through the unchanged reminder lane.
 
 For requests such as "find Zeia's milk notes from yesterday", use `activity_list`
 with optional `search` and the appropriate event-time bounds in RFC3339:

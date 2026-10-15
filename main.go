@@ -5,14 +5,21 @@ import (
 	"database/sql"
 	"errors"
 	"family-assistant/infrastructure/database"
+	generation "family-assistant/infrastructure/generation"
 	notificationInfra "family-assistant/infrastructure/notification"
 	reminderCache "family-assistant/internal/cache/reminder"
+	scheduledMessageCache "family-assistant/internal/cache/scheduledmessage"
 	domainidentity "family-assistant/internal/domain/identity"
 	domainspace "family-assistant/internal/domain/space"
+	"family-assistant/internal/dto"
 	mcpHandler "family-assistant/internal/handlers/mcp"
+	interfaceaudit "family-assistant/internal/interfaces/audit"
+	interfaceauthorization "family-assistant/internal/interfaces/authorization"
 	interfacenotification "family-assistant/internal/interfaces/notification"
 	interfaceonboarding "family-assistant/internal/interfaces/onboarding"
 	interfacereminder "family-assistant/internal/interfaces/reminder"
+	interfacescheduledmessage "family-assistant/internal/interfaces/scheduledmessage"
+	interfacespace "family-assistant/internal/interfaces/space"
 	activityRepo "family-assistant/internal/repositories/activity"
 	identityRepo "family-assistant/internal/repositories/identity"
 	invitationRepo "family-assistant/internal/repositories/invitation"
@@ -20,6 +27,7 @@ import (
 	permissionRepo "family-assistant/internal/repositories/permission"
 	reminderRepo "family-assistant/internal/repositories/reminder"
 	roleRepo "family-assistant/internal/repositories/role"
+	scheduledMessageRepo "family-assistant/internal/repositories/scheduledmessage"
 	spaceRepo "family-assistant/internal/repositories/space"
 	userRepo "family-assistant/internal/repositories/user"
 	"family-assistant/internal/router"
@@ -30,6 +38,7 @@ import (
 	onboardingService "family-assistant/internal/services/onboarding"
 	permissionService "family-assistant/internal/services/permission"
 	reminderService "family-assistant/internal/services/reminder"
+	scheduledMessageService "family-assistant/internal/services/scheduledmessage"
 	spaceService "family-assistant/internal/services/space"
 	"family-assistant/pkg/config"
 	"family-assistant/pkg/logger"
@@ -49,6 +58,8 @@ import (
 	_ "github.com/golang-migrate/migrate/v4/database/postgres" // Register the PostgreSQL driver for migrations.
 	_ "github.com/golang-migrate/migrate/v4/source/file"       // Register the file-based migration source.
 	"github.com/joho/godotenv"
+	"github.com/redis/go-redis/v9"
+	"gorm.io/gorm"
 )
 
 func FailOnError(err error, msg string) {
@@ -83,6 +94,7 @@ func run() error {
 	logger.WriteLog(logger.LogLevelDebug, fmt.Sprintf("ConfigID: %s", confID))
 	mcpConfig := config.LoadMCPConfig()
 	reminderSchedulerConfig := config.LoadReminderSchedulerConfig()
+	scheduledMessageConfig := config.LoadScheduledMessageConfig()
 	FailOnError(config.ValidateStartupConfig(port), "Invalid app configuration")
 
 	if runMigrate {
@@ -145,11 +157,19 @@ func run() error {
 	if _, err := startReminderScheduler(serverContext, reminderSchedulerConfig, reminderSchedulerRepository, identityRepository, spaceRepository, reminderDueIndex); err != nil {
 		return fmt.Errorf("start reminder scheduler: %w", err)
 	}
+	scheduledMessages, err := startScheduledMessageLane(serverContext, scheduledMessageConfig, scheduledMessageLaneDependencies{
+		db: routes.DB, redis: database.GetRedisClient(), spaces: spaceRepository,
+		authorizer: authorizationService.NewAuthorizer(), audit: audit,
+	})
+	if err != nil {
+		return fmt.Errorf("start scheduled message lane: %w", err)
+	}
 
 	mcpServer, mcpListener := startMCPServer(mcpConfig.Enabled, func() (*http.Server, net.Listener, error) {
 		return mcpHandler.Listen(mcpConfig, identityResolver, identityLink, accountRegistrar, spaces, reminders, mcpHandler.ToolServices{
-			Invitation: invitations,
-			Activity:   activities,
+			Invitation:       invitations,
+			Activity:         activities,
+			ScheduledMessage: scheduledMessages,
 		})
 	})
 	httpServer, httpListener := bindHTTPServer(serverContext, fmt.Sprintf(":%s", port), routes.App, mcpListener)
@@ -199,6 +219,65 @@ func startReminderScheduler(
 	)
 	go scheduler.Run(ctx)
 	return scheduler, nil
+}
+
+type scheduledMessageLaneDependencies struct {
+	db         *gorm.DB
+	redis      redis.UniversalClient
+	spaces     interfacespace.RepoSpaceInterface
+	authorizer interfaceauthorization.Authorizer
+	audit      interfaceaudit.ServiceAuditInterface
+}
+
+func startScheduledMessageLane(ctx context.Context, cfg config.ScheduledMessageConfig, dependencies scheduledMessageLaneDependencies) (interfacescheduledmessage.Service, error) {
+	if !cfg.Enabled {
+		return nil, nil
+	}
+	if err := cfg.Validate(); err != nil {
+		return nil, err
+	}
+	generator, err := newScheduledMessageGenerator(cfg)
+	if err != nil {
+		return nil, err
+	}
+	repository := scheduledMessageRepo.NewRepository(dependencies.db)
+	dueIndex := scheduledMessageCache.NewRedisDueIndex(dependencies.redis, cfg.Scheduler.IndexBatchSize)
+	service := scheduledMessageService.NewScheduledMessageService(
+		repository, dependencies.spaces, dependencies.authorizer, dependencies.audit, dueIndex, generator,
+		scheduledMessageService.ScheduledMessageServiceOptions{MaxTextBytes: cfg.MaxTextBytes, MaxListRows: cfg.MaxListRows},
+	)
+	sender, err := notificationInfra.NewWhatsAppBridge(cfg.Scheduler.WhatsAppBridgeURL)
+	if err != nil {
+		return nil, err
+	}
+	scheduler, err := scheduledMessageService.NewScheduledMessageScheduler(
+		repository, dueIndex, generator, sender, cfg, dto.ScheduledMessageSchedulerOptions{},
+	)
+	if err != nil {
+		return nil, err
+	}
+	if err := startScheduledMessageWorker(ctx, cfg, scheduler); err != nil {
+		return nil, err
+	}
+	return service, nil
+}
+
+func newScheduledMessageGenerator(cfg config.ScheduledMessageConfig) (interfacescheduledmessage.Generator, error) {
+	if strings.TrimSpace(cfg.GeneratorURL) == "" && strings.TrimSpace(cfg.GeneratorKey) == "" {
+		return nil, nil
+	}
+	return generation.NewHermesGenerator(cfg)
+}
+
+func startScheduledMessageWorker(ctx context.Context, cfg config.ScheduledMessageConfig, scheduler interfacescheduledmessage.Scheduler) error {
+	if !cfg.Enabled {
+		return nil
+	}
+	if scheduler == nil {
+		return errors.New("scheduled message scheduler is not configured")
+	}
+	go scheduler.Run(ctx)
+	return nil
 }
 
 func configureRuntime() {

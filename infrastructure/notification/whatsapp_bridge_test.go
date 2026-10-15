@@ -3,6 +3,7 @@ package notification
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -33,6 +34,31 @@ func TestWhatsAppBridgeSendsChatMessage(t *testing.T) {
 	}
 	if err := sender.Send(context.Background(), domainreminder.DeliveryTarget{Provider: "whatsapp", Target: "120363@g.us"}, "⏰ Pengingat: susu bayi"); err != nil {
 		t.Fatalf("send: %v", err)
+	}
+}
+
+func TestWhatsAppBridgeSendHonorsCanceledContext(t *testing.T) {
+	requests := make(chan struct{}, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requests <- struct{}{}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+
+	sender, err := NewWhatsAppBridge(server.URL)
+	if err != nil {
+		t.Fatalf("new sender: %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	err = sender.Send(ctx, domainreminder.DeliveryTarget{Provider: "whatsapp", Target: "chat-1"}, "hello")
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("send error = %v, want wrapped context cancellation", err)
+	}
+	select {
+	case <-requests:
+		t.Fatal("canceled send reached the WhatsApp bridge")
+	default:
 	}
 }
 

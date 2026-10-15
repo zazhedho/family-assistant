@@ -46,5 +46,8 @@ func validateMCPConfig() []string {
 	if conf.Enabled && conf.ServerKey == "" {
 		return []string{"MCP_SERVER_KEY is required when MCP_ENABLED=true"}
 	}
+	if conf.Enabled && LoadScheduledMessageConfig().Enabled && conf.IdentitySecret == "" {
+		return []string{"MCP_IDENTITY_SECRET is required when MCP_ENABLED and SCHEDULED_MESSAGES_ENABLED=true"}
+	}
 	return nil
 }

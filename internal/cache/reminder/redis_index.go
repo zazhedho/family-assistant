@@ -8,6 +8,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	cachehelpers "family-assistant/internal/cache"
 	domainreminder "family-assistant/internal/domain/reminder"
 	interfacereminder "family-assistant/internal/interfaces/reminder"
 
@@ -79,16 +80,11 @@ func (r *redisDueReminderIndex) AllIDs(ctx context.Context) ([]string, error) {
 }
 
 func (r *redisDueReminderIndex) UpsertMany(ctx context.Context, reminders []domainreminder.Reminder) error {
-	for start := 0; start < len(reminders); start += r.batchSize {
-		end := min(start+r.batchSize, len(reminders))
-		members := make([]redis.Z, 0, end-start)
-		for _, reminder := range reminders[start:end] {
-			members = append(members, redis.Z{Score: float64(reminder.ScheduledAt.UnixMilli()), Member: reminder.ID})
-		}
-		if err := r.client.ZAdd(ctx, reminderDueIndexKey, members...).Err(); err != nil {
-			r.markDirty()
-			return fmt.Errorf("rebuild reminder index: %w", err)
-		}
+	if err := cachehelpers.ZAddBatched(ctx, r.client, reminderDueIndexKey, r.batchSize, reminders, func(reminder domainreminder.Reminder) redis.Z {
+		return redis.Z{Score: float64(reminder.ScheduledAt.UnixMilli()), Member: reminder.ID}
+	}); err != nil {
+		r.markDirty()
+		return fmt.Errorf("rebuild reminder index: %w", err)
 	}
 	return nil
 }
@@ -97,16 +93,9 @@ func (r *redisDueReminderIndex) RemoveMany(ctx context.Context, reminderIDs []st
 	if len(reminderIDs) == 0 {
 		return nil
 	}
-	for start := 0; start < len(reminderIDs); start += r.batchSize {
-		end := min(start+r.batchSize, len(reminderIDs))
-		members := make([]any, 0, end-start)
-		for _, reminderID := range reminderIDs[start:end] {
-			members = append(members, reminderID)
-		}
-		if err := r.client.ZRem(ctx, reminderDueIndexKey, members...).Err(); err != nil {
-			r.markDirty()
-			return fmt.Errorf("remove stale reminder index entries: %w", err)
-		}
+	if err := cachehelpers.ZRemBatched(ctx, r.client, reminderDueIndexKey, r.batchSize, reminderIDs); err != nil {
+		r.markDirty()
+		return fmt.Errorf("remove stale reminder index entries: %w", err)
 	}
 	return nil
 }

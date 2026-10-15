@@ -147,6 +147,32 @@ func TestValidateStartupConfigValidatesEnabledReminderScheduler(t *testing.T) {
 	}
 }
 
+func TestValidateStartupConfigRequiresIdentitySecretForScheduledMCP(t *testing.T) {
+	clearStartupEnv(t)
+	setRequiredStartupEnv(t)
+	t.Setenv("MCP_ENABLED", "true")
+	t.Setenv("MCP_SERVER_KEY", "server-key")
+	t.Setenv("SCHEDULED_MESSAGES_ENABLED", "true")
+	t.Setenv("REMINDER_WHATSAPP_BRIDGE_URL", "http://127.0.0.1:8080")
+
+	err := ValidateStartupConfig("8080")
+	if err == nil || !strings.Contains(err.Error(), "MCP_IDENTITY_SECRET is required when MCP_ENABLED and SCHEDULED_MESSAGES_ENABLED=true") {
+		t.Fatalf("error = %v, want signed identity secret validation", err)
+	}
+}
+
+func TestValidateStartupConfigKeepsLegacyMCPWithoutScheduledMessages(t *testing.T) {
+	clearStartupEnv(t)
+	setRequiredStartupEnv(t)
+	t.Setenv("MCP_ENABLED", "true")
+	t.Setenv("MCP_SERVER_KEY", "server-key")
+	t.Setenv("SCHEDULED_MESSAGES_ENABLED", "false")
+
+	if err := ValidateStartupConfig("8080"); err != nil {
+		t.Fatalf("legacy MCP without scheduled messages should remain valid, got %v", err)
+	}
+}
+
 func setRequiredStartupEnv(t *testing.T) {
 	t.Helper()
 	t.Setenv("JWT_KEY", "test-secret-must-be-at-least-32-bytes")
@@ -196,6 +222,22 @@ func clearStartupEnv(t *testing.T) {
 		"MCP_SERVER_KEY",
 		"MCP_PROFILE_HEADER",
 		"MCP_IDENTITY_SECRET",
+		"SCHEDULED_MESSAGES_ENABLED",
+		"SCHEDULED_MESSAGES_GENERATOR_URL",
+		"SCHEDULED_MESSAGES_GENERATOR_KEY",
+		"SCHEDULED_MESSAGES_GENERATOR_MODEL",
+		"SCHEDULED_MESSAGES_GENERATOR_TIMEOUT",
+		"SCHEDULED_MESSAGES_GENERATOR_MAX_RESPONSE_BYTES",
+		"SCHEDULED_MESSAGES_MAX_OUTPUT_BYTES",
+		"SCHEDULED_MESSAGES_GENERATION_MAX_RETRIES",
+		"SCHEDULED_MESSAGES_GENERATION_RETRY_BACKOFF",
+		"SCHEDULED_MESSAGES_DELIVERY_MAX_RETRIES",
+		"SCHEDULED_MESSAGES_DELIVERY_RETRY_BACKOFF",
+		"SCHEDULED_MESSAGES_LEASE",
+		"SCHEDULED_MESSAGES_BATCH_SIZE",
+		"SCHEDULED_MESSAGES_CONCURRENCY",
+		"SCHEDULED_MESSAGES_MAX_TEXT_BYTES",
+		"SCHEDULED_MESSAGES_MAX_LIST_ROWS",
 		"REMINDER_SCHEDULER_ENABLED",
 		"REMINDER_WHATSAPP_BRIDGE_URL",
 		"REMINDER_SCHEDULER_INTERVAL",

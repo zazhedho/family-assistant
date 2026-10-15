@@ -20,9 +20,15 @@ type ExternalRequest struct {
 }
 
 type externalRequestContextKey struct{}
+type verifiedExternalRequestContextKey struct{}
 
 func WithExternalRequest(ctx context.Context, request ExternalRequest) context.Context {
 	return context.WithValue(ctx, externalRequestContextKey{}, request)
+}
+
+func withVerifiedExternalRequest(ctx context.Context, request ExternalRequest) context.Context {
+	ctx = WithExternalRequest(ctx, request)
+	return context.WithValue(ctx, verifiedExternalRequestContextKey{}, request)
 }
 
 func ExternalRequestFromContext(ctx context.Context) (ExternalRequest, bool) {
@@ -30,6 +36,14 @@ func ExternalRequestFromContext(ctx context.Context) (ExternalRequest, bool) {
 		return ExternalRequest{}, false
 	}
 	request, ok := ctx.Value(externalRequestContextKey{}).(ExternalRequest)
+	return request, ok
+}
+
+func verifiedExternalRequestFromContext(ctx context.Context) (ExternalRequest, bool) {
+	if ctx == nil {
+		return ExternalRequest{}, false
+	}
+	request, ok := ctx.Value(verifiedExternalRequestContextKey{}).(ExternalRequest)
 	return request, ok
 }
 

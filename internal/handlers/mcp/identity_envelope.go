@@ -79,7 +79,7 @@ func toolIdentityContext(ctx context.Context, req *mcpsdk.CallToolRequest) (cont
 	if err != nil {
 		return ctx, err
 	}
-	return WithExternalRequest(ctx, request), nil
+	return withVerifiedExternalRequest(ctx, request), nil
 }
 
 func (v *IdentityVerifier) Verify(req *mcpsdk.CallToolRequest) (ExternalRequest, error) {
