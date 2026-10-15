@@ -34,6 +34,8 @@ linters:
       threshold: 200
     misspell:
       locale: US
+      ignore-rules:
+        - CANCELLED
   exclusions:
     rules:
       - linters:
