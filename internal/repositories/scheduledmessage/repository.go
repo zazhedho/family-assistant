@@ -17,13 +17,15 @@ import (
 )
 
 const (
-	spaceActiveStatus   = "ACTIVE"
-	memberActiveStatus  = "ACTIVE"
-	maxScheduleListRows = 100
-	whatsappChannel     = "whatsapp"
-	groupChatType       = "group"
-	groupChatIdentifier = `^[0-9]*[1-9][0-9]*@g[.]us$`
-	whatsappIdentifier  = `^[0-9]*[1-9][0-9]*@(s[.]whatsapp[.]net|lid)$`
+	spaceActiveStatus    = "ACTIVE"
+	memberActiveStatus   = "ACTIVE"
+	maxScheduleListRows  = 100
+	whatsappChannel      = "whatsapp"
+	groupChatType        = "group"
+	groupChatIdentifier  = `^[0-9]*[1-9][0-9]*@g[.]us$`
+	whatsappIdentifier   = `^[0-9]*[1-9][0-9]*@(s[.]whatsapp[.]net|lid)$`
+	spaceJoin            = "JOIN spaces ON spaces.id = scheduled_messages.space_id"
+	pendingDeliveryWhere = "scheduled_message_id = ? AND status = ?"
 )
 
 var (
@@ -96,7 +98,7 @@ func setCreatedAt(createdAt, updatedAt *time.Time, now time.Time) {
 func (r *Repository) FindByIDInSpace(ctx context.Context, spaceID, scheduleID string) (*domainscheduledmessage.Schedule, error) {
 	var schedule domainscheduledmessage.Schedule
 	err := r.DB.WithContext(ctx).Model(&domainscheduledmessage.Schedule{}).
-		Joins("JOIN spaces ON spaces.id = scheduled_messages.space_id").
+		Joins(spaceJoin).
 		Where("scheduled_messages.space_id = ? AND scheduled_messages.id = ? AND spaces.status = ? AND spaces.deleted_at IS NULL", spaceID, scheduleID, spaceActiveStatus).
 		First(&schedule).Error
 	return &schedule, err
@@ -104,7 +106,7 @@ func (r *Repository) FindByIDInSpace(ctx context.Context, spaceID, scheduleID st
 
 func (r *Repository) List(ctx context.Context, input dto.ScheduledMessageListInput) ([]domainscheduledmessage.Schedule, error) {
 	query := r.DB.WithContext(ctx).Model(&domainscheduledmessage.Schedule{}).
-		Joins("JOIN spaces ON spaces.id = scheduled_messages.space_id").
+		Joins(spaceJoin).
 		Where("scheduled_messages.space_id = ? AND spaces.status = ? AND spaces.deleted_at IS NULL", strings.TrimSpace(input.Space), spaceActiveStatus)
 	if input.ScheduleID != nil {
 		query = query.Where("scheduled_messages.id = ?", strings.TrimSpace(*input.ScheduleID))
@@ -130,17 +132,10 @@ func (r *Repository) ListHistory(ctx context.Context, spaceID, scheduleID string
 	var history []domainscheduledmessage.Delivery
 	err := r.DB.WithContext(ctx).Model(&domainscheduledmessage.Delivery{}).
 		Joins("JOIN scheduled_messages ON scheduled_messages.id = scheduled_message_deliveries.scheduled_message_id").
-		Joins("JOIN spaces ON spaces.id = scheduled_messages.space_id").
+		Joins(spaceJoin).
 		Where("scheduled_messages.space_id = ? AND scheduled_messages.id = ? AND spaces.status = ? AND spaces.deleted_at IS NULL", spaceID, scheduleID, spaceActiveStatus).
-		Order("scheduled_message_deliveries.scheduled_at DESC, scheduled_message_deliveries.id DESC").Limit(boundedHistoryLimit(limit)).Find(&history).Error
+		Order("scheduled_message_deliveries.scheduled_at DESC, scheduled_message_deliveries.id DESC").Limit(boundedScheduleListLimit(limit)).Find(&history).Error
 	return history, err
-}
-
-func boundedHistoryLimit(limit int) int {
-	if limit < 1 || limit > maxScheduleListRows {
-		return maxScheduleListRows
-	}
-	return limit
 }
 
 func (r *Repository) UpdateActive(ctx context.Context, spaceID, scheduleID string, fields dto.ScheduledMessageUpdateInput, next *domainscheduledmessage.Delivery, updatedAt time.Time) ([]string, error) {
@@ -199,7 +194,7 @@ func scheduleUpdates(fields dto.ScheduledMessageUpdateInput, updatedAt time.Time
 func replacePendingOccurrence(tx *gorm.DB, scheduleID string, next *domainscheduledmessage.Delivery, updatedAt time.Time) ([]string, error) {
 	var pending []domainscheduledmessage.Delivery
 	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
-		Where("scheduled_message_id = ? AND status = ?", scheduleID, domainscheduledmessage.DeliveryStatusPending).
+		Where(pendingDeliveryWhere, scheduleID, domainscheduledmessage.DeliveryStatusPending).
 		Order("scheduled_at ASC, id ASC").Find(&pending).Error; err != nil {
 		return nil, err
 	}
@@ -279,7 +274,7 @@ func (r *Repository) transitionTerminal(ctx context.Context, spaceID, scheduleID
 			return err
 		}
 		var deliveries []domainscheduledmessage.Delivery
-		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("scheduled_message_id = ? AND status = ?", schedule.ID, domainscheduledmessage.DeliveryStatusPending).
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where(pendingDeliveryWhere, schedule.ID, domainscheduledmessage.DeliveryStatusPending).
 			Order("scheduled_at ASC, id ASC").Find(&deliveries).Error; err != nil {
 			return err
 		}
@@ -289,7 +284,7 @@ func (r *Repository) transitionTerminal(ctx context.Context, spaceID, scheduleID
 		}
 		if len(deliveries) > 0 {
 			if err := tx.Model(&domainscheduledmessage.Delivery{}).
-				Where("scheduled_message_id = ? AND status = ?", schedule.ID, domainscheduledmessage.DeliveryStatusPending).
+				Where(pendingDeliveryWhere, schedule.ID, domainscheduledmessage.DeliveryStatusPending).
 				Updates(map[string]any{"status": domainscheduledmessage.DeliveryStatusCancelled, "lease_token": nil, "lease_until": nil, "updated_at": at}).Error; err != nil {
 				return err
 			}
@@ -310,7 +305,7 @@ func (r *Repository) transitionTerminal(ctx context.Context, spaceID, scheduleID
 func lockSchedule(tx *gorm.DB, spaceID, scheduleID string) (*domainscheduledmessage.Schedule, error) {
 	var schedule domainscheduledmessage.Schedule
 	err := tx.Model(&domainscheduledmessage.Schedule{}).
-		Joins("JOIN spaces ON spaces.id = scheduled_messages.space_id").
+		Joins(spaceJoin).
 		Clauses(clause.Locking{Strength: "UPDATE", Table: clause.Table{Name: "scheduled_messages"}}).
 		Where("scheduled_messages.space_id = ? AND scheduled_messages.id = ? AND scheduled_messages.status = ? AND spaces.status = ? AND spaces.deleted_at IS NULL",
 			spaceID, scheduleID, domainscheduledmessage.ScheduleStatusActive, spaceActiveStatus).

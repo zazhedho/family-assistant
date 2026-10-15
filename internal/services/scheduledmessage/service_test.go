@@ -101,8 +101,8 @@ func (s *scheduledMessageRepoStub) FindByIDInSpace(_ context.Context, spaceID, s
 	if s.found == nil || s.found.SpaceID != spaceID || s.found.ID != scheduleID {
 		return nil, gorm.ErrRecordNotFound
 	}
-	copy := *s.found
-	return &copy, nil
+	cloned := *s.found
+	return &cloned, nil
 }
 
 func (s *scheduledMessageRepoStub) List(_ context.Context, input dto.ScheduledMessageListInput) ([]domainscheduledmessage.Schedule, error) {
@@ -126,9 +126,9 @@ func (s *scheduledMessageRepoStub) UpdateActive(_ context.Context, spaceID, sche
 	s.updatedFields, s.updatedAt, s.updateCalls = fields, at, s.updateCalls+1
 	s.updatedSpaceID, s.updatedScheduleID = spaceID, scheduleID
 	if next != nil {
-		copy := *next
-		s.updatedDelivery = &copy
-		s.setPendingForIndex([]domainscheduledmessage.Delivery{copy})
+		cloned := *next
+		s.updatedDelivery = &cloned
+		s.setPendingForIndex([]domainscheduledmessage.Delivery{cloned})
 	} else {
 		s.setPendingForIndex(nil)
 	}
@@ -167,8 +167,8 @@ func (s *scheduledMessageRepoStub) BindCurrentGroup(_ context.Context, spaceID, 
 	if s.bound == nil {
 		return &domainscheduledmessage.SpaceChannel{ID: serviceChannelID, SpaceID: spaceID, Channel: channel, Status: domainscheduledmessage.SpaceChannelStatusActive, BoundByMemberID: memberID}, nil
 	}
-	copy := *s.bound
-	return &copy, nil
+	cloned := *s.bound
+	return &cloned, nil
 }
 
 func (s *scheduledMessageRepoStub) ListTargets(context.Context, string) ([]dto.ScheduledMessageTargetOutput, error) {
@@ -925,32 +925,36 @@ func TestUpdateUsesConfiguredTextLimit(t *testing.T) {
 		{name: "configured larger limit", maxBytes: 4096, content: strings.Repeat("x", 3000)},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			anchor := pastRecurringAnchor(t)
-			repo := &scheduledMessageRepoStub{found: recurringScheduleFixture(serviceCreatorID, anchor, anchor.AddDate(0, 0, 7))}
-			spaces := &scheduledMessageSpaceRepoStub{members: []domainspace.ResolvedMembership{
-				scheduledMessageMember(serviceSpaceID, serviceCreatorID, "user-creator", "Sam", "space_member", domainspace.StatusActive),
-			}}
-			service := newTestScheduledMessageService(repo, spaces, nil, nil, nil, ScheduledMessageServiceOptions{MaxTextBytes: test.maxBytes})
-			actor := scheduledMessageActor(serviceSpaceID, serviceCreatorID, "user-creator", "space_member", "scheduled_messages:update")
-
-			_, err := service.Update(context.Background(), actor, serviceSpaceID, serviceScheduleID, dto.ScheduledMessageUpdateInput{Content: &test.content})
-			if test.wantError {
-				var validation *authorization.ValidationError
-				if !errors.As(err, &validation) || validation.Field != "content" {
-					t.Fatalf("update over configured text limit error = %v, want content validation", err)
-				}
-				if repo.updateCalls != 0 {
-					t.Fatal("updated a schedule with content over the configured limit")
-				}
-				return
-			}
-			if err != nil {
-				t.Fatalf("update under configured text limit: %v", err)
-			}
-			if repo.updateCalls != 1 || repo.updatedFields.Content == nil || *repo.updatedFields.Content != test.content {
-				t.Fatalf("update fields = %+v after %d calls, want configured content persisted", repo.updatedFields, repo.updateCalls)
-			}
+			runUpdateTextLimitCase(t, test.maxBytes, test.content, test.wantError)
 		})
+	}
+}
+
+func runUpdateTextLimitCase(t *testing.T, maxBytes int, content string, wantError bool) {
+	t.Helper()
+	anchor := pastRecurringAnchor(t)
+	repo := &scheduledMessageRepoStub{found: recurringScheduleFixture(serviceCreatorID, anchor, anchor.AddDate(0, 0, 7))}
+	spaces := &scheduledMessageSpaceRepoStub{members: []domainspace.ResolvedMembership{
+		scheduledMessageMember(serviceSpaceID, serviceCreatorID, "user-creator", "Sam", "space_member", domainspace.StatusActive),
+	}}
+	service := newTestScheduledMessageService(repo, spaces, nil, nil, nil, ScheduledMessageServiceOptions{MaxTextBytes: maxBytes})
+	actor := scheduledMessageActor(serviceSpaceID, serviceCreatorID, "user-creator", "space_member", "scheduled_messages:update")
+	_, err := service.Update(context.Background(), actor, serviceSpaceID, serviceScheduleID, dto.ScheduledMessageUpdateInput{Content: &content})
+	if wantError {
+		var validation *authorization.ValidationError
+		if !errors.As(err, &validation) || validation.Field != "content" {
+			t.Fatalf("update over configured text limit error = %v, want content validation", err)
+		}
+		if repo.updateCalls != 0 {
+			t.Fatal("updated a schedule with content over the configured limit")
+		}
+		return
+	}
+	if err != nil {
+		t.Fatalf("update under configured text limit: %v", err)
+	}
+	if repo.updateCalls != 1 || repo.updatedFields.Content == nil || *repo.updatedFields.Content != content {
+		t.Fatalf("update fields = %+v after %d calls, want configured content persisted", repo.updatedFields, repo.updateCalls)
 	}
 }
 
@@ -1032,119 +1036,82 @@ func TestTargetedListReturnsAtMostOneHundredHistoryRowsWithoutLease(t *testing.T
 	}
 }
 
-func TestCanonicalResourceActionPermissionsAuthorizeScheduledMessageService(t *testing.T) {
-	tests := []struct {
-		name     string
-		resource string
-		action   string
-		memberID string
-		role     string
-		prepare  func(*scheduledMessageRepoStub)
-		call     func(*testing.T, interfacescheduledmessage.Service, domainidentity.ActorContext)
-	}{
-		{
-			name: "create and targets", resource: "scheduled_messages", action: "create",
-			memberID: serviceCreatorID, role: "space_owner",
-			prepare: func(repo *scheduledMessageRepoStub) {
-				repo.targets = []dto.ScheduledMessageTargetOutput{{Kind: domainscheduledmessage.TargetDM, MemberID: stringPointer(serviceRecipientID)}}
-			},
-			call: func(t *testing.T, service interfacescheduledmessage.Service, actor domainidentity.ActorContext) {
-				t.Helper()
-				if _, err := service.Targets(context.Background(), actor, serviceSpaceID); err != nil {
-					t.Fatalf("Targets() with canonical scheduled_messages:create permission: %v", err)
-				}
-				if _, err := service.Create(context.Background(), actor, validCreateInput()); err != nil {
-					t.Fatalf("Create() with canonical scheduled_messages:create permission: %v", err)
-				}
-			},
-		},
-		{
-			name: "list", resource: "scheduled_messages", action: "list",
-			memberID: serviceCreatorID, role: "space_owner",
-			call: func(t *testing.T, service interfacescheduledmessage.Service, actor domainidentity.ActorContext) {
-				t.Helper()
-				if _, err := service.List(context.Background(), actor, dto.ScheduledMessageListInput{Space: serviceSpaceID}); err != nil {
-					t.Fatalf("List() with canonical scheduled_messages:list permission: %v", err)
-				}
-			},
-		},
-		{
-			name: "view", resource: "scheduled_messages", action: "view",
-			memberID: serviceCreatorID, role: "space_owner",
-			prepare: func(repo *scheduledMessageRepoStub) {
-				repo.listed = []domainscheduledmessage.Schedule{{ID: serviceScheduleID, SpaceID: serviceSpaceID, CreatedByMemberID: serviceCreatorID, Target: domainscheduledmessage.TargetDM, RecipientMemberID: stringPointer(serviceRecipientID)}}
-			},
-			call: func(t *testing.T, service interfacescheduledmessage.Service, actor domainidentity.ActorContext) {
-				t.Helper()
-				if _, err := service.List(context.Background(), actor, dto.ScheduledMessageListInput{Space: serviceSpaceID, ScheduleID: stringPointer(serviceScheduleID)}); err != nil {
-					t.Fatalf("targeted List() with canonical scheduled_messages:view permission: %v", err)
-				}
-			},
-		},
-		{
-			name: "update", resource: "scheduled_messages", action: "update",
-			memberID: serviceCreatorID, role: "space_owner",
-			prepare: func(repo *scheduledMessageRepoStub) { repo.found = canonicalPermissionSchedule() },
-			call: func(t *testing.T, service interfacescheduledmessage.Service, actor domainidentity.ActorContext) {
-				t.Helper()
-				if _, err := service.Update(context.Background(), actor, serviceSpaceID, serviceScheduleID, dto.ScheduledMessageUpdateInput{Content: stringPointer("updated")}); err != nil {
-					t.Fatalf("Update() with canonical scheduled_messages:update permission: %v", err)
-				}
-			},
-		},
-		{
-			name: "cancel", resource: "scheduled_messages", action: "delete",
-			memberID: serviceCreatorID, role: "space_owner",
-			prepare: func(repo *scheduledMessageRepoStub) { repo.found = canonicalPermissionSchedule() },
-			call: func(t *testing.T, service interfacescheduledmessage.Service, actor domainidentity.ActorContext) {
-				t.Helper()
-				if _, err := service.Cancel(context.Background(), actor, serviceSpaceID, serviceScheduleID); err != nil {
-					t.Fatalf("Cancel() with canonical scheduled_messages:delete permission: %v", err)
-				}
-			},
-		},
-		{
-			name: "unsubscribe", resource: "scheduled_messages", action: "unsubscribe",
-			memberID: serviceRecipientID, role: "space_member",
-			prepare: func(repo *scheduledMessageRepoStub) { repo.found = canonicalPermissionSchedule() },
-			call: func(t *testing.T, service interfacescheduledmessage.Service, actor domainidentity.ActorContext) {
-				t.Helper()
-				if _, err := service.Unsubscribe(context.Background(), actor, serviceSpaceID, serviceScheduleID); err != nil {
-					t.Fatalf("Unsubscribe() with canonical scheduled_messages:unsubscribe permission: %v", err)
-				}
-			},
-		},
-		{
-			name: "bind group", resource: "space_channels", action: "create",
-			memberID: serviceCreatorID, role: "space_owner",
-			call: func(t *testing.T, service interfacescheduledmessage.Service, actor domainidentity.ActorContext) {
-				t.Helper()
-				input := dto.SpaceChannelBindInput{Space: serviceSpaceID, CurrentChannel: "whatsapp", CurrentChatID: "120363123456@g.us", CurrentChatType: "group"}
-				if _, err := service.BindCurrentGroup(context.Background(), actor, input); err != nil {
-					t.Fatalf("BindCurrentGroup() with canonical space_channels:create permission: %v", err)
-				}
-			},
-		},
-	}
+type canonicalPermissionCase struct {
+	name     string
+	resource string
+	action   string
+	memberID string
+	role     string
+}
 
+func TestCanonicalResourceActionPermissionsAuthorizeScheduledMessageService(t *testing.T) {
+	tests := []canonicalPermissionCase{
+		{name: "create and targets", resource: "scheduled_messages", action: "create", memberID: serviceCreatorID, role: "space_owner"},
+		{name: "list", resource: "scheduled_messages", action: "list", memberID: serviceCreatorID, role: "space_owner"},
+		{name: "view", resource: "scheduled_messages", action: "view", memberID: serviceCreatorID, role: "space_owner"},
+		{name: "update", resource: "scheduled_messages", action: "update", memberID: serviceCreatorID, role: "space_owner"},
+		{name: "cancel", resource: "scheduled_messages", action: "delete", memberID: serviceCreatorID, role: "space_owner"},
+		{name: "unsubscribe", resource: "scheduled_messages", action: "unsubscribe", memberID: serviceRecipientID, role: "space_member"},
+		{name: "bind group", resource: "space_channels", action: "create", memberID: serviceCreatorID, role: "space_owner"},
+	}
 	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			repo := &scheduledMessageRepoStub{}
-			if test.prepare != nil {
-				test.prepare(repo)
-			}
-			spaces := &scheduledMessageSpaceRepoStub{members: []domainspace.ResolvedMembership{
-				scheduledMessageMember(serviceSpaceID, serviceCreatorID, "user-creator", "Sam", "space_owner", domainspace.StatusActive),
-				scheduledMessageMember(serviceSpaceID, serviceRecipientID, "user-recipient", "Alex", "space_member", domainspace.StatusActive),
-			}}
-			service := newTestScheduledMessageService(repo, spaces, nil, nil, nil)
-			permission := authscope.PermissionKey(test.resource, test.action)
-			actor := scheduledMessageActor(serviceSpaceID, test.memberID, "user-creator", test.role, permission)
-			if test.memberID == serviceRecipientID {
-				actor.UserID = "user-recipient"
-			}
-			test.call(t, service, actor)
-		})
+		t.Run(test.name, func(t *testing.T) { runCanonicalPermissionCase(t, test) })
+	}
+}
+
+func runCanonicalPermissionCase(t *testing.T, test canonicalPermissionCase) {
+	t.Helper()
+	repo := &scheduledMessageRepoStub{}
+	prepareCanonicalPermissionCase(repo, test.name)
+	spaces := &scheduledMessageSpaceRepoStub{members: []domainspace.ResolvedMembership{
+		scheduledMessageMember(serviceSpaceID, serviceCreatorID, "user-creator", "Sam", "space_owner", domainspace.StatusActive),
+		scheduledMessageMember(serviceSpaceID, serviceRecipientID, "user-recipient", "Alex", "space_member", domainspace.StatusActive),
+	}}
+	service := newTestScheduledMessageService(repo, spaces, nil, nil, nil)
+	permission := authscope.PermissionKey(test.resource, test.action)
+	actor := scheduledMessageActor(serviceSpaceID, test.memberID, "user-creator", test.role, permission)
+	if test.memberID == serviceRecipientID {
+		actor.UserID = "user-recipient"
+	}
+	runCanonicalPermissionCall(t, test, service, actor)
+}
+
+func prepareCanonicalPermissionCase(repo *scheduledMessageRepoStub, name string) {
+	switch name {
+	case "create and targets":
+		repo.targets = []dto.ScheduledMessageTargetOutput{{Kind: domainscheduledmessage.TargetDM, MemberID: stringPointer(serviceRecipientID)}}
+	case "view":
+		repo.listed = []domainscheduledmessage.Schedule{{ID: serviceScheduleID, SpaceID: serviceSpaceID, CreatedByMemberID: serviceCreatorID, Target: domainscheduledmessage.TargetDM, RecipientMemberID: stringPointer(serviceRecipientID)}}
+	case "update", "cancel", "unsubscribe":
+		repo.found = canonicalPermissionSchedule()
+	}
+}
+
+func runCanonicalPermissionCall(t *testing.T, test canonicalPermissionCase, service interfacescheduledmessage.Service, actor domainidentity.ActorContext) {
+	t.Helper()
+	var err error
+	switch test.name {
+	case "create and targets":
+		_, err = service.Targets(context.Background(), actor, serviceSpaceID)
+		if err == nil {
+			_, err = service.Create(context.Background(), actor, validCreateInput())
+		}
+	case "list":
+		_, err = service.List(context.Background(), actor, dto.ScheduledMessageListInput{Space: serviceSpaceID})
+	case "view":
+		_, err = service.List(context.Background(), actor, dto.ScheduledMessageListInput{Space: serviceSpaceID, ScheduleID: stringPointer(serviceScheduleID)})
+	case "update":
+		_, err = service.Update(context.Background(), actor, serviceSpaceID, serviceScheduleID, dto.ScheduledMessageUpdateInput{Content: stringPointer("updated")})
+	case "cancel":
+		_, err = service.Cancel(context.Background(), actor, serviceSpaceID, serviceScheduleID)
+	case "unsubscribe":
+		_, err = service.Unsubscribe(context.Background(), actor, serviceSpaceID, serviceScheduleID)
+	case "bind group":
+		input := dto.SpaceChannelBindInput{Space: serviceSpaceID, CurrentChannel: "whatsapp", CurrentChatID: "120363123456@g.us", CurrentChatType: "group"}
+		_, err = service.BindCurrentGroup(context.Background(), actor, input)
+	}
+	if err != nil {
+		t.Fatalf("%s with canonical %s:%s permission: %v", test.name, test.resource, test.action, err)
 	}
 }
 

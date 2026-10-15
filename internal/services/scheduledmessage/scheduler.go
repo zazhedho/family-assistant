@@ -236,19 +236,15 @@ func (s *ScheduledMessageScheduler) process(ctx context.Context, claimed *domain
 	if schedule == nil || delivery == nil {
 		return errScheduledMessageState
 	}
-	content := ""
-	if delivery.ContentSnapshot != nil {
-		content = *delivery.ContentSnapshot
-	} else if schedule.ContentMode == domainscheduledmessage.ContentModeFixed {
-		content = schedule.Content
-	} else if schedule.ContentMode == domainscheduledmessage.ContentModeAI {
-		content, schedule, delivery, err = s.generateContent(ctx, schedule, delivery, recipientName)
-		if err != nil || content == "" {
-			return err
-		}
+	content, schedule, delivery, shouldDispatch, err := s.contentForDelivery(ctx, schedule, delivery, recipientName)
+	if err != nil {
+		return err
 	}
-	if ctx.Err() != nil {
-		return ctx.Err()
+	if !shouldDispatch {
+		return nil
+	}
+	if err := ctx.Err(); err != nil {
+		return err
 	}
 	contentLimit := s.config.MaxOutputBytes
 	if schedule.ContentMode == domainscheduledmessage.ContentModeFixed {
@@ -260,6 +256,29 @@ func (s *ScheduledMessageScheduler) process(ctx context.Context, claimed *domain
 	return s.dispatch(ctx, schedule, delivery, content)
 }
 
+func (s *ScheduledMessageScheduler) contentForDelivery(
+	ctx context.Context,
+	schedule *domainscheduledmessage.Schedule,
+	delivery *domainscheduledmessage.Delivery,
+	recipientName string,
+) (string, *domainscheduledmessage.Schedule, *domainscheduledmessage.Delivery, bool, error) {
+	content := ""
+	if delivery.ContentSnapshot != nil {
+		content = *delivery.ContentSnapshot
+		return content, schedule, delivery, true, nil
+	} else if schedule.ContentMode == domainscheduledmessage.ContentModeFixed {
+		content = schedule.Content
+		return content, schedule, delivery, true, nil
+	} else if schedule.ContentMode == domainscheduledmessage.ContentModeAI {
+		content, schedule, delivery, err := s.generateContent(ctx, schedule, delivery, recipientName)
+		if err != nil || content == "" {
+			return content, schedule, delivery, false, err
+		}
+		return content, schedule, delivery, true, nil
+	}
+	return content, schedule, delivery, true, nil
+}
+
 func (s *ScheduledMessageScheduler) generateContent(
 	ctx context.Context,
 	schedule *domainscheduledmessage.Schedule,
@@ -269,25 +288,9 @@ func (s *ScheduledMessageScheduler) generateContent(
 	if s.generator == nil {
 		return "", schedule, delivery, s.finishGenerationFailure(ctx, schedule, delivery, "generation_unavailable")
 	}
-	recent, err := s.repository.ListGeneratedHistory(ctx, schedule.SpaceID, schedule.ID, maxGeneratedHistory)
-	if err != nil {
-		return "", schedule, delivery, errScheduledMessageState
-	}
-	if len(recent) > maxGeneratedHistory {
-		recent = recent[len(recent)-maxGeneratedHistory:]
-	}
-	reservedAt := s.now()
-	if err := s.repository.ReserveGenerationAttempt(ctx, delivery, reservedAt, s.config.GenerationMaxRetries+1); err != nil {
-		if errors.Is(err, interfacescheduledmessage.ErrClaimConflict) {
-			return "", schedule, delivery, err
-		}
-		if errors.Is(err, interfacescheduledmessage.ErrAttemptLimitReached) {
-			return "", schedule, delivery, s.finishGenerationFailure(ctx, schedule, delivery, generationFailure)
-		}
-		return "", schedule, delivery, errScheduledMessageState
-	}
-	if !leaseCovers(delivery, s.now(), s.config.GeneratorTimeout) {
-		return "", schedule, delivery, nil
+	recent, ready, err := s.prepareGeneration(ctx, schedule, delivery)
+	if err != nil || !ready {
+		return "", schedule, delivery, err
 	}
 	input := dto.ScheduledMessageGenerationInput{
 		Theme: schedule.Content, RecipientName: strings.TrimSpace(recipientName),
@@ -296,13 +299,49 @@ func (s *ScheduledMessageScheduler) generateContent(
 	callCtx, cancel := context.WithTimeout(ctx, s.config.GeneratorTimeout)
 	generated, generationErr := s.generator.Generate(callCtx, input)
 	cancel()
-	if ctx.Err() != nil {
-		return "", schedule, delivery, ctx.Err()
+	if err := ctx.Err(); err != nil {
+		return "", schedule, delivery, err
 	}
 	generated = strings.TrimSpace(generated)
 	if generationErr != nil || generated == "" || len(generated) > s.config.MaxOutputBytes {
 		return "", schedule, delivery, s.retryOrFinish(ctx, schedule, delivery, true)
 	}
+	return s.persistGeneratedContent(ctx, schedule, delivery, generated)
+}
+
+func (s *ScheduledMessageScheduler) prepareGeneration(
+	ctx context.Context,
+	schedule *domainscheduledmessage.Schedule,
+	delivery *domainscheduledmessage.Delivery,
+) ([]string, bool, error) {
+	recent, err := s.repository.ListGeneratedHistory(ctx, schedule.SpaceID, schedule.ID, maxGeneratedHistory)
+	if err != nil {
+		return nil, false, errScheduledMessageState
+	}
+	if len(recent) > maxGeneratedHistory {
+		recent = recent[len(recent)-maxGeneratedHistory:]
+	}
+	if err := s.repository.ReserveGenerationAttempt(ctx, delivery, s.now(), s.config.GenerationMaxRetries+1); err != nil {
+		if errors.Is(err, interfacescheduledmessage.ErrClaimConflict) {
+			return nil, false, err
+		}
+		if errors.Is(err, interfacescheduledmessage.ErrAttemptLimitReached) {
+			return nil, false, s.finishGenerationFailure(ctx, schedule, delivery, generationFailure)
+		}
+		return nil, false, errScheduledMessageState
+	}
+	if !leaseCovers(delivery, s.now(), s.config.GeneratorTimeout) {
+		return recent, false, nil
+	}
+	return recent, true, nil
+}
+
+func (s *ScheduledMessageScheduler) persistGeneratedContent(
+	ctx context.Context,
+	schedule *domainscheduledmessage.Schedule,
+	delivery *domainscheduledmessage.Delivery,
+	generated string,
+) (string, *domainscheduledmessage.Schedule, *domainscheduledmessage.Delivery, error) {
 	currentSchedule, currentDelivery, _, _, _, loadErr := s.repository.LoadClaimed(ctx, delivery.ID, pointerStringValue(delivery.LeaseToken), s.now())
 	if errors.Is(loadErr, interfacescheduledmessage.ErrClaimConflict) {
 		return "", schedule, delivery, loadErr
@@ -568,7 +607,9 @@ func (s *ScheduledMessageScheduler) syncFinalIndex(ctx context.Context, delivery
 
 func (s *ScheduledMessageScheduler) beginIndexMutation() func(error) {
 	if s.index == nil {
-		return func(error) {}
+		return func(error) {
+			// No index means there is no lifecycle mutation to finish.
+		}
 	}
 	s.index.BeginLifecycleMutation()
 	return s.index.FinishLifecycleMutation

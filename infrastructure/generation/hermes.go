@@ -56,6 +56,18 @@ func (g *HermesGenerator) Generate(ctx context.Context, input dto.ScheduledMessa
 	if g == nil || g.client == nil {
 		return "", errors.New("hermes generator is not configured")
 	}
+	userContent, err := g.userContent(input)
+	if err != nil {
+		return "", err
+	}
+	response, err := g.sendRequest(ctx, userContent)
+	if err != nil {
+		return "", err
+	}
+	return g.readCompletion(response)
+}
+
+func (g *HermesGenerator) userContent(input dto.ScheduledMessageGenerationInput) (string, error) {
 	theme := strings.TrimSpace(input.Theme)
 	if theme == "" || len(theme) > g.maxTextBytes {
 		return "", errors.New("scheduled message theme is empty or exceeds its configured limit")
@@ -86,7 +98,10 @@ func (g *HermesGenerator) Generate(ctx context.Context, input dto.ScheduledMessa
 			userContent += "\n- " + message
 		}
 	}
+	return userContent, nil
+}
 
+func (g *HermesGenerator) sendRequest(ctx context.Context, userContent string) (*http.Response, error) {
 	body, err := json.Marshal(struct {
 		Model    string          `json:"model"`
 		Messages []hermesMessage `json:"messages"`
@@ -100,19 +115,23 @@ func (g *HermesGenerator) Generate(ctx context.Context, input dto.ScheduledMessa
 		Stream: false,
 	})
 	if err != nil {
-		return "", errors.New("hermes request could not be encoded")
+		return nil, errors.New("hermes request could not be encoded")
 	}
 	request, err := http.NewRequestWithContext(ctx, http.MethodPost, g.endpoint, strings.NewReader(string(body)))
 	if err != nil {
-		return "", errors.New("hermes request could not be created")
+		return nil, errors.New("hermes request could not be created")
 	}
 	request.Header.Set("Authorization", "Bearer "+g.key)
 	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set("Accept", "application/json")
 	response, err := g.client.Do(request)
 	if err != nil {
-		return "", errors.New("hermes request failed")
+		return nil, errors.New("hermes request failed")
 	}
+	return response, nil
+}
+
+func (g *HermesGenerator) readCompletion(response *http.Response) (string, error) {
 	responseBody, readErr := io.ReadAll(io.LimitReader(response.Body, int64(g.maxResponseSize)+1))
 	closeErr := response.Body.Close()
 	if readErr != nil || closeErr != nil {

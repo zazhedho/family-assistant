@@ -20,13 +20,14 @@ import (
 const (
 	scheduledMessagesResource = "scheduled_messages"
 	scheduledMessagesCreate   = "create"
+	claimedDeliveryLeaseWhere = "id = ? AND status = ? AND lease_token = ? AND lease_until = ? AND lease_until > ?"
 )
 
 func (r *Repository) ListPendingForIndex(ctx context.Context) ([]domainscheduledmessage.Delivery, error) {
 	var deliveries []domainscheduledmessage.Delivery
 	err := r.DB.WithContext(ctx).Model(&domainscheduledmessage.Delivery{}).
 		Joins("JOIN scheduled_messages ON scheduled_messages.id = scheduled_message_deliveries.scheduled_message_id").
-		Joins("JOIN spaces ON spaces.id = scheduled_messages.space_id").
+		Joins(spaceJoin).
 		Where("scheduled_message_deliveries.status = ? AND scheduled_messages.status = ? AND spaces.status = ? AND spaces.deleted_at IS NULL",
 			domainscheduledmessage.DeliveryStatusPending, domainscheduledmessage.ScheduleStatusActive, spaceActiveStatus).
 		Order("scheduled_message_deliveries.next_attempt_at ASC, scheduled_message_deliveries.id ASC").Find(&deliveries).Error
@@ -245,7 +246,7 @@ func (r *Repository) PersistGeneratedContent(ctx context.Context, delivery *doma
 			return err
 		}
 		result := tx.Model(&domainscheduledmessage.Delivery{}).
-			Where("id = ? AND status = ? AND lease_token = ? AND lease_until = ? AND lease_until > ?", delivery.ID, domainscheduledmessage.DeliveryStatusPending, *delivery.LeaseToken, *delivery.LeaseExpiresAt, updatedAt).
+			Where(claimedDeliveryLeaseWhere, delivery.ID, domainscheduledmessage.DeliveryStatusPending, *delivery.LeaseToken, *delivery.LeaseExpiresAt, updatedAt).
 			Updates(map[string]any{"content_snapshot": content, "updated_at": updatedAt})
 		if result.Error != nil {
 			return result.Error
@@ -338,7 +339,7 @@ func hasLease(delivery *domainscheduledmessage.Delivery) bool {
 func lockScheduleByID(tx *gorm.DB, scheduleID string) (*domainscheduledmessage.Schedule, error) {
 	var schedule domainscheduledmessage.Schedule
 	err := tx.Model(&domainscheduledmessage.Schedule{}).
-		Joins("JOIN spaces ON spaces.id = scheduled_messages.space_id").
+		Joins(spaceJoin).
 		Clauses(clause.Locking{Strength: "UPDATE", Table: clause.Table{Name: "scheduled_messages"}}).
 		Where("scheduled_messages.id = ? AND scheduled_messages.status = ? AND spaces.status = ? AND spaces.deleted_at IS NULL", scheduleID, domainscheduledmessage.ScheduleStatusActive, spaceActiveStatus).
 		First(&schedule).Error
@@ -387,7 +388,7 @@ func updateRetryDelivery(tx *gorm.DB, delivery *domainscheduledmessage.Delivery)
 		"failure_category": delivery.FailureCategory, "updated_at": delivery.UpdatedAt,
 	}
 	result := tx.Model(&domainscheduledmessage.Delivery{}).
-		Where("id = ? AND status = ? AND lease_token = ? AND lease_until = ? AND lease_until > ?", delivery.ID, domainscheduledmessage.DeliveryStatusPending, *delivery.LeaseToken, *delivery.LeaseExpiresAt, delivery.UpdatedAt).
+		Where(claimedDeliveryLeaseWhere, delivery.ID, domainscheduledmessage.DeliveryStatusPending, *delivery.LeaseToken, *delivery.LeaseExpiresAt, delivery.UpdatedAt).
 		Updates(updates)
 	if result.Error != nil {
 		return result.Error
@@ -431,7 +432,7 @@ func (r *Repository) FinalizeOccurrence(ctx context.Context, delivery *domainsch
 
 func updateFinalDelivery(tx *gorm.DB, delivery *domainscheduledmessage.Delivery) error {
 	result := tx.Model(&domainscheduledmessage.Delivery{}).
-		Where("id = ? AND status = ? AND lease_token = ? AND lease_until = ? AND lease_until > ?", delivery.ID, domainscheduledmessage.DeliveryStatusPending, *delivery.LeaseToken, *delivery.LeaseExpiresAt, delivery.UpdatedAt).
+		Where(claimedDeliveryLeaseWhere, delivery.ID, domainscheduledmessage.DeliveryStatusPending, *delivery.LeaseToken, *delivery.LeaseExpiresAt, delivery.UpdatedAt).
 		Updates(map[string]any{
 			"status": delivery.Status, "failure_category": delivery.FailureCategory, "sent_at": delivery.SentAt,
 			"next_attempt_at": delivery.NextAttemptAt, "lease_token": nil, "lease_until": nil, "updated_at": delivery.UpdatedAt,
@@ -546,7 +547,7 @@ func lockScheduleForDelivery(tx *gorm.DB, deliveryID, token string, now time.Tim
 	var schedule domainscheduledmessage.Schedule
 	err := tx.Model(&domainscheduledmessage.Schedule{}).
 		Joins("JOIN scheduled_message_deliveries ON scheduled_message_deliveries.scheduled_message_id = scheduled_messages.id").
-		Joins("JOIN spaces ON spaces.id = scheduled_messages.space_id").
+		Joins(spaceJoin).
 		Clauses(clause.Locking{Strength: "UPDATE", Table: clause.Table{Name: "scheduled_messages"}}).
 		Where("scheduled_message_deliveries.id = ? AND scheduled_message_deliveries.status = ? AND scheduled_message_deliveries.lease_token = ? AND scheduled_message_deliveries.lease_until > ? AND scheduled_messages.status = ? AND spaces.status = ? AND spaces.deleted_at IS NULL AND scheduled_messages.space_id = ?",
 			deliveryID, domainscheduledmessage.DeliveryStatusPending, token, now, domainscheduledmessage.ScheduleStatusActive, spaceActiveStatus, spaceID).

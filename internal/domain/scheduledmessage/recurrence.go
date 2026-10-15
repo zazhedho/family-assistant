@@ -25,14 +25,9 @@ func NextOccurrence(rule Recurrence, start, after time.Time, timezone string) (*
 	if rule == RecurrenceOnce {
 		return nil, nil
 	}
-	var periodDays int64
-	switch rule {
-	case RecurrenceDaily:
-		periodDays = 1
-	case RecurrenceWeekly:
-		periodDays = 7
-	default:
-		return nil, fmt.Errorf("%w: %q", ErrInvalidRecurrence, rule)
+	periodDays, err := recurrencePeriod(rule)
+	if err != nil {
+		return nil, err
 	}
 
 	startLocal := start.In(loc)
@@ -48,33 +43,56 @@ func NextOccurrence(rule Recurrence, start, after time.Time, timezone string) (*
 		}
 	}
 
+	return firstFutureOccurrence(startDate, startLocal, afterLocal, after, loc, periodDays, step)
+}
+
+func recurrencePeriod(rule Recurrence) (int64, error) {
+	switch rule {
+	case RecurrenceDaily:
+		return 1, nil
+	case RecurrenceWeekly:
+		return 7, nil
+	default:
+		return 0, fmt.Errorf("%w: %q", ErrInvalidRecurrence, rule)
+	}
+}
+
+func firstFutureOccurrence(startDate, startLocal, afterLocal, after time.Time, loc *time.Location, periodDays, step int64) (*time.Time, error) {
 	for {
 		date := startDate.AddDate(0, 0, int(step*periodDays))
-		matches := wallTimeMatches(date, startLocal, loc)
-		switch len(matches) {
-		case 0:
-			if sameCivilDate(date, afterLocal) && wallClockPassed(startLocal, afterLocal) {
-				step++
-				continue
-			}
-			return nil, ErrNonexistentLocalTime
-		case 1:
-			if matches[0].After(after) {
-				return &matches[0], nil
-			}
-		case 2:
-			future := false
-			for _, match := range matches {
-				future = future || match.After(after)
-			}
-			if future {
-				return nil, ErrAmbiguousLocalTime
-			}
-		default:
-			return nil, ErrAmbiguousLocalTime
+		next, err := occurrenceOnDate(date, startLocal, afterLocal, after, loc)
+		if err != nil {
+			return nil, err
+		}
+		if next != nil {
+			return next, nil
 		}
 		step++
 	}
+}
+
+func occurrenceOnDate(date, startLocal, afterLocal, after time.Time, loc *time.Location) (*time.Time, error) {
+	matches := wallTimeMatches(date, startLocal, loc)
+	switch len(matches) {
+	case 0:
+		if sameCivilDate(date, afterLocal) && wallClockPassed(startLocal, afterLocal) {
+			return nil, nil
+		}
+		return nil, ErrNonexistentLocalTime
+	case 1:
+		if matches[0].After(after) {
+			return &matches[0], nil
+		}
+	case 2:
+		for _, match := range matches {
+			if match.After(after) {
+				return nil, ErrAmbiguousLocalTime
+			}
+		}
+	default:
+		return nil, ErrAmbiguousLocalTime
+	}
+	return nil, nil
 }
 
 func civilDate(local time.Time) time.Time {
@@ -101,7 +119,7 @@ func wallClockPassed(wall, local time.Time) bool {
 	return local.Nanosecond() >= wall.Nanosecond()
 }
 
-func wallTimeMatches(date time.Time, wall time.Time, loc *time.Location) []time.Time {
+func wallTimeMatches(date, wall time.Time, loc *time.Location) []time.Time {
 	year, month, day := date.Date()
 	wallUTC := time.Date(year, month, day, wall.Hour(), wall.Minute(), wall.Second(), wall.Nanosecond(), time.UTC)
 	offsets := make(map[int]struct{})

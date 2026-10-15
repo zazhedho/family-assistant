@@ -22,62 +22,70 @@ var (
 func (s *service) resolveCreateTarget(ctx context.Context, spaceID string, input dto.ScheduledMessageCreateInput, members []domainspace.ResolvedMembership) (*string, *string, error) {
 	switch input.Target {
 	case domainscheduledmessage.TargetDM:
-		if input.RecipientMemberID == nil || input.SpaceChannelID != nil {
-			return nil, nil, invalid("target", "requires exactly one active recipient")
-		}
-		recipientID, err := parseUUID(*input.RecipientMemberID, "recipient_member_id")
-		if err != nil {
-			return nil, nil, err
-		}
-		if memberByID(members, recipientID) == nil {
-			return nil, nil, authorization.ErrNotFound
-		}
-		targets, err := s.repository.ListTargets(ctx, spaceID)
-		if err != nil {
-			return nil, nil, err
-		}
-		for i := range targets {
-			target := &targets[i]
-			if target.Kind == domainscheduledmessage.TargetDM && target.MemberID != nil && target.SpaceChannelID == nil {
-				targetMemberID, targetIDErr := parseUUID(*target.MemberID, "member_id")
-				if targetIDErr == nil && targetMemberID == recipientID {
-					return &recipientID, nil, nil
-				}
-			}
-		}
-		return nil, nil, interfacescheduledmessage.ErrInvalidWhatsAppIdentity
+		return s.resolveDMCreateTarget(ctx, spaceID, input, members)
 	case domainscheduledmessage.TargetGroup:
-		if input.RecipientMemberID != nil || input.SpaceChannelID == nil {
-			return nil, nil, invalid("target", "requires exactly one active bound group")
-		}
-		channelID, err := parseUUID(*input.SpaceChannelID, "space_channel_id")
-		if err != nil {
-			return nil, nil, err
-		}
-		targets, err := s.repository.ListTargets(ctx, spaceID)
-		if err != nil {
-			return nil, nil, err
-		}
-		for i := range targets {
-			target := &targets[i]
-			if target.Kind == domainscheduledmessage.TargetGroup && target.SpaceChannelID != nil && target.MemberID == nil {
-				targetChannelID, targetIDErr := parseUUID(*target.SpaceChannelID, "space_channel_id")
-				if targetIDErr == nil && targetChannelID == channelID {
-					return nil, &channelID, nil
-				}
-			}
-		}
-		return nil, nil, authorization.ErrNotFound
+		return s.resolveGroupCreateTarget(ctx, spaceID, input)
 	default:
 		return nil, nil, invalid("target", "must be DM or GROUP")
 	}
+}
+
+func (s *service) resolveDMCreateTarget(ctx context.Context, spaceID string, input dto.ScheduledMessageCreateInput, members []domainspace.ResolvedMembership) (*string, *string, error) {
+	if input.RecipientMemberID == nil || input.SpaceChannelID != nil {
+		return nil, nil, invalid("target", "requires exactly one active recipient")
+	}
+	recipientID, err := parseUUID(*input.RecipientMemberID, "recipient_member_id")
+	if err != nil {
+		return nil, nil, err
+	}
+	if memberByID(members, recipientID) == nil {
+		return nil, nil, authorization.ErrNotFound
+	}
+	targets, err := s.repository.ListTargets(ctx, spaceID)
+	if err != nil {
+		return nil, nil, err
+	}
+	for i := range targets {
+		target := &targets[i]
+		if target.Kind == domainscheduledmessage.TargetDM && target.MemberID != nil && target.SpaceChannelID == nil {
+			targetMemberID, targetIDErr := parseUUID(*target.MemberID, "member_id")
+			if targetIDErr == nil && targetMemberID == recipientID {
+				return &recipientID, nil, nil
+			}
+		}
+	}
+	return nil, nil, interfacescheduledmessage.ErrInvalidWhatsAppIdentity
+}
+
+func (s *service) resolveGroupCreateTarget(ctx context.Context, spaceID string, input dto.ScheduledMessageCreateInput) (*string, *string, error) {
+	if input.RecipientMemberID != nil || input.SpaceChannelID == nil {
+		return nil, nil, invalid("target", "requires exactly one active bound group")
+	}
+	channelID, err := parseUUID(*input.SpaceChannelID, "space_channel_id")
+	if err != nil {
+		return nil, nil, err
+	}
+	targets, err := s.repository.ListTargets(ctx, spaceID)
+	if err != nil {
+		return nil, nil, err
+	}
+	for i := range targets {
+		target := &targets[i]
+		if target.Kind == domainscheduledmessage.TargetGroup && target.SpaceChannelID != nil && target.MemberID == nil {
+			targetChannelID, targetIDErr := parseUUID(*target.SpaceChannelID, "space_channel_id")
+			if targetIDErr == nil && targetChannelID == channelID {
+				return nil, &channelID, nil
+			}
+		}
+	}
+	return nil, nil, authorization.ErrNotFound
 }
 
 func (s *service) Targets(ctx context.Context, actor domainidentity.ActorContext, rawSpaceID string) (result []dto.ScheduledMessageTargetOutput, err error) {
 	spaceID := strings.TrimSpace(actor.SpaceID)
 	defer func() {
 		if err != nil {
-			event := s.auditEvent(ctx, actor, "targets", spaceID, "", actor.MemberID, domainaudit.StatusFailed, nil)
+			event := s.auditEvent(ctx, actor, "targets", scheduledMessageAuditScope{spaceID: spaceID, ownerID: actor.MemberID}, domainaudit.StatusFailed, nil)
 			event.ErrorMessage = failureCategory(err)
 			s.writeAudit(ctx, event)
 		}
@@ -120,7 +128,7 @@ func (s *service) Targets(ctx context.Context, actor domainidentity.ActorContext
 			return nil, invalid("target", "repository returned an unknown target kind")
 		}
 	}
-	s.writeAudit(ctx, s.auditEvent(ctx, actor, "targets", spaceID, "", actorMember.ID, domainaudit.StatusSuccess, nil))
+	s.writeAudit(ctx, s.auditEvent(ctx, actor, "targets", scheduledMessageAuditScope{spaceID: spaceID, ownerID: actorMember.ID}, domainaudit.StatusSuccess, nil))
 	return result, nil
 }
 
@@ -128,7 +136,7 @@ func (s *service) BindCurrentGroup(ctx context.Context, actor domainidentity.Act
 	spaceID := strings.TrimSpace(actor.SpaceID)
 	defer func() {
 		if err != nil {
-			event := s.auditEvent(ctx, actor, "bind", spaceID, "", actor.MemberID, domainaudit.StatusFailed, nil)
+			event := s.auditEvent(ctx, actor, "bind", scheduledMessageAuditScope{spaceID: spaceID, ownerID: actor.MemberID}, domainaudit.StatusFailed, nil)
 			event.ErrorMessage = failureCategory(err)
 			s.writeAudit(ctx, event)
 		}
@@ -161,6 +169,6 @@ func (s *service) BindCurrentGroup(ctx context.Context, actor domainidentity.Act
 	if bound == nil || bound.SpaceID != spaceID || bound.Channel != channel || bound.BoundByMemberID != actorMember.ID {
 		return nil, authorization.ErrNotFound
 	}
-	s.writeAudit(ctx, s.auditEvent(ctx, actor, "bind", spaceID, bound.ID, actorMember.ID, domainaudit.StatusSuccess, map[string]any{"target": domainscheduledmessage.TargetGroup, "status": bound.Status}))
+	s.writeAudit(ctx, s.auditEvent(ctx, actor, "bind", scheduledMessageAuditScope{spaceID: spaceID, resourceID: bound.ID, ownerID: actorMember.ID}, domainaudit.StatusSuccess, map[string]any{"target": domainscheduledmessage.TargetGroup, "status": bound.Status}))
 	return bound, nil
 }

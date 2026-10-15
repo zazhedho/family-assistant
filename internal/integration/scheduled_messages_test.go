@@ -38,8 +38,8 @@ import (
 	"family-assistant/utils"
 
 	"github.com/golang-migrate/migrate/v4"
-	_ "github.com/golang-migrate/migrate/v4/database/postgres"
-	_ "github.com/golang-migrate/migrate/v4/source/file"
+	_ "github.com/golang-migrate/migrate/v4/database/postgres" // register the PostgreSQL migration driver
+	_ "github.com/golang-migrate/migrate/v4/source/file"       // register the file migration source
 	gormpostgres "gorm.io/driver/postgres"
 	"gorm.io/gorm"
 )
@@ -61,7 +61,11 @@ func TestScheduledMessagesRealPostgresIntegration(t *testing.T) {
 	scheduledMessageActor(t, ctx, identities, permissions, fixture, "Outsider", fixture.personalSpaceIDs["Outsider"])
 
 	sender := &recordingScheduledMessageSender{}
-	legacyReminderID := exerciseLegacyReminderLane(t, ctx, db, spaces, identities, audits, daddy, fixture, sender, "before-migration-12")
+	legacyLane := legacyReminderLaneContext{
+		ctx: ctx, db: db, spaces: spaces, identities: identities, audits: audits,
+		actor: daddy, fixture: fixture, sender: sender,
+	}
+	legacyReminderID := exerciseLegacyReminderLane(t, legacyLane, "before-migration-12")
 	assertPopulatedLegacyFixture(t, db, fixture, legacyReminderID)
 
 	if err := migration.Steps(1); err != nil {
@@ -69,20 +73,20 @@ func TestScheduledMessagesRealPostgresIntegration(t *testing.T) {
 	}
 	assertPopulatedLegacyFixture(t, db, fixture, legacyReminderID)
 	assertScheduledMessageMigrationObjects(t, db, true)
-	exerciseLegacyReminderLane(t, ctx, db, spaces, identities, audits, daddy, fixture, sender, "after-migration-12")
+	exerciseLegacyReminderLane(t, legacyLane, "after-migration-12")
 
 	if err := migration.Steps(-1); err != nil {
 		t.Fatalf("roll back migration 12 in disposable schema: %v", err)
 	}
 	assertScheduledMessageMigrationObjects(t, db, false)
 	assertPopulatedLegacyFixture(t, db, fixture, legacyReminderID)
-	exerciseLegacyReminderLane(t, ctx, db, spaces, identities, audits, daddy, fixture, sender, "after-migration-12-down")
+	exerciseLegacyReminderLane(t, legacyLane, "after-migration-12-down")
 	if err := migration.Steps(1); err != nil {
 		t.Fatalf("reapply migration 12 in disposable schema: %v", err)
 	}
 	assertScheduledMessageMigrationObjects(t, db, true)
 	assertPopulatedLegacyFixture(t, db, fixture, legacyReminderID)
-	exerciseLegacyReminderLane(t, ctx, db, spaces, identities, audits, daddy, fixture, sender, "after-migration-12-reup")
+	exerciseLegacyReminderLane(t, legacyLane, "after-migration-12-reup")
 	assertScheduledMessageDeliveryRetryTimeConstraint(t, db, fixture)
 
 	permissions = servicepermission.NewPermissionService(permissionrepo.NewPermissionRepo(db))
@@ -96,15 +100,21 @@ func TestScheduledMessagesRealPostgresIntegration(t *testing.T) {
 		repository, spaces, authorization.NewAuthorizer(), audits, nil, nil,
 		servicescheduledmessage.ScheduledMessageServiceOptions{MaxTextBytes: 2000, MaxListRows: 100},
 	)
+	testContext := scheduledMessageTestContext{
+		ctx: ctx, db: db, repository: repository, service: service,
+		daddy: daddy, mommy: mommy, member: member, outsider: outsider,
+		fixture: fixture, sender: sender,
+	}
 
 	assertSelectedSpaceAndTargets(t, ctx, service, daddy, mommy, fixture)
-	assertPrivateListVisibility(t, ctx, service, daddy, mommy, member, outsider, fixture)
+	assertPrivateListVisibility(t, testContext)
 	channel := bindIntegrationGroup(t, ctx, service, daddy, fixture.sharedSpaceID)
-	assertGroupCreatorCannotCancel(t, ctx, service, member, mommy, daddy, fixture.sharedSpaceID, channel.ID)
+	testContext.channelID = channel.ID
+	assertGroupCreatorCannotCancel(t, testContext)
 	assertOccurrenceUpdateReusesRows(t, ctx, db, repository, service, daddy, fixture)
 	assertRecipientUnsubscribeIsTerminal(t, ctx, db, service, daddy, member, fixture)
-	assertScheduledDeliveryAndCancellationSafety(t, ctx, db, repository, service, daddy, member, fixture, channel.ID, sender)
-	assertConcurrentAndStaleClaims(t, ctx, db, repository, service, daddy, fixture)
+	assertScheduledDeliveryAndCancellationSafety(t, testContext)
+	assertConcurrentAndStaleClaims(t, testContext)
 }
 
 type scheduledMessageFixture struct {
@@ -114,6 +124,48 @@ type scheduledMessageFixture struct {
 	sharedSpaceID     string
 	sharedMemberIDs   map[string]string
 	whatsappIDs       map[string]string
+}
+
+type scheduledMessageTestContext struct {
+	ctx        context.Context
+	db         *gorm.DB
+	repository *scheduledmessagerepo.Repository
+	service    interfacescheduledmessage.Service
+	daddy      domainidentity.ActorContext
+	mommy      domainidentity.ActorContext
+	member     domainidentity.ActorContext
+	outsider   domainidentity.ActorContext
+	fixture    scheduledMessageFixture
+	channelID  string
+	sender     *recordingScheduledMessageSender
+}
+
+type legacyReminderLaneContext struct {
+	ctx        context.Context
+	db         *gorm.DB
+	spaces     interfacespace.RepoSpaceInterface
+	identities *serviceidentity.ResolverService
+	audits     *serviceaudit.AuditService
+	actor      domainidentity.ActorContext
+	fixture    scheduledMessageFixture
+	sender     *recordingScheduledMessageSender
+}
+
+type scheduledMessageSpaceInput struct {
+	name      string
+	spaceType string
+	category  string
+	userID    string
+	roleID    string
+}
+
+type reusedOccurrenceExpectation struct {
+	createdAt          time.Time
+	content            string
+	scheduledAt        time.Time
+	status             domainscheduledmessage.DeliveryStatus
+	generationAttempts int
+	deliveryAttempts   int
 }
 
 func openScheduledMessageTestDatabase(t *testing.T) (*gorm.DB, *migrate.Migrate) {
@@ -231,11 +283,17 @@ func seedScheduledMessageFixture(t *testing.T, ctx context.Context, db *gorm.DB)
 		},
 	}
 	for _, name := range []string{"Daddy", "Mommy", "Member", "Outsider"} {
-		space, member := createScheduledMessageSpace(ctx, t, spaces, name+" personal", domainspace.TypePersonal, domainspace.CategoryPersonal, users[name], roleIDs["space_owner"])
+		space, member := createScheduledMessageSpace(ctx, t, spaces, scheduledMessageSpaceInput{
+			name: name + " personal", spaceType: domainspace.TypePersonal, category: domainspace.CategoryPersonal,
+			userID: users[name], roleID: roleIDs["space_owner"],
+		})
 		fixture.personalSpaceIDs[name] = space.ID
 		fixture.personalMemberIDs[name] = member.ID
 	}
-	shared, daddyMember := createScheduledMessageSpace(ctx, t, spaces, "Family", domainspace.TypeShared, domainspace.CategoryFamily, users["Daddy"], roleIDs["space_owner"])
+	shared, daddyMember := createScheduledMessageSpace(ctx, t, spaces, scheduledMessageSpaceInput{
+		name: "Family", spaceType: domainspace.TypeShared, category: domainspace.CategoryFamily,
+		userID: users["Daddy"], roleID: roleIDs["space_owner"],
+	})
 	fixture.sharedSpaceID = shared.ID
 	fixture.sharedMemberIDs["Daddy"] = daddyMember.ID
 	for _, member := range []struct {
@@ -259,19 +317,19 @@ func seedScheduledMessageFixture(t *testing.T, ctx context.Context, db *gorm.DB)
 	return fixture
 }
 
-func createScheduledMessageSpace(ctx context.Context, t *testing.T, spaces interfacespace.RepoSpaceInterface, name, spaceType, category, userID, roleID string) (domainspace.Space, domainspace.Member) {
+func createScheduledMessageSpace(ctx context.Context, t *testing.T, spaces interfacespace.RepoSpaceInterface, input scheduledMessageSpaceInput) (domainspace.Space, domainspace.Member) {
 	t.Helper()
 	now := time.Now().UTC()
 	updatedAt := now
 	space := domainspace.Space{
-		ID: utils.CreateUUID(), Name: name, Type: spaceType, Category: category, Status: domainspace.StatusActive,
-		CreatedByUserID: userID, CreatedAt: now, UpdatedAt: &updatedAt,
+		ID: utils.CreateUUID(), Name: input.name, Type: input.spaceType, Category: input.category, Status: domainspace.StatusActive,
+		CreatedByUserID: input.userID, CreatedAt: now, UpdatedAt: &updatedAt,
 	}
 	member := domainspace.Member{
-		ID: utils.CreateUUID(), SpaceID: space.ID, UserID: userID, RoleID: roleID, Status: domainspace.StatusActive, CreatedAt: now,
+		ID: utils.CreateUUID(), SpaceID: space.ID, UserID: input.userID, RoleID: input.roleID, Status: domainspace.StatusActive, CreatedAt: now,
 	}
 	if err := spaces.CreateWithOwner(ctx, &space, &member); err != nil {
-		t.Fatalf("create %s fixture: %v", name, err)
+		t.Fatalf("create %s fixture: %v", input.name, err)
 	}
 	return space, member
 }
@@ -301,8 +359,9 @@ func scheduledMessageActor(t *testing.T, ctx context.Context, identities *servic
 	return selected
 }
 
-func exerciseLegacyReminderLane(t *testing.T, ctx context.Context, db *gorm.DB, spaces interfacespace.RepoSpaceInterface, identities *serviceidentity.ResolverService, audits *serviceaudit.AuditService, actor domainidentity.ActorContext, fixture scheduledMessageFixture, sender *recordingScheduledMessageSender, label string) string {
+func exerciseLegacyReminderLane(t *testing.T, lane legacyReminderLaneContext, label string) string {
 	t.Helper()
+	ctx, db, spaces, identities, audits, actor, fixture, sender := lane.ctx, lane.db, lane.spaces, lane.identities, lane.audits, lane.actor, lane.fixture, lane.sender
 	reminders := servicereminder.NewReminderService(reminderrepo.NewRepository(db), spaces, authorization.NewAuthorizer(), audits, nil)
 	now := time.Now().UTC()
 	delivered, err := reminders.Create(ctx, actor, dto.ReminderCreateInput{
@@ -446,30 +505,32 @@ func assertSelectedSpaceAndTargets(t *testing.T, ctx context.Context, service in
 	}
 }
 
-func assertPrivateListVisibility(t *testing.T, ctx context.Context, service interfacescheduledmessage.Service, daddy, mommy, member, outsider domainidentity.ActorContext, fixture scheduledMessageFixture) {
+func assertPrivateListVisibility(t *testing.T, testContext scheduledMessageTestContext) {
 	t.Helper()
+	ctx, service, fixture := testContext.ctx, testContext.service, testContext.fixture
 	start := time.Now().UTC().Add(20 * time.Minute)
-	dm := createScheduledMessage(t, ctx, service, daddy, dto.ScheduledMessageCreateInput{
+	dm := createScheduledMessage(t, ctx, service, testContext.daddy, dto.ScheduledMessageCreateInput{
 		Space: fixture.sharedSpaceID, Target: domainscheduledmessage.TargetDM, RecipientMemberID: stringPointer(fixture.sharedMemberIDs["Mommy"]),
 		ContentMode: domainscheduledmessage.ContentModeFixed, Content: "private family note", Recurrence: domainscheduledmessage.RecurrenceOnce,
 		Timezone: "UTC", StartAt: start,
 	})
-	memberRows, err := service.List(ctx, member, dto.ScheduledMessageListInput{Space: fixture.sharedSpaceID})
+	memberRows, err := service.List(ctx, testContext.member, dto.ScheduledMessageListInput{Space: fixture.sharedSpaceID})
 	if err != nil {
 		t.Fatalf("member list schedules: %v", err)
 	}
 	if containsScheduledMessage(memberRows, dm.ID) {
 		t.Fatal("ordinary member can read a DM schedule for two other members")
 	}
-	mommyRows, err := service.List(ctx, mommy, dto.ScheduledMessageListInput{Space: fixture.sharedSpaceID})
+	mommyRows, err := service.List(ctx, testContext.mommy, dto.ScheduledMessageListInput{Space: fixture.sharedSpaceID})
 	if err != nil || !containsScheduledMessage(mommyRows, dm.ID) {
 		t.Fatalf("admin list DM schedule: found=%t err=%v", containsScheduledMessage(mommyRows, dm.ID), err)
 	}
+	outsider := testContext.outsider
 	outsider.SpaceID = fixture.sharedSpaceID
 	if _, err := service.List(ctx, outsider, dto.ScheduledMessageListInput{Space: fixture.sharedSpaceID}); err == nil {
 		t.Fatal("outsider without active shared membership listed shared schedules")
 	}
-	if _, err := service.Cancel(ctx, daddy, fixture.sharedSpaceID, dm.ID); err != nil {
+	if _, err := service.Cancel(ctx, testContext.daddy, fixture.sharedSpaceID, dm.ID); err != nil {
 		t.Fatalf("cancel private-visibility fixture schedule: %v", err)
 	}
 }
@@ -485,25 +546,26 @@ func bindIntegrationGroup(t *testing.T, ctx context.Context, service interfacesc
 	return channel
 }
 
-func assertGroupCreatorCannotCancel(t *testing.T, ctx context.Context, service interfacescheduledmessage.Service, creator, admin, owner domainidentity.ActorContext, spaceID, channelID string) {
+func assertGroupCreatorCannotCancel(t *testing.T, testContext scheduledMessageTestContext) {
 	t.Helper()
-	schedule := createScheduledMessage(t, ctx, service, creator, dto.ScheduledMessageCreateInput{
+	ctx, service, spaceID, channelID := testContext.ctx, testContext.service, testContext.fixture.sharedSpaceID, testContext.channelID
+	schedule := createScheduledMessage(t, ctx, service, testContext.member, dto.ScheduledMessageCreateInput{
 		Space: spaceID, Target: domainscheduledmessage.TargetGroup, SpaceChannelID: stringPointer(channelID),
 		ContentMode: domainscheduledmessage.ContentModeFixed, Content: "group cancellation policy", Recurrence: domainscheduledmessage.RecurrenceOnce,
 		Timezone: "UTC", StartAt: time.Now().UTC().Add(time.Hour),
 	})
 	content := "group schedule edited by its creator"
-	updated, err := service.Update(ctx, creator, spaceID, schedule.ID, dto.ScheduledMessageUpdateInput{Content: &content})
+	updated, err := service.Update(ctx, testContext.member, spaceID, schedule.ID, dto.ScheduledMessageUpdateInput{Content: &content})
 	if err != nil {
 		t.Fatalf("ordinary group creator Update() of own schedule: %v", err)
 	}
 	if updated == nil || updated.Content != content || updated.Target != domainscheduledmessage.TargetGroup || updated.SpaceChannelID == nil || *updated.SpaceChannelID != channelID {
 		t.Fatalf("ordinary group creator Update() changed ownership/destination: %#v", updated)
 	}
-	if _, err := service.Cancel(ctx, creator, spaceID, schedule.ID); !errors.Is(err, authorization.ErrForbidden) {
+	if _, err := service.Cancel(ctx, testContext.member, spaceID, schedule.ID); !errors.Is(err, authorization.ErrForbidden) {
 		t.Fatalf("ordinary group creator Cancel() error = %v, want forbidden", err)
 	}
-	adminCancelled, err := service.Cancel(ctx, admin, spaceID, schedule.ID)
+	adminCancelled, err := service.Cancel(ctx, testContext.mommy, spaceID, schedule.ID)
 	if err != nil {
 		t.Fatalf("Space admin Cancel() of group schedule: %v", err)
 	}
@@ -513,12 +575,12 @@ func assertGroupCreatorCannotCancel(t *testing.T, ctx context.Context, service i
 	if adminCancelled.Status != domainscheduledmessage.ScheduleStatusCancelled {
 		t.Fatalf("Space admin Cancel() status=%s, want CANCELLED", adminCancelled.Status)
 	}
-	ownerSchedule := createScheduledMessage(t, ctx, service, creator, dto.ScheduledMessageCreateInput{
+	ownerSchedule := createScheduledMessage(t, ctx, service, testContext.member, dto.ScheduledMessageCreateInput{
 		Space: spaceID, Target: domainscheduledmessage.TargetGroup, SpaceChannelID: stringPointer(channelID),
 		ContentMode: domainscheduledmessage.ContentModeFixed, Content: "group owner cancellation policy", Recurrence: domainscheduledmessage.RecurrenceOnce,
 		Timezone: "UTC", StartAt: time.Now().UTC().Add(time.Hour),
 	})
-	cancelled, err := service.Cancel(ctx, owner, spaceID, ownerSchedule.ID)
+	cancelled, err := service.Cancel(ctx, testContext.daddy, spaceID, ownerSchedule.ID)
 	if err != nil {
 		t.Fatalf("Space owner Cancel() of group schedule: %v", err)
 	}
@@ -555,10 +617,14 @@ func assertOccurrenceUpdateReusesRows(t *testing.T, ctx context.Context, db *gor
 	}
 
 	content := "content-only edit at the same occurrence"
+	want := reusedOccurrenceExpectation{
+		createdAt: createdAt, content: content, scheduledAt: startAt,
+		status: domainscheduledmessage.DeliveryStatusPending, generationAttempts: 2, deliveryAttempts: 3,
+	}
 	if _, err := service.Update(ctx, creator, fixture.sharedSpaceID, schedule.ID, dto.ScheduledMessageUpdateInput{Content: &content}); err != nil {
 		t.Fatalf("content-only edit at the same occurrence: %v", err)
 	}
-	assertReusedOccurrenceState(t, db, schedule.ID, original.ID, createdAt, content, startAt, domainscheduledmessage.DeliveryStatusPending, 2, 3)
+	assertReusedOccurrenceState(t, db, schedule.ID, original.ID, want)
 	if _, _, _, _, _, err := repository.LoadClaimed(ctx, original.ID, leaseToken, time.Now().UTC()); !errors.Is(err, gorm.ErrRecordNotFound) {
 		t.Fatalf("old lease after same-UUID reuse error=%v, want no matching claim", err)
 	}
@@ -567,10 +633,11 @@ func assertOccurrenceUpdateReusesRows(t *testing.T, ctx context.Context, db *gor
 	}
 
 	repeatedContent := "repeated edit at the same occurrence"
+	want.content = repeatedContent
 	if _, err := service.Update(ctx, creator, fixture.sharedSpaceID, schedule.ID, dto.ScheduledMessageUpdateInput{Content: &repeatedContent}); err != nil {
 		t.Fatalf("repeated edit at the same occurrence: %v", err)
 	}
-	assertReusedOccurrenceState(t, db, schedule.ID, original.ID, createdAt, repeatedContent, startAt, domainscheduledmessage.DeliveryStatusPending, 2, 3)
+	assertReusedOccurrenceState(t, db, schedule.ID, original.ID, want)
 
 	secondAt := time.Now().UTC().Add(3 * time.Hour)
 	if _, err := service.Update(ctx, creator, fixture.sharedSpaceID, schedule.ID, dto.ScheduledMessageUpdateInput{StartAt: &secondAt}); err != nil {
@@ -593,7 +660,7 @@ func assertOccurrenceUpdateReusesRows(t *testing.T, ctx context.Context, db *gor
 	if _, err := service.Update(ctx, creator, fixture.sharedSpaceID, schedule.ID, dto.ScheduledMessageUpdateInput{StartAt: &startAt}); err != nil {
 		t.Fatalf("move occurrence from B back to A: %v", err)
 	}
-	assertReusedOccurrenceState(t, db, schedule.ID, original.ID, createdAt, repeatedContent, startAt, domainscheduledmessage.DeliveryStatusPending, 2, 3)
+	assertReusedOccurrenceState(t, db, schedule.ID, original.ID, want)
 	if err := db.Where("id = ?", second.ID).First(&second).Error; err != nil {
 		t.Fatalf("read superseded B occurrence: %v", err)
 	}
@@ -632,20 +699,20 @@ func assertOccurrenceUpdateReusesRows(t *testing.T, ctx context.Context, db *gor
 	}
 }
 
-func assertReusedOccurrenceState(t *testing.T, db *gorm.DB, scheduleID, deliveryID string, createdAt time.Time, content string, scheduledAt time.Time, status domainscheduledmessage.DeliveryStatus, generationAttempts, deliveryAttempts int) {
+func assertReusedOccurrenceState(t *testing.T, db *gorm.DB, scheduleID, deliveryID string, want reusedOccurrenceExpectation) {
 	t.Helper()
 	var occurrence domainscheduledmessage.Delivery
 	if err := db.Where("id = ?", deliveryID).First(&occurrence).Error; err != nil {
 		t.Fatalf("read reused occurrence %s: %v", deliveryID, err)
 	}
-	if occurrence.ScheduledMessageID != scheduleID || occurrence.Status != status || !occurrence.ScheduledAt.Equal(scheduledAt) || occurrence.GenerationAttempts != generationAttempts || occurrence.DeliveryAttempts != deliveryAttempts || !occurrence.CreatedAt.Equal(createdAt) {
-		t.Fatalf("reused occurrence=%+v, want schedule=%s status=%s scheduled_at=%s attempts=%d/%d created_at=%s", occurrence, scheduleID, status, scheduledAt, generationAttempts, deliveryAttempts, createdAt)
+	if occurrence.ScheduledMessageID != scheduleID || occurrence.Status != want.status || !occurrence.ScheduledAt.Equal(want.scheduledAt) || occurrence.GenerationAttempts != want.generationAttempts || occurrence.DeliveryAttempts != want.deliveryAttempts || !occurrence.CreatedAt.Equal(want.createdAt) {
+		t.Fatalf("reused occurrence=%+v, want schedule=%s status=%s scheduled_at=%s attempts=%d/%d created_at=%s", occurrence, scheduleID, want.status, want.scheduledAt, want.generationAttempts, want.deliveryAttempts, want.createdAt)
 	}
 	if occurrence.LeaseToken != nil || occurrence.LeaseExpiresAt != nil {
 		t.Fatalf("reused occurrence retains a lease: token=%v until=%v", occurrence.LeaseToken, occurrence.LeaseExpiresAt)
 	}
-	if occurrence.ContentSnapshot == nil || *occurrence.ContentSnapshot != content {
-		t.Fatalf("reused occurrence content snapshot=%v, want %q", occurrence.ContentSnapshot, content)
+	if occurrence.ContentSnapshot == nil || *occurrence.ContentSnapshot != want.content {
+		t.Fatalf("reused occurrence content snapshot=%v, want %q", occurrence.ContentSnapshot, want.content)
 	}
 }
 
@@ -681,8 +748,11 @@ func assertRecipientUnsubscribeIsTerminal(t *testing.T, ctx context.Context, db 
 	}
 }
 
-func assertScheduledDeliveryAndCancellationSafety(t *testing.T, ctx context.Context, db *gorm.DB, repository *scheduledmessagerepo.Repository, service interfacescheduledmessage.Service, creator, recipient domainidentity.ActorContext, fixture scheduledMessageFixture, channelID string, sender *recordingScheduledMessageSender) {
+func assertScheduledDeliveryAndCancellationSafety(t *testing.T, testContext scheduledMessageTestContext) {
 	t.Helper()
+	ctx, db, repository, service := testContext.ctx, testContext.db, testContext.repository, testContext.service
+	creator, recipient, fixture := testContext.daddy, testContext.member, testContext.fixture
+	channelID, sender := testContext.channelID, testContext.sender
 	due := time.Now().UTC().Add(5 * time.Minute)
 	dm := createScheduledMessage(t, ctx, service, creator, dto.ScheduledMessageCreateInput{
 		Space: fixture.sharedSpaceID, Target: domainscheduledmessage.TargetDM, RecipientMemberID: stringPointer(recipient.MemberID),
@@ -722,13 +792,15 @@ func assertScheduledDeliveryAndCancellationSafety(t *testing.T, ctx context.Cont
 		t.Fatalf("scheduled sender targets=%v, want Member WhatsApp and bound group only", got)
 	}
 
-	assertFinalGateMutation(t, ctx, repository, service, creator, recipient, fixture, channelID, "cancel")
-	assertFinalGateMutation(t, ctx, repository, service, creator, recipient, fixture, channelID, "unsubscribe")
-	assertFinalGateMutation(t, ctx, repository, service, creator, recipient, fixture, channelID, "update")
+	assertFinalGateMutation(t, testContext, "cancel")
+	assertFinalGateMutation(t, testContext, "unsubscribe")
+	assertFinalGateMutation(t, testContext, "update")
 }
 
-func assertFinalGateMutation(t *testing.T, ctx context.Context, repository *scheduledmessagerepo.Repository, service interfacescheduledmessage.Service, creator, recipient domainidentity.ActorContext, fixture scheduledMessageFixture, channelID, action string) {
+func assertFinalGateMutation(t *testing.T, testContext scheduledMessageTestContext, action string) {
 	t.Helper()
+	ctx, service := testContext.ctx, testContext.service
+	fixture, recipient, creator := testContext.fixture, testContext.member, testContext.daddy
 	due := time.Now().UTC().Add(20 * time.Minute)
 	input := dto.ScheduledMessageCreateInput{
 		Space: fixture.sharedSpaceID, Target: domainscheduledmessage.TargetDM, RecipientMemberID: stringPointer(recipient.MemberID),
@@ -736,42 +808,13 @@ func assertFinalGateMutation(t *testing.T, ctx context.Context, repository *sche
 		Timezone: "UTC", StartAt: due,
 	}
 	if action == "group-cancel" {
-		input.Target, input.RecipientMemberID, input.SpaceChannelID = domainscheduledmessage.TargetGroup, nil, stringPointer(channelID)
+		input.Target, input.RecipientMemberID, input.SpaceChannelID = domainscheduledmessage.TargetGroup, nil, stringPointer(testContext.channelID)
 	}
 	schedule := createScheduledMessage(t, ctx, service, creator, input)
-	claimed, err := repository.ClaimDue(ctx, due.Add(time.Second), 2*time.Minute, 10)
-	if err != nil {
-		t.Fatalf("claim final-gate %s delivery: %v", action, err)
-	}
-	var claim *domainscheduledmessage.Delivery
-	for i := range claimed {
-		if claimed[i].ScheduledMessageID == schedule.ID {
-			claim = &claimed[i]
-			break
-		}
-	}
-	if claim == nil || claim.LeaseToken == nil {
-		t.Fatalf("claim final-gate %s row missing from actual PostgreSQL claims", action)
-	}
-	switch action {
-	case "cancel":
-		if _, err := service.Cancel(ctx, creator, fixture.sharedSpaceID, schedule.ID); err != nil {
-			t.Fatalf("cancel claimed schedule before dispatch: %v", err)
-		}
-	case "unsubscribe":
-		if _, err := service.Unsubscribe(ctx, recipient, fixture.sharedSpaceID, schedule.ID); err != nil {
-			t.Fatalf("unsubscribe claimed schedule before dispatch: %v", err)
-		}
-	case "update":
-		newStart := due.Add(time.Hour)
-		if _, err := service.Update(ctx, creator, fixture.sharedSpaceID, schedule.ID, dto.ScheduledMessageUpdateInput{Content: stringPointer("updated before dispatch"), StartAt: &newStart}); err != nil {
-			t.Fatalf("update claimed schedule before dispatch: %v", err)
-		}
-	default:
-		t.Fatalf("unknown final-gate action %q", action)
-	}
+	claim := claimFinalGateDelivery(t, testContext, schedule.ID, due, action)
+	applyFinalGateMutation(t, testContext, schedule.ID, due, action)
 	dispatched := false
-	err = repository.DispatchAndFinalize(ctx, claim.ID, *claim.LeaseToken, due.Add(2*time.Second), nil,
+	err := testContext.repository.DispatchAndFinalize(ctx, claim.ID, *claim.LeaseToken, due.Add(2*time.Second), nil,
 		func(context.Context, *domainscheduledmessage.Schedule, *domainscheduledmessage.Delivery, *domainscheduledmessage.SpaceChannel, *domainidentity.ExternalIdentity) (time.Time, error) {
 			dispatched = true
 			return due.Add(2 * time.Second), nil
@@ -786,8 +829,52 @@ func assertFinalGateMutation(t *testing.T, ctx context.Context, repository *sche
 	}
 }
 
-func assertConcurrentAndStaleClaims(t *testing.T, ctx context.Context, db *gorm.DB, repository *scheduledmessagerepo.Repository, service interfacescheduledmessage.Service, creator domainidentity.ActorContext, fixture scheduledMessageFixture) {
+func claimFinalGateDelivery(t *testing.T, testContext scheduledMessageTestContext, scheduleID string, due time.Time, action string) *domainscheduledmessage.Delivery {
 	t.Helper()
+	claimed, err := testContext.repository.ClaimDue(testContext.ctx, due.Add(time.Second), 2*time.Minute, 10)
+	if err != nil {
+		t.Fatalf("claim final-gate %s delivery: %v", action, err)
+	}
+	var claim *domainscheduledmessage.Delivery
+	for i := range claimed {
+		if claimed[i].ScheduledMessageID == scheduleID {
+			claim = &claimed[i]
+			break
+		}
+	}
+	if claim == nil || claim.LeaseToken == nil {
+		t.Fatalf("claim final-gate %s row missing from actual PostgreSQL claims", action)
+	}
+	return claim
+}
+
+func applyFinalGateMutation(t *testing.T, testContext scheduledMessageTestContext, scheduleID string, due time.Time, action string) {
+	t.Helper()
+	ctx, service, creator, recipient := testContext.ctx, testContext.service, testContext.daddy, testContext.member
+	spaceID := testContext.fixture.sharedSpaceID
+	switch action {
+	case "cancel":
+		if _, err := service.Cancel(ctx, creator, spaceID, scheduleID); err != nil {
+			t.Fatalf("cancel claimed schedule before dispatch: %v", err)
+		}
+	case "unsubscribe":
+		if _, err := service.Unsubscribe(ctx, recipient, spaceID, scheduleID); err != nil {
+			t.Fatalf("unsubscribe claimed schedule before dispatch: %v", err)
+		}
+	case "update":
+		newStart := due.Add(time.Hour)
+		if _, err := service.Update(ctx, creator, spaceID, scheduleID, dto.ScheduledMessageUpdateInput{Content: stringPointer("updated before dispatch"), StartAt: &newStart}); err != nil {
+			t.Fatalf("update claimed schedule before dispatch: %v", err)
+		}
+	default:
+		t.Fatalf("unknown final-gate action %q", action)
+	}
+}
+
+func assertConcurrentAndStaleClaims(t *testing.T, testContext scheduledMessageTestContext) {
+	t.Helper()
+	ctx, db, repository, service := testContext.ctx, testContext.db, testContext.repository, testContext.service
+	creator, fixture := testContext.daddy, testContext.fixture
 	due := time.Now().UTC().Add(45 * time.Minute)
 	schedule := createScheduledMessage(t, ctx, service, creator, dto.ScheduledMessageCreateInput{
 		Space: fixture.sharedSpaceID, Target: domainscheduledmessage.TargetDM, RecipientMemberID: stringPointer(fixture.sharedMemberIDs["Mommy"]),
@@ -795,33 +882,7 @@ func assertConcurrentAndStaleClaims(t *testing.T, ctx context.Context, db *gorm.
 		Timezone: "UTC", StartAt: due,
 	})
 	claimAt := due.Add(time.Second)
-	type claimResult struct {
-		rows []domainscheduledmessage.Delivery
-		err  error
-	}
-	results := make(chan claimResult, 2)
-	var workers sync.WaitGroup
-	for i := 0; i < 2; i++ {
-		workers.Add(1)
-		go func() {
-			defer workers.Done()
-			rows, err := repository.ClaimDue(ctx, claimAt, 2*time.Minute, 1)
-			results <- claimResult{rows: rows, err: err}
-		}()
-	}
-	workers.Wait()
-	close(results)
-	claims := make([]domainscheduledmessage.Delivery, 0, 2)
-	for result := range results {
-		if result.err != nil {
-			t.Fatalf("concurrent PostgreSQL claim: %v", result.err)
-		}
-		for _, row := range result.rows {
-			if row.ScheduledMessageID == schedule.ID {
-				claims = append(claims, row)
-			}
-		}
-	}
+	claims := claimScheduleConcurrently(t, testContext, schedule.ID, claimAt)
 	if len(claims) != 1 || claims[0].LeaseToken == nil {
 		t.Fatalf("concurrent SQL lock produced %d claims for one delivery, want exactly one", len(claims))
 	}
@@ -843,6 +904,38 @@ func assertConcurrentAndStaleClaims(t *testing.T, ctx context.Context, db *gorm.
 	if _, err := service.Cancel(ctx, creator, fixture.sharedSpaceID, schedule.ID); err != nil {
 		t.Fatalf("cancel stale-claim fixture: %v", err)
 	}
+}
+
+func claimScheduleConcurrently(t *testing.T, testContext scheduledMessageTestContext, scheduleID string, claimAt time.Time) []domainscheduledmessage.Delivery {
+	t.Helper()
+	type claimResult struct {
+		rows []domainscheduledmessage.Delivery
+		err  error
+	}
+	results := make(chan claimResult, 2)
+	var workers sync.WaitGroup
+	for i := 0; i < 2; i++ {
+		workers.Add(1)
+		go func() {
+			defer workers.Done()
+			rows, err := testContext.repository.ClaimDue(testContext.ctx, claimAt, 2*time.Minute, 1)
+			results <- claimResult{rows: rows, err: err}
+		}()
+	}
+	workers.Wait()
+	close(results)
+	claims := make([]domainscheduledmessage.Delivery, 0, 2)
+	for result := range results {
+		if result.err != nil {
+			t.Fatalf("concurrent PostgreSQL claim: %v", result.err)
+		}
+		for _, row := range result.rows {
+			if row.ScheduledMessageID == scheduleID {
+				claims = append(claims, row)
+			}
+		}
+	}
+	return claims
 }
 
 func assertScheduledMessageDeliveryRetryTimeConstraint(t *testing.T, db *gorm.DB, fixture scheduledMessageFixture) {

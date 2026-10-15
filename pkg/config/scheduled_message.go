@@ -79,6 +79,31 @@ func (cfg ScheduledMessageConfig) Validate() error {
 	if !cfg.Enabled {
 		return nil
 	}
+	if err := cfg.validateScheduler(); err != nil {
+		return err
+	}
+	if err := cfg.validateGenerator(); err != nil {
+		return err
+	}
+	if cfg.MaxOutputBytes <= 0 {
+		return errors.New("SCHEDULED_MESSAGES_MAX_OUTPUT_BYTES must be positive")
+	}
+	if err := cfg.validateRetries(); err != nil {
+		return err
+	}
+	if err := cfg.validateLeaseAndBatch(); err != nil {
+		return err
+	}
+	if cfg.MaxTextBytes <= 0 {
+		return errors.New("SCHEDULED_MESSAGES_MAX_TEXT_BYTES must be positive")
+	}
+	if cfg.MaxListRows <= 0 || cfg.MaxListRows > maxScheduledMessageListRows {
+		return errors.New("SCHEDULED_MESSAGES_MAX_LIST_ROWS must be between 1 and 100")
+	}
+	return nil
+}
+
+func (cfg ScheduledMessageConfig) validateScheduler() error {
 	if cfg.Scheduler.WhatsAppBridgeURL == "" {
 		return errors.New("REMINDER_WHATSAPP_BRIDGE_URL is required when SCHEDULED_MESSAGES_ENABLED=true")
 	}
@@ -88,6 +113,10 @@ func (cfg ScheduledMessageConfig) Validate() error {
 	if cfg.Scheduler.Interval <= 0 || cfg.Scheduler.DatabaseFallbackInterval <= 0 || cfg.Scheduler.IndexReconcileInterval <= 0 || cfg.Scheduler.IndexBatchSize <= 0 {
 		return errors.New("shared REMINDER_SCHEDULER interval, fallback, and reconcile settings must be positive")
 	}
+	return nil
+}
+
+func (cfg ScheduledMessageConfig) validateGenerator() error {
 	if (cfg.GeneratorURL == "") != (cfg.GeneratorKey == "") {
 		return errors.New("SCHEDULED_MESSAGES_GENERATOR_URL and SCHEDULED_MESSAGES_GENERATOR_KEY must be configured together")
 	}
@@ -100,9 +129,10 @@ func (cfg ScheduledMessageConfig) Validate() error {
 	if cfg.MaxResponseBytes <= 0 || cfg.MaxResponseBytes == int(^uint(0)>>1) {
 		return errors.New("SCHEDULED_MESSAGES_GENERATOR_MAX_RESPONSE_BYTES must be positive and representable for bounded reads")
 	}
-	if cfg.MaxOutputBytes <= 0 {
-		return errors.New("SCHEDULED_MESSAGES_MAX_OUTPUT_BYTES must be positive")
-	}
+	return nil
+}
+
+func (cfg ScheduledMessageConfig) validateRetries() error {
 	if cfg.GenerationMaxRetries < 0 || cfg.GenerationMaxRetries > 3 {
 		return errors.New("SCHEDULED_MESSAGES_GENERATION_MAX_RETRIES must be between 0 and 3")
 	}
@@ -112,18 +142,16 @@ func (cfg ScheduledMessageConfig) Validate() error {
 	if cfg.GenerationRetryBackoff < 0 || cfg.DeliveryRetryBackoff < 0 {
 		return errors.New("scheduled message retry backoffs must be non-negative")
 	}
+	return nil
+}
+
+func (cfg ScheduledMessageConfig) validateLeaseAndBatch() error {
 	operationMargin := scheduledMessageBridgeTimeout + scheduledMessageProcessingMargin
 	if cfg.Lease <= operationMargin || cfg.GeneratorTimeout >= cfg.Lease-operationMargin {
 		return errors.New("SCHEDULED_MESSAGES_LEASE must exceed the generator and WhatsApp operation timeouts plus processing margin")
 	}
 	if cfg.BatchSize <= 0 || cfg.Concurrency <= 0 || cfg.BatchSize > cfg.Concurrency {
 		return errors.New("SCHEDULED_MESSAGES_BATCH_SIZE must be positive and no greater than SCHEDULED_MESSAGES_CONCURRENCY")
-	}
-	if cfg.MaxTextBytes <= 0 {
-		return errors.New("SCHEDULED_MESSAGES_MAX_TEXT_BYTES must be positive")
-	}
-	if cfg.MaxListRows <= 0 || cfg.MaxListRows > maxScheduledMessageListRows {
-		return errors.New("SCHEDULED_MESSAGES_MAX_LIST_ROWS must be between 1 and 100")
 	}
 	return nil
 }

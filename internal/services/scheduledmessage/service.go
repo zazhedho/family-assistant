@@ -24,15 +24,17 @@ import (
 )
 
 const (
-	createPermission      = "scheduled_messages:create"
-	listPermission        = "scheduled_messages:list"
-	viewPermission        = "scheduled_messages:view"
-	updatePermission      = "scheduled_messages:update"
-	cancelPermission      = "scheduled_messages:delete"
-	unsubscribePermission = "scheduled_messages:unsubscribe"
-	bindPermission        = "space_channels:create"
-	maxContentBytes       = 2000
-	maxListRows           = 100
+	createPermission        = "scheduled_messages:create"
+	listPermission          = "scheduled_messages:list"
+	viewPermission          = "scheduled_messages:view"
+	updatePermission        = "scheduled_messages:update"
+	cancelPermission        = "scheduled_messages:delete"
+	unsubscribePermission   = "scheduled_messages:unsubscribe"
+	bindPermission          = "space_channels:create"
+	maxContentBytes         = 2000
+	maxListRows             = 100
+	invalidValueReason      = "is invalid"
+	validIANATimezoneReason = "must be a valid IANA timezone"
 )
 
 type service struct {
@@ -44,6 +46,12 @@ type service struct {
 	generator    interfacescheduledmessage.Generator
 	maxTextBytes int
 	maxListRows  int
+}
+
+type scheduledMessageAuditScope struct {
+	spaceID    string
+	resourceID string
+	ownerID    string
 }
 
 type ScheduledMessageServiceOptions struct {
@@ -76,7 +84,7 @@ func (s *service) Create(ctx context.Context, actor domainidentity.ActorContext,
 	spaceID := strings.TrimSpace(actor.SpaceID)
 	defer func() {
 		if err != nil {
-			event := s.auditEvent(ctx, actor, domainaudit.ActionCreate, spaceID, scheduleID(created), actor.MemberID, domainaudit.StatusFailed, nil)
+			event := s.auditEvent(ctx, actor, domainaudit.ActionCreate, scheduledMessageAuditScope{spaceID: spaceID, resourceID: scheduleID(created), ownerID: actor.MemberID}, domainaudit.StatusFailed, nil)
 			event.ErrorMessage = failureCategory(err)
 			s.writeAudit(ctx, event)
 		}
@@ -137,7 +145,7 @@ func (s *service) Create(ctx context.Context, actor domainidentity.ActorContext,
 	}
 	indexErr := s.upsertIndex(ctx, delivery.ID, startAt)
 	finishIndexMutation(indexErr)
-	s.writeAudit(ctx, s.auditEvent(ctx, actor, domainaudit.ActionCreate, spaceID, created.ID, created.CreatedByMemberID, domainaudit.StatusSuccess, map[string]any{"target": created.Target, "status": created.Status}))
+	s.writeAudit(ctx, s.auditEvent(ctx, actor, domainaudit.ActionCreate, scheduledMessageAuditScope{spaceID: spaceID, resourceID: created.ID, ownerID: created.CreatedByMemberID}, domainaudit.StatusSuccess, map[string]any{"target": created.Target, "status": created.Status}))
 	return created, nil
 }
 
@@ -146,7 +154,7 @@ func (s *service) List(ctx context.Context, actor domainidentity.ActorContext, i
 	resourceID := ""
 	defer func() {
 		if err != nil {
-			event := s.auditEvent(ctx, actor, "list", spaceID, resourceID, actor.MemberID, domainaudit.StatusFailed, nil)
+			event := s.auditEvent(ctx, actor, "list", scheduledMessageAuditScope{spaceID: spaceID, resourceID: resourceID, ownerID: actor.MemberID}, domainaudit.StatusFailed, nil)
 			event.ErrorMessage = failureCategory(err)
 			s.writeAudit(ctx, event)
 		}
@@ -172,7 +180,7 @@ func (s *service) List(ctx context.Context, actor domainidentity.ActorContext, i
 		return nil, err
 	}
 	if input.Status != nil && !validScheduleStatus(*input.Status) {
-		return nil, invalid("status", "is invalid")
+		return nil, invalid("status", invalidValueReason)
 	}
 	query := dto.ScheduledMessageListInput{
 		Space: spaceID, ScheduleID: scheduleID, Status: input.Status,
@@ -193,18 +201,26 @@ func (s *service) List(ctx context.Context, actor domainidentity.ActorContext, i
 			break
 		}
 	}
-	if scheduleID != nil && len(result) == 1 {
-		history, historyErr := s.repository.ListHistory(ctx, spaceID, *scheduleID, s.maxListRows)
-		if historyErr != nil {
-			return nil, historyErr
-		}
-		result[0].History = make([]dto.ScheduledMessageDeliveryOutput, 0, min(len(history), s.maxListRows))
-		for i := 0; i < len(history) && i < s.maxListRows; i++ {
-			result[0].History = append(result[0].History, deliveryOutput(&history[i]))
-		}
+	if err := s.loadScheduleHistory(ctx, spaceID, scheduleID, result); err != nil {
+		return nil, err
 	}
-	s.writeAudit(ctx, s.auditEvent(ctx, actor, action, spaceID, resourceID, actorMember.ID, domainaudit.StatusSuccess, nil))
+	s.writeAudit(ctx, s.auditEvent(ctx, actor, action, scheduledMessageAuditScope{spaceID: spaceID, resourceID: resourceID, ownerID: actorMember.ID}, domainaudit.StatusSuccess, nil))
 	return result, nil
+}
+
+func (s *service) loadScheduleHistory(ctx context.Context, spaceID string, scheduleID *string, result []dto.ScheduledMessageOutput) error {
+	if scheduleID == nil || len(result) != 1 {
+		return nil
+	}
+	history, err := s.repository.ListHistory(ctx, spaceID, *scheduleID, s.maxListRows)
+	if err != nil {
+		return err
+	}
+	result[0].History = make([]dto.ScheduledMessageDeliveryOutput, 0, min(len(history), s.maxListRows))
+	for i := 0; i < len(history) && i < s.maxListRows; i++ {
+		result[0].History = append(result[0].History, deliveryOutput(&history[i]))
+	}
+	return nil
 }
 
 func (s *service) Update(ctx context.Context, actor domainidentity.ActorContext, rawSpaceID, rawScheduleID string, input dto.ScheduledMessageUpdateInput) (result *domainscheduledmessage.Schedule, err error) {
@@ -212,7 +228,7 @@ func (s *service) Update(ctx context.Context, actor domainidentity.ActorContext,
 	scheduleID := ""
 	defer func() {
 		if err != nil {
-			event := s.auditEvent(ctx, actor, domainaudit.ActionUpdate, spaceID, scheduleID, actor.MemberID, domainaudit.StatusFailed, nil)
+			event := s.auditEvent(ctx, actor, domainaudit.ActionUpdate, scheduledMessageAuditScope{spaceID: spaceID, resourceID: scheduleID, ownerID: actor.MemberID}, domainaudit.StatusFailed, nil)
 			event.ErrorMessage = failureCategory(err)
 			s.writeAudit(ctx, event)
 		}
@@ -267,7 +283,7 @@ func (s *service) Update(ctx context.Context, actor domainidentity.ActorContext,
 	}
 	indexErr = errors.Join(indexErr, s.upsertIndex(ctx, next.ID, nextAt))
 	finishIndexMutation(indexErr)
-	s.writeAudit(ctx, s.auditEvent(ctx, actor, domainaudit.ActionUpdate, spaceID, schedule.ID, schedule.CreatedByMemberID, domainaudit.StatusSuccess, map[string]any{"target": schedule.Target, "status": schedule.Status}))
+	s.writeAudit(ctx, s.auditEvent(ctx, actor, domainaudit.ActionUpdate, scheduledMessageAuditScope{spaceID: spaceID, resourceID: schedule.ID, ownerID: schedule.CreatedByMemberID}, domainaudit.StatusSuccess, map[string]any{"target": schedule.Target, "status": schedule.Status}))
 	return schedule, nil
 }
 
@@ -276,7 +292,7 @@ func (s *service) Cancel(ctx context.Context, actor domainidentity.ActorContext,
 	scheduleID := ""
 	defer func() {
 		if err != nil {
-			event := s.auditEvent(ctx, actor, domainaudit.ActionDelete, spaceID, scheduleID, actor.MemberID, domainaudit.StatusFailed, nil)
+			event := s.auditEvent(ctx, actor, domainaudit.ActionDelete, scheduledMessageAuditScope{spaceID: spaceID, resourceID: scheduleID, ownerID: actor.MemberID}, domainaudit.StatusFailed, nil)
 			event.ErrorMessage = failureCategory(err)
 			s.writeAudit(ctx, event)
 		}
@@ -317,7 +333,7 @@ func (s *service) Cancel(ctx context.Context, actor domainidentity.ActorContext,
 		indexErr = errors.Join(indexErr, s.removeFromIndex(ctx, deliveryID))
 	}
 	finishIndexMutation(indexErr)
-	s.writeAudit(ctx, s.auditEvent(ctx, actor, domainaudit.ActionDelete, spaceID, schedule.ID, schedule.CreatedByMemberID, domainaudit.StatusSuccess, map[string]any{"target": schedule.Target, "status": schedule.Status}))
+	s.writeAudit(ctx, s.auditEvent(ctx, actor, domainaudit.ActionDelete, scheduledMessageAuditScope{spaceID: spaceID, resourceID: schedule.ID, ownerID: schedule.CreatedByMemberID}, domainaudit.StatusSuccess, map[string]any{"target": schedule.Target, "status": schedule.Status}))
 	return schedule, nil
 }
 
@@ -326,7 +342,7 @@ func (s *service) Unsubscribe(ctx context.Context, actor domainidentity.ActorCon
 	scheduleID := ""
 	defer func() {
 		if err != nil {
-			event := s.auditEvent(ctx, actor, "unsubscribe", spaceID, scheduleID, actor.MemberID, domainaudit.StatusFailed, nil)
+			event := s.auditEvent(ctx, actor, "unsubscribe", scheduledMessageAuditScope{spaceID: spaceID, resourceID: scheduleID, ownerID: actor.MemberID}, domainaudit.StatusFailed, nil)
 			event.ErrorMessage = failureCategory(err)
 			s.writeAudit(ctx, event)
 		}
@@ -380,7 +396,7 @@ func (s *service) Unsubscribe(ctx context.Context, actor domainidentity.ActorCon
 		indexErr = errors.Join(indexErr, s.removeFromIndex(ctx, deliveryID))
 	}
 	finishIndexMutation(indexErr)
-	s.writeAudit(ctx, s.auditEvent(ctx, actor, "unsubscribe", spaceID, schedule.ID, schedule.CreatedByMemberID, domainaudit.StatusSuccess, map[string]any{"target": schedule.Target, "status": schedule.Status}))
+	s.writeAudit(ctx, s.auditEvent(ctx, actor, "unsubscribe", scheduledMessageAuditScope{spaceID: spaceID, resourceID: schedule.ID, ownerID: schedule.CreatedByMemberID}, domainaudit.StatusSuccess, map[string]any{"target": schedule.Target, "status": schedule.Status}))
 	return schedule, nil
 }
 
@@ -418,53 +434,13 @@ func (s *service) findSchedule(ctx context.Context, spaceID, scheduleID string) 
 
 func (s *service) updateFields(schedule *domainscheduledmessage.Schedule, input dto.ScheduledMessageUpdateInput, now time.Time) (dto.ScheduledMessageUpdateInput, time.Time, domainscheduledmessage.ContentMode, string, domainscheduledmessage.Recurrence, string, time.Time, error) {
 	fields := dto.ScheduledMessageUpdateInput{}
-	contentMode, content := schedule.ContentMode, schedule.Content
-	recurrence, timezone, startAt := schedule.Recurrence, schedule.Timezone, schedule.StartAt
-	if input.ContentMode != nil {
-		if *input.ContentMode != domainscheduledmessage.ContentModeFixed && *input.ContentMode != domainscheduledmessage.ContentModeAI {
-			return fields, time.Time{}, "", "", "", "", time.Time{}, invalid("content_mode", "must be FIXED or AI")
-		}
-		contentMode = *input.ContentMode
-		fields.ContentMode = &contentMode
+	contentMode, content, err := s.updateContentFields(schedule, input, &fields)
+	if err != nil {
+		return fields, time.Time{}, "", "", "", "", time.Time{}, err
 	}
-	if input.Content != nil {
-		var err error
-		content, err = validateContent(*input.Content, s.maxTextBytes)
-		if err != nil {
-			return fields, time.Time{}, "", "", "", "", time.Time{}, err
-		}
-		fields.Content = &content
-	}
-	if fields.ContentMode != nil || fields.Content != nil {
-		if contentMode == domainscheduledmessage.ContentModeAI && s.generator == nil {
-			return fields, time.Time{}, "", "", "", "", time.Time{}, invalid("content_mode", "AI generation is unavailable")
-		}
-		if content == "" || len(content) > s.maxTextBytes {
-			return fields, time.Time{}, "", "", "", "", time.Time{}, invalid("content", fmt.Sprintf("must contain 1 to %d bytes", s.maxTextBytes))
-		}
-	}
-	if input.Recurrence != nil {
-		if !validRecurrence(*input.Recurrence) {
-			return fields, time.Time{}, "", "", "", "", time.Time{}, invalid("recurrence", "is invalid")
-		}
-		recurrence = *input.Recurrence
-		fields.Recurrence = &recurrence
-	}
-	if input.Timezone != nil {
-		var err error
-		timezone, err = validateTimezone(*input.Timezone)
-		if err != nil {
-			return fields, time.Time{}, "", "", "", "", time.Time{}, err
-		}
-		fields.Timezone = &timezone
-	}
-	if input.StartAt != nil {
-		var err error
-		startAt, err = validateFutureTime(*input.StartAt)
-		if err != nil {
-			return fields, time.Time{}, "", "", "", "", time.Time{}, err
-		}
-		fields.StartAt = &startAt
+	recurrence, timezone, startAt, err := updateScheduleFields(input, &fields, schedule.Recurrence, schedule.Timezone, schedule.StartAt)
+	if err != nil {
+		return fields, time.Time{}, "", "", "", "", time.Time{}, err
 	}
 	if fields.ContentMode == nil && fields.Content == nil && fields.Recurrence == nil && fields.Timezone == nil && fields.StartAt == nil {
 		return fields, time.Time{}, "", "", "", "", time.Time{}, invalid("update", "at least one field is required")
@@ -474,23 +450,86 @@ func (s *service) updateFields(schedule *domainscheduledmessage.Schedule, input 
 			return fields, time.Time{}, "", "", "", "", time.Time{}, err
 		}
 	}
+	nextAt, err := updatedNextScheduledAt(schedule, recurrence, startAt, timezone, now, fields.StartAt != nil)
+	if err != nil {
+		return fields, time.Time{}, "", "", "", "", time.Time{}, err
+	}
+	return fields, nextAt, contentMode, content, recurrence, timezone, startAt, nil
+}
+
+func (s *service) updateContentFields(schedule *domainscheduledmessage.Schedule, input dto.ScheduledMessageUpdateInput, fields *dto.ScheduledMessageUpdateInput) (domainscheduledmessage.ContentMode, string, error) {
+	contentMode, content := schedule.ContentMode, schedule.Content
+	if input.ContentMode != nil {
+		if *input.ContentMode != domainscheduledmessage.ContentModeFixed && *input.ContentMode != domainscheduledmessage.ContentModeAI {
+			return "", "", invalid("content_mode", "must be FIXED or AI")
+		}
+		contentMode = *input.ContentMode
+		fields.ContentMode = &contentMode
+	}
+	if input.Content != nil {
+		var err error
+		content, err = validateContent(*input.Content, s.maxTextBytes)
+		if err != nil {
+			return "", "", err
+		}
+		fields.Content = &content
+	}
+	if fields.ContentMode != nil || fields.Content != nil {
+		if contentMode == domainscheduledmessage.ContentModeAI && s.generator == nil {
+			return "", "", invalid("content_mode", "AI generation is unavailable")
+		}
+		if content == "" || len(content) > s.maxTextBytes {
+			return "", "", invalid("content", fmt.Sprintf("must contain 1 to %d bytes", s.maxTextBytes))
+		}
+	}
+	return contentMode, content, nil
+}
+
+func updateScheduleFields(input dto.ScheduledMessageUpdateInput, fields *dto.ScheduledMessageUpdateInput, recurrence domainscheduledmessage.Recurrence, timezone string, startAt time.Time) (domainscheduledmessage.Recurrence, string, time.Time, error) {
+	if input.Recurrence != nil {
+		if !validRecurrence(*input.Recurrence) {
+			return "", "", time.Time{}, invalid("recurrence", invalidValueReason)
+		}
+		recurrence = *input.Recurrence
+		fields.Recurrence = &recurrence
+	}
+	if input.Timezone != nil {
+		var err error
+		timezone, err = validateTimezone(*input.Timezone)
+		if err != nil {
+			return "", "", time.Time{}, err
+		}
+		fields.Timezone = &timezone
+	}
+	if input.StartAt != nil {
+		var err error
+		startAt, err = validateFutureTime(*input.StartAt)
+		if err != nil {
+			return "", "", time.Time{}, err
+		}
+		fields.StartAt = &startAt
+	}
+	return recurrence, timezone, startAt, nil
+}
+
+func updatedNextScheduledAt(schedule *domainscheduledmessage.Schedule, recurrence domainscheduledmessage.Recurrence, startAt time.Time, timezone string, now time.Time, startAtChanged bool) (time.Time, error) {
 	if schedule.NextScheduledAt == nil {
-		return fields, time.Time{}, "", "", "", "", time.Time{}, interfacescheduledmessage.ErrConflict
+		return time.Time{}, interfacescheduledmessage.ErrConflict
 	}
 	nextAt := *schedule.NextScheduledAt
-	if recurrence == domainscheduledmessage.RecurrenceOnce && fields.StartAt != nil {
+	if recurrence == domainscheduledmessage.RecurrenceOnce && startAtChanged {
 		nextAt = startAt
 	} else if recurrence != domainscheduledmessage.RecurrenceOnce {
 		next, err := domainscheduledmessage.NextOccurrence(recurrence, startAt, now, timezone)
 		if err != nil {
-			return fields, time.Time{}, "", "", "", "", time.Time{}, recurrenceError(err)
+			return time.Time{}, recurrenceError(err)
 		}
 		if next == nil {
-			return fields, time.Time{}, "", "", "", "", time.Time{}, interfacescheduledmessage.ErrConflict
+			return time.Time{}, interfacescheduledmessage.ErrConflict
 		}
 		nextAt = *next
 	}
-	return fields, nextAt, contentMode, content, recurrence, timezone, startAt, nil
+	return nextAt, nil
 }
 
 func activeActorMember(members []domainspace.ResolvedMembership, memberID, userID string) *domainspace.ResolvedMembership {
@@ -555,10 +594,10 @@ func validateFutureTime(value time.Time) (time.Time, error) {
 func validateTimezone(value string) (string, error) {
 	value = strings.TrimSpace(value)
 	if value == "" || value == "Local" || len(value) > 64 {
-		return "", invalid("timezone", "must be a valid IANA timezone")
+		return "", invalid("timezone", validIANATimezoneReason)
 	}
 	if _, err := time.LoadLocation(value); err != nil {
-		return "", invalid("timezone", "must be a valid IANA timezone")
+		return "", invalid("timezone", validIANATimezoneReason)
 	}
 	return value, nil
 }
@@ -569,7 +608,7 @@ func validRecurrence(value domainscheduledmessage.Recurrence) bool {
 
 func validateRecurrence(value domainscheduledmessage.Recurrence, startAt, after time.Time, timezone string) error {
 	if !validRecurrence(value) {
-		return invalid("recurrence", "is invalid")
+		return invalid("recurrence", invalidValueReason)
 	}
 	_, err := domainscheduledmessage.NextOccurrence(value, startAt, after, timezone)
 	if err != nil {
@@ -581,9 +620,9 @@ func validateRecurrence(value domainscheduledmessage.Recurrence, startAt, after 
 func recurrenceError(err error) error {
 	switch {
 	case errors.Is(err, domainscheduledmessage.ErrInvalidTimezone):
-		return invalid("timezone", "must be a valid IANA timezone")
+		return invalid("timezone", validIANATimezoneReason)
 	case errors.Is(err, domainscheduledmessage.ErrInvalidRecurrence):
-		return invalid("recurrence", "is invalid")
+		return invalid("recurrence", invalidValueReason)
 	case errors.Is(err, domainscheduledmessage.ErrAmbiguousLocalTime), errors.Is(err, domainscheduledmessage.ErrNonexistentLocalTime):
 		return invalid("start_at", "is not a valid local time in the selected timezone")
 	default:
@@ -651,7 +690,9 @@ func deliveryOutput(delivery *domainscheduledmessage.Delivery) dto.ScheduledMess
 // Due-index keys are immutable delivery UUIDs; schedule UUIDs are never index keys.
 func (s *service) beginIndexMutation() func(error) {
 	if s.index == nil {
-		return func(error) {}
+		return func(error) {
+			// No index means there is no lifecycle mutation to finish.
+		}
 	}
 	s.index.BeginLifecycleMutation()
 	return s.index.FinishLifecycleMutation
@@ -677,11 +718,11 @@ func (s *service) removeFromIndex(ctx context.Context, deliveryID string) error 
 	return nil
 }
 
-func (s *service) auditEvent(ctx context.Context, actor domainidentity.ActorContext, action, spaceID, resourceID, ownerID, status string, metadata map[string]any) domainaudit.AuditEvent {
+func (s *service) auditEvent(ctx context.Context, actor domainidentity.ActorContext, action string, scope scheduledMessageAuditScope, status string, metadata map[string]any) domainaudit.AuditEvent {
 	if metadata == nil {
 		metadata = make(map[string]any, 2)
 	}
-	metadata["space_id"] = strings.TrimSpace(spaceID)
+	metadata["space_id"] = strings.TrimSpace(scope.spaceID)
 	actorUserID, actorRole := strings.TrimSpace(actor.UserID), strings.TrimSpace(actor.RoleName)
 	if initiatorID := strings.TrimSpace(actor.InitiatorUserID); initiatorID != "" {
 		actorUserID = initiatorID
@@ -694,9 +735,9 @@ func (s *service) auditEvent(ctx context.Context, actor domainidentity.ActorCont
 	}
 	return domainaudit.AuditEvent{
 		ActorUserID: actorUserID, ActorMemberID: strings.TrimSpace(actor.MemberID),
-		ResourceOwnerMemberID: strings.TrimSpace(ownerID), Source: auditSource(actor.Source),
+		ResourceOwnerMemberID: strings.TrimSpace(scope.ownerID), Source: auditSource(actor.Source),
 		Channel: safeAuditChannel(actor.Channel), ActorRole: actorRole, Action: action,
-		Resource: "scheduled_message", ResourceID: strings.TrimSpace(resourceID), Status: status,
+		Resource: "scheduled_message", ResourceID: strings.TrimSpace(scope.resourceID), Status: status,
 		RequestID: logger.LogIDFromContext(ctx), Metadata: metadata,
 	}
 }

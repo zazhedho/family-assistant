@@ -1075,14 +1075,16 @@ func TestRecordRetryUpdatesAttemptsAndBackoffUnderClaimToken(t *testing.T) {
 
 func TestReserveExternalAttemptPersistsCounterAndKeepsLiveLease(t *testing.T) {
 	for _, test := range []struct {
-		name string
-		call func(*Repository, *domainscheduledmessage.Delivery, time.Time) error
-		col  string
+		name               string
+		call               func(*Repository, *domainscheduledmessage.Delivery, time.Time) error
+		col                string
+		generationAttempts int
+		deliveryAttempts   int
 	}{
-		{name: "generation", col: "generation_attempts", call: func(repo *Repository, delivery *domainscheduledmessage.Delivery, now time.Time) error {
+		{name: "generation", col: "generation_attempts", generationAttempts: 1, call: func(repo *Repository, delivery *domainscheduledmessage.Delivery, now time.Time) error {
 			return repo.ReserveGenerationAttempt(context.Background(), delivery, now, 4)
 		}},
-		{name: "delivery", col: "delivery_attempts", call: func(repo *Repository, delivery *domainscheduledmessage.Delivery, now time.Time) error {
+		{name: "delivery", col: "delivery_attempts", deliveryAttempts: 1, call: func(repo *Repository, delivery *domainscheduledmessage.Delivery, now time.Time) error {
 			return repo.ReserveDeliveryAttempt(context.Background(), delivery, now, 4)
 		}},
 	} {
@@ -1110,17 +1112,21 @@ func TestReserveExternalAttemptPersistsCounterAndKeepsLiveLease(t *testing.T) {
 			if err := test.call(repo, delivery, now); err != nil {
 				t.Fatalf("reserve external attempt: %v", err)
 			}
-			if (test.col == "generation_attempts" && (delivery.GenerationAttempts != 1 || delivery.DeliveryAttempts != 0)) ||
-				(test.col == "delivery_attempts" && (delivery.GenerationAttempts != 0 || delivery.DeliveryAttempts != 1)) {
-				t.Fatalf("reserved counters = generation %d, delivery %d", delivery.GenerationAttempts, delivery.DeliveryAttempts)
-			}
-			if delivery.Status != domainscheduledmessage.DeliveryStatusPending || delivery.LeaseToken == nil || *delivery.LeaseToken != token || delivery.LeaseExpiresAt == nil || !delivery.LeaseExpiresAt.Equal(leaseUntil) {
-				t.Fatalf("reservation changed live claim: %#v", delivery)
-			}
+			assertReservedExternalAttempt(t, delivery, test.generationAttempts, test.deliveryAttempts, token, leaseUntil)
 			if err := mock.ExpectationsWereMet(); err != nil {
 				t.Fatalf("SQL expectations: %v", err)
 			}
 		})
+	}
+}
+
+func assertReservedExternalAttempt(t *testing.T, delivery *domainscheduledmessage.Delivery, generationAttempts, deliveryAttempts int, token string, leaseUntil time.Time) {
+	t.Helper()
+	if delivery.GenerationAttempts != generationAttempts || delivery.DeliveryAttempts != deliveryAttempts {
+		t.Fatalf("reserved counters = generation %d, delivery %d", delivery.GenerationAttempts, delivery.DeliveryAttempts)
+	}
+	if delivery.Status != domainscheduledmessage.DeliveryStatusPending || delivery.LeaseToken == nil || *delivery.LeaseToken != token || delivery.LeaseExpiresAt == nil || !delivery.LeaseExpiresAt.Equal(leaseUntil) {
+		t.Fatalf("reservation changed live claim: %#v", delivery)
 	}
 }
 

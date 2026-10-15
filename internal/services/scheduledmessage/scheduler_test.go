@@ -148,26 +148,37 @@ func TestRunOnceSkipsSendWhenReservationLockWaitLeavesTooLittleLease(t *testing.
 }
 
 func TestRunOnceCancelsOccurrenceWhenSpaceIsInactiveAndReactivationCannotResurrectIt(t *testing.T) {
-	for _, stage := range []string{"before_generation", "after_generation", "final_dispatch_gate"} {
-		t.Run(stage, func(t *testing.T) {
+	tests := []struct {
+		name               string
+		mode               domainscheduledmessage.ContentMode
+		wantGeneratorCalls int
+		beforeRun          func(*memoryScheduledRepository, *testGenerator)
+	}{
+		{
+			name: "before_generation", mode: domainscheduledmessage.ContentModeAI,
+			beforeRun: func(repo *memoryScheduledRepository, _ *testGenerator) { repo.setSpaceActive("space-1", false) },
+		},
+		{
+			name: "after_generation", mode: domainscheduledmessage.ContentModeAI, wantGeneratorCalls: 1,
+			beforeRun: func(repo *memoryScheduledRepository, generator *testGenerator) {
+				generator.afterCall = func() { repo.setSpaceActive("space-1", false) }
+			},
+		},
+		{
+			name: "final_dispatch_gate", mode: domainscheduledmessage.ContentModeFixed,
+			beforeRun: func(repo *memoryScheduledRepository, _ *testGenerator) {
+				repo.afterDeliveryReserve = func() { repo.setSpaceActive("space-1", false) }
+			},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
 			now := time.Date(2026, 10, 14, 10, 0, 0, 0, time.UTC)
 			clock := &testClock{now: now}
 			repo := newMemoryScheduledRepository()
-			mode := domainscheduledmessage.ContentModeAI
-			if stage == "final_dispatch_gate" {
-				mode = domainscheduledmessage.ContentModeFixed
-			}
-			repo.addSchedule(testSchedule("schedule-1", "delivery-1", now, domainscheduledmessage.RecurrenceOnce, mode, "theme"))
+			repo.addSchedule(testSchedule("schedule-1", "delivery-1", now, domainscheduledmessage.RecurrenceOnce, test.mode, "theme"))
 			generator := &testGenerator{outputs: []string{"generated"}}
-			if stage == "before_generation" {
-				repo.setSpaceActive("space-1", false)
-			}
-			if stage == "after_generation" {
-				generator.afterCall = func() { repo.setSpaceActive("space-1", false) }
-			}
-			if stage == "final_dispatch_gate" {
-				repo.afterDeliveryReserve = func() { repo.setSpaceActive("space-1", false) }
-			}
+			test.beforeRun(repo, generator)
 			sender := &testSender{}
 			scheduler := newTestScheduler(t, repo, nil, generator, sender, testScheduledConfig(), clock)
 			if err := scheduler.RunOnce(context.Background(), now); err != nil {
@@ -181,7 +192,7 @@ func TestRunOnceCancelsOccurrenceWhenSpaceIsInactiveAndReactivationCannotResurre
 			if err := scheduler.RunOnce(context.Background(), now.Add(3*time.Minute)); err != nil {
 				t.Fatalf("RunOnce() after Space reactivation = %v", err)
 			}
-			if sender.calls() != 0 || (stage != "before_generation" && stage != "final_dispatch_gate" && generator.calls() != 1) {
+			if sender.calls() != 0 || generator.calls() != test.wantGeneratorCalls {
 				t.Fatalf("external calls after inactive Space transition: generator=%d sender=%d", generator.calls(), sender.calls())
 			}
 		})
@@ -258,42 +269,56 @@ func TestRunOnceExhaustsGenerationRetriesAndFinalizesByRecurrence(t *testing.T) 
 		{name: "daily", recurrence: domainscheduledmessage.RecurrenceDaily, wantState: domainscheduledmessage.DeliveryStatusSkipped, wantSched: domainscheduledmessage.ScheduleStatusActive},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			now := time.Date(2026, 10, 14, 10, 0, 0, 0, time.UTC)
-			clock := &testClock{now: now}
-			repo := newMemoryScheduledRepository()
-			repo.addSchedule(testSchedule("schedule-1", "delivery-1", now, tc.recurrence, domainscheduledmessage.ContentModeAI, "theme"))
-			generator := &testGenerator{errors: []error{errors.New("failed"), errors.New("failed"), errors.New("failed"), errors.New("failed"), errors.New("must not run")}}
-			cfg := testScheduledConfig()
-			cfg.GenerationMaxRetries = 3
-			scheduler := newTestScheduler(t, repo, nil, generator, &testSender{}, cfg, clock)
-
-			for attempt := 1; attempt <= 4; attempt++ {
-				if err := scheduler.RunOnce(context.Background(), clock.time()); err != nil {
-					t.Fatalf("RunOnce() attempt %d error = %v", attempt, err)
-				}
-				_, delivery := repo.state("schedule-1", "delivery-1")
-				if delivery.GenerationAttempts != attempt {
-					t.Fatalf("reserved generation attempts = %d, want %d", delivery.GenerationAttempts, attempt)
-				}
-				if attempt < 4 {
-					if delivery.Status != domainscheduledmessage.DeliveryStatusPending || delivery.NextAttemptAt == nil {
-						t.Fatalf("attempt %d state = %s, next %v; want pending retry", attempt, delivery.Status, delivery.NextAttemptAt)
-					}
-					clock.set(*delivery.NextAttemptAt)
-				}
-			}
-
-			schedule, delivery := repo.state("schedule-1", "delivery-1")
-			if generator.calls() != 4 || delivery.Status != tc.wantState || schedule.Status != tc.wantSched {
-				t.Fatalf("calls/state = %d/%s/%s; want 4/%s/%s", generator.calls(), delivery.Status, schedule.Status, tc.wantState, tc.wantSched)
-			}
-			if tc.recurrence == domainscheduledmessage.RecurrenceDaily {
-				next := repo.next["schedule-1"]
-				if next == nil || !next.ScheduledAt.After(clock.time()) {
-					t.Fatalf("next recurrence = %v; want a future occurrence", next)
-				}
-			}
+			runGenerationRetryCase(t, tc.recurrence, tc.wantState, tc.wantSched)
 		})
+	}
+}
+
+func runGenerationRetryCase(t *testing.T, recurrence domainscheduledmessage.Recurrence, wantState domainscheduledmessage.DeliveryStatus, wantSchedule domainscheduledmessage.ScheduleStatus) {
+	t.Helper()
+	now := time.Date(2026, 10, 14, 10, 0, 0, 0, time.UTC)
+	clock := &testClock{now: now}
+	repo := newMemoryScheduledRepository()
+	repo.addSchedule(testSchedule("schedule-1", "delivery-1", now, recurrence, domainscheduledmessage.ContentModeAI, "theme"))
+	generator := &testGenerator{errors: []error{errors.New("failed"), errors.New("failed"), errors.New("failed"), errors.New("failed"), errors.New("must not run")}}
+	cfg := testScheduledConfig()
+	cfg.GenerationMaxRetries = 3
+	scheduler := newTestScheduler(t, repo, nil, generator, &testSender{}, cfg, clock)
+	for attempt := 1; attempt <= 4; attempt++ {
+		runGenerationRetryAttempt(t, scheduler, repo, clock, attempt)
+	}
+	schedule, delivery := repo.state("schedule-1", "delivery-1")
+	if generator.calls() != 4 || delivery.Status != wantState || schedule.Status != wantSchedule {
+		t.Fatalf("calls/state = %d/%s/%s; want 4/%s/%s", generator.calls(), delivery.Status, schedule.Status, wantState, wantSchedule)
+	}
+	assertNextRecurrenceIfDaily(t, recurrence, repo, clock)
+}
+
+func runGenerationRetryAttempt(t *testing.T, scheduler *ScheduledMessageScheduler, repo *memoryScheduledRepository, clock *testClock, attempt int) {
+	t.Helper()
+	if err := scheduler.RunOnce(context.Background(), clock.time()); err != nil {
+		t.Fatalf("RunOnce() attempt %d error = %v", attempt, err)
+	}
+	_, delivery := repo.state("schedule-1", "delivery-1")
+	if delivery.GenerationAttempts != attempt {
+		t.Fatalf("reserved generation attempts = %d, want %d", delivery.GenerationAttempts, attempt)
+	}
+	if attempt < 4 {
+		if delivery.Status != domainscheduledmessage.DeliveryStatusPending || delivery.NextAttemptAt == nil {
+			t.Fatalf("attempt %d state = %s, next %v; want pending retry", attempt, delivery.Status, delivery.NextAttemptAt)
+		}
+		clock.set(*delivery.NextAttemptAt)
+	}
+}
+
+func assertNextRecurrenceIfDaily(t *testing.T, recurrence domainscheduledmessage.Recurrence, repo *memoryScheduledRepository, clock *testClock) {
+	t.Helper()
+	if recurrence != domainscheduledmessage.RecurrenceDaily {
+		return
+	}
+	next := repo.next["schedule-1"]
+	if next == nil || !next.ScheduledAt.After(clock.time()) {
+		t.Fatalf("next recurrence = %v; want a future occurrence", next)
 	}
 }
 
@@ -1348,41 +1373,41 @@ func cloneSchedule(schedule *domainscheduledmessage.Schedule) *domainscheduledme
 	if schedule == nil {
 		return nil
 	}
-	copy := *schedule
-	copy.RecipientMemberID = cloneString(schedule.RecipientMemberID)
-	copy.SpaceChannelID = cloneString(schedule.SpaceChannelID)
-	copy.NextScheduledAt = cloneTime(schedule.NextScheduledAt)
-	return &copy
+	cloned := *schedule
+	cloned.RecipientMemberID = cloneString(schedule.RecipientMemberID)
+	cloned.SpaceChannelID = cloneString(schedule.SpaceChannelID)
+	cloned.NextScheduledAt = cloneTime(schedule.NextScheduledAt)
+	return &cloned
 }
 
 func cloneDelivery(delivery *domainscheduledmessage.Delivery) *domainscheduledmessage.Delivery {
 	if delivery == nil {
 		return nil
 	}
-	copy := *delivery
-	copy.ContentSnapshot = cloneString(delivery.ContentSnapshot)
-	copy.NextAttemptAt = cloneTime(delivery.NextAttemptAt)
-	copy.LeaseToken = cloneString(delivery.LeaseToken)
-	copy.LeaseExpiresAt = cloneTime(delivery.LeaseExpiresAt)
-	copy.FailureCategory = cloneString(delivery.FailureCategory)
-	copy.SentAt = cloneTime(delivery.SentAt)
-	return &copy
+	cloned := *delivery
+	cloned.ContentSnapshot = cloneString(delivery.ContentSnapshot)
+	cloned.NextAttemptAt = cloneTime(delivery.NextAttemptAt)
+	cloned.LeaseToken = cloneString(delivery.LeaseToken)
+	cloned.LeaseExpiresAt = cloneTime(delivery.LeaseExpiresAt)
+	cloned.FailureCategory = cloneString(delivery.FailureCategory)
+	cloned.SentAt = cloneTime(delivery.SentAt)
+	return &cloned
 }
 
 func cloneString(value *string) *string {
 	if value == nil {
 		return nil
 	}
-	copy := *value
-	return &copy
+	cloned := *value
+	return &cloned
 }
 
 func cloneTime(value *time.Time) *time.Time {
 	if value == nil {
 		return nil
 	}
-	copy := *value
-	return &copy
+	cloned := *value
+	return &cloned
 }
 
 func schedTestTimePointer(value time.Time) *time.Time { return &value }
