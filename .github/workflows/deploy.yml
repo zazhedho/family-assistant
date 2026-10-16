@@ -1,0 +1,231 @@
+name: Deploy Family Assistant
+
+on:
+  workflow_run:
+    workflows: ["Build Family Assistant Image"]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      target:
+        description: VPS tujuan
+        type: choice
+        required: true
+        default: oci-arm64
+        options:
+          - oci-arm64
+          - vps-amd64
+
+concurrency:
+  group: family-assistant-deploy-${{ github.event.inputs.target || vars.DEPLOY_TARGET || 'oci-arm64' }}
+  cancel-in-progress: false
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  deploy:
+    if: >-
+      (github.event_name == 'workflow_run' &&
+       github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.head_branch == 'main') ||
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')
+    runs-on: ubuntu-latest
+    environment: Production
+    env:
+      TARGET: ${{ github.event.inputs.target || vars.DEPLOY_TARGET || 'oci-arm64' }}
+    steps:
+      - name: Resolve latest successful main build for manual deploy
+        id: resolve
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          build_run="$(gh api "repos/${GH_REPOSITORY}/actions/workflows/build.yml/runs?branch=main&per_page=1" --jq '.workflow_runs[0] | [.conclusion // "", .head_sha // ""] | @tsv')"
+          IFS=$'\t' read -r build_conclusion build_sha <<< "$build_run"
+          if [[ "$build_conclusion" != success || ! "$build_sha" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "The latest main image build is missing or unsuccessful."
+            exit 1
+          fi
+          echo "sha=${build_sha}" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout deployment config
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || steps.resolve.outputs.sha }}
+
+      - name: Deploy exact image
+        env:
+          OCI_VPS_HOST: ${{ secrets.OCI_VPS_HOST }}
+          OCI_VPS_USER: ${{ secrets.OCI_VPS_USER }}
+          OCI_VPS_SSH_KEY: ${{ secrets.OCI_VPS_SSH_KEY }}
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+          GITHUB_REPOSITORY_OWNER: ${{ github.repository_owner }}
+          DEPLOY_SHA: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || steps.resolve.outputs.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          source_host=""
+          source_user=""
+          source_key=""
+          case "$TARGET" in
+            oci-arm64)
+              deploy_host="$OCI_VPS_HOST"
+              deploy_user="$OCI_VPS_USER"
+              deploy_key="$OCI_VPS_SSH_KEY"
+              expected_arch=arm64
+              source_host="$VPS_HOST"
+              source_user="$VPS_USER"
+              source_key="$VPS_SSH_KEY"
+              ;;
+            vps-amd64)
+              deploy_host="$VPS_HOST"
+              deploy_user="$VPS_USER"
+              deploy_key="$VPS_SSH_KEY"
+              expected_arch=amd64
+              ;;
+            *)
+              echo "Unsupported deployment target: ${TARGET}."
+              exit 1
+              ;;
+          esac
+
+          if [[ -z "$deploy_host" || -z "$deploy_user" || -z "$deploy_key" ]]; then
+            echo "Missing target host, user, or SSH key secret for ${TARGET}."
+            exit 1
+          fi
+          if [[ ! "$deploy_host" =~ ^[A-Za-z0-9][A-Za-z0-9.-]*$ || ! "$deploy_user" =~ ^[A-Za-z_][A-Za-z0-9_-]*$ ]]; then
+            echo "Invalid target host or user secret for ${TARGET}."
+            exit 1
+          fi
+          if [[ ! "$DEPLOY_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "Invalid deployment commit SHA."
+            exit 1
+          fi
+
+          image_ref="ghcr.io/${GITHUB_REPOSITORY_OWNER}/family-assistant:${DEPLOY_SHA}"
+          if [[ ! "$image_ref" =~ ^ghcr\.io/[A-Za-z0-9_.-]+/family-assistant:[0-9a-f]{40}$ ]]; then
+            echo "Invalid deployment image reference."
+            exit 1
+          fi
+
+          if [[ "$TARGET" == "oci-arm64" ]]; then
+            if [[ -z "$source_host" || -z "$source_user" || -z "$source_key" ]]; then
+              echo "Missing old VPS connection secrets needed to copy the existing env file."
+              exit 1
+            fi
+            if [[ ! "$source_host" =~ ^[A-Za-z0-9][A-Za-z0-9.-]*$ || ! "$source_user" =~ ^[A-Za-z_][A-Za-z0-9_-]*$ ]]; then
+              echo "Invalid old VPS host or user secret."
+              exit 1
+            fi
+          fi
+
+          temp_dir="$(mktemp -d)"
+          trap 'rm -rf "$temp_dir"' EXIT
+          target_key_file="${temp_dir}/target_key"
+          source_key_file="${temp_dir}/source_key"
+          known_hosts="${temp_dir}/known_hosts"
+          umask 077
+          printf '%s\n' "$deploy_key" > "$target_key_file"
+
+          ssh-keyscan -T 10 -H "$deploy_host" > "${temp_dir}/target_hosts" 2>/dev/null
+          if [[ ! -s "${temp_dir}/target_hosts" ]]; then
+            echo "Could not scan target SSH host key for ${TARGET}."
+            exit 1
+          fi
+          cat "${temp_dir}/target_hosts" > "$known_hosts"
+
+          if [[ "$TARGET" == "oci-arm64" ]]; then
+            printf '%s\n' "$source_key" > "$source_key_file"
+            ssh-keyscan -T 10 -H "$source_host" > "${temp_dir}/source_hosts" 2>/dev/null
+            if [[ ! -s "${temp_dir}/source_hosts" ]]; then
+              echo "Could not scan old VPS SSH host key."
+              exit 1
+            fi
+            cat "${temp_dir}/source_hosts" >> "$known_hosts"
+          fi
+
+          ssh_options=(
+            -o UserKnownHostsFile="$known_hosts"
+            -o StrictHostKeyChecking=yes
+            -o BatchMode=yes
+            -o IdentitiesOnly=yes
+            -o PasswordAuthentication=no
+            -o PreferredAuthentications=publickey
+            -o ConnectTimeout=10
+            -o ServerAliveInterval=15
+            -o ServerAliveCountMax=3
+          )
+
+          if [[ "$TARGET" == "oci-arm64" ]]; then
+            ssh -i "$target_key_file" "${ssh_options[@]}" "${deploy_user}@${deploy_host}" \
+              "sudo -n install -d -m 0750 /opt/apps/family-assistant && sudo -n install -d -m 0755 /var/log/apps/family-assistant"
+
+            ssh -i "$source_key_file" "${ssh_options[@]}" "${source_user}@${source_host}" \
+              "test -r /opt/apps/family-assistant/.env && cat /opt/apps/family-assistant/.env" |
+              ssh -i "$target_key_file" "${ssh_options[@]}" "${deploy_user}@${deploy_host}" \
+                "sudo -n sh -c 'umask 077; cat > /opt/apps/family-assistant/.env.tmp && mv /opt/apps/family-assistant/.env.tmp /opt/apps/family-assistant/.env'"
+
+            ssh -i "$target_key_file" "${ssh_options[@]}" "${deploy_user}@${deploy_host}" \
+              "sudo -n sh -c 'umask 022; cat > /opt/apps/family-assistant/compose.yaml.tmp && mv /opt/apps/family-assistant/compose.yaml.tmp /opt/apps/family-assistant/compose.yaml'" \
+              < compose.yaml
+
+            compose_file=/opt/apps/family-assistant/compose.yaml
+          else
+            compose_file=/opt/apps/family-assistant/docker-compose.yml
+          fi
+
+          ssh -i "$target_key_file" "${ssh_options[@]}" "${deploy_user}@${deploy_host}" \
+            "bash -s -- '${image_ref}' '${expected_arch}' '${TARGET}' '${compose_file}'" <<'REMOTE'
+          set -euo pipefail
+          image_ref="$1"
+          expected_arch="$2"
+          target="$3"
+          compose_file="$4"
+
+          if [[ ! "$image_ref" =~ ^ghcr\.io/[A-Za-z0-9_.-]+/family-assistant:[0-9a-f]{40}$ ]]; then
+            echo "Invalid deployment image reference."
+            exit 1
+          fi
+
+          case "$expected_arch:$(uname -m)" in
+            arm64:aarch64|amd64:x86_64) ;;
+            *)
+              echo "Target architecture mismatch: expected ${expected_arch}, got $(uname -m)."
+              exit 1
+              ;;
+          esac
+
+          if [[ ! -r "$compose_file" || ! -r /opt/apps/family-assistant/.env ]]; then
+            echo "Compose config or runtime env file is missing."
+            exit 1
+          fi
+
+          override_file="$(mktemp /tmp/family-assistant-override.XXXXXX.yaml)"
+          trap 'rm -f "$override_file"' EXIT
+          cat > "$override_file" <<EOF
+          services:
+            backend:
+              image: ${image_ref}
+          EOF
+
+          sudo -n docker compose -f "$compose_file" -f "$override_file" config --quiet
+          sudo -n docker compose -f "$compose_file" -f "$override_file" pull backend
+          sudo -n docker compose -f "$compose_file" -f "$override_file" up -d --no-deps backend
+
+          container_id="$(sudo -n docker compose -f "$compose_file" -f "$override_file" ps -q backend)"
+          if [[ -z "$container_id" || "$(sudo -n docker inspect --format '{{.State.Status}}' "$container_id")" != running ]]; then
+            echo "Family Assistant container is not running after deployment."
+            exit 1
+          fi
+          if [[ "$(sudo -n docker inspect --format '{{.Config.Image}}' "$container_id")" != "$image_ref" ]]; then
+            echo "Family Assistant container is not using the requested image."
+            exit 1
+          fi
+          REMOTE
