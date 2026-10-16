@@ -579,17 +579,14 @@ func scheduledMessageTarget(channel *domainscheduledmessage.SpaceChannel, identi
 }
 
 func scheduledMessageText(schedule *domainscheduledmessage.Schedule, content string) string {
-	lines := []string{
-		"From member " + strings.TrimSpace(schedule.CreatedByMemberID),
-		"Scheduled message " + strings.TrimSpace(schedule.ID) + " · space " + strings.TrimSpace(schedule.SpaceID),
-		"",
-		content,
-		"",
+	if schedule.Recurrence == domainscheduledmessage.RecurrenceOnce {
+		return content
 	}
+	lines := []string{content, ""}
 	if schedule.Target == domainscheduledmessage.TargetDM {
-		lines = append(lines, "Reply unsubscribe to stop these messages.")
+		lines = append(lines, "Balas *unsubscribe* untuk berhenti menerima pesan ini.")
 	} else {
-		lines = append(lines, "Only a Space owner or admin can cancel this schedule.")
+		lines = append(lines, "Hanya admin grup yang dapat mengubah atau menghentikan pesan terjadwal ini.")
 	}
 	return strings.Join(lines, "\n")
 }

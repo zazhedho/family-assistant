@@ -19,7 +19,7 @@ import (
 	"family-assistant/pkg/config"
 )
 
-func TestRunOnceSendsFixedMessageWithManagementContext(t *testing.T) {
+func TestRunOnceSendsFixedMessageWithoutInternalIDs(t *testing.T) {
 	now := time.Date(2026, 10, 14, 10, 0, 0, 0, time.UTC)
 	clock := &testClock{now: now}
 	repo := newMemoryScheduledRepository()
@@ -35,14 +35,58 @@ func TestRunOnceSendsFixedMessageWithManagementContext(t *testing.T) {
 		t.Fatalf("send calls = %d, want 1", sender.calls())
 	}
 	message := sender.messages[0]
-	for _, part := range []string{"member-sender", "schedule-1", "space-1", "unsubscribe", "hello"} {
-		if !strings.Contains(message, part) {
-			t.Errorf("message %q missing %q", message, part)
+	if !strings.Contains(message, "hello") {
+		t.Errorf("message %q does not contain fixed content", message)
+	}
+	for _, internalID := range []string{"member-sender", "schedule-1", "space-1"} {
+		if strings.Contains(message, internalID) {
+			t.Errorf("message %q exposes internal ID %q", message, internalID)
 		}
 	}
 	schedule, delivery := repo.state("schedule-1", "delivery-1")
 	if delivery.Status != domainscheduledmessage.DeliveryStatusSent || schedule.Status != domainscheduledmessage.ScheduleStatusSent {
 		t.Fatalf("final state = %s/%s, want SENT/SENT", delivery.Status, schedule.Status)
+	}
+}
+
+func TestScheduledMessageTextHidesInternalIDs(t *testing.T) {
+	tests := []struct {
+		name       string
+		target     domainscheduledmessage.TargetKind
+		recurrence domainscheduledmessage.Recurrence
+		want       string
+	}{
+		{
+			name:       "recurring direct message",
+			target:     domainscheduledmessage.TargetDM,
+			recurrence: domainscheduledmessage.RecurrenceDaily,
+			want:       "message body\n\nBalas *unsubscribe* untuk berhenti menerima pesan ini.",
+		},
+		{
+			name:       "recurring group",
+			target:     domainscheduledmessage.TargetGroup,
+			recurrence: domainscheduledmessage.RecurrenceDaily,
+			want:       "message body\n\nHanya admin grup yang dapat mengubah atau menghentikan pesan terjadwal ini.",
+		},
+		{
+			name:       "one-time direct message",
+			target:     domainscheduledmessage.TargetDM,
+			recurrence: domainscheduledmessage.RecurrenceOnce,
+			want:       "message body",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			schedule := &domainscheduledmessage.Schedule{
+				ID: "schedule-internal-id", SpaceID: "space-internal-id", CreatedByMemberID: "member-internal-id",
+				Target: test.target, Recurrence: test.recurrence,
+			}
+			got := scheduledMessageText(schedule, "message body")
+			if got != test.want {
+				t.Errorf("scheduledMessageText() = %q, want %q", got, test.want)
+			}
+		})
 	}
 }
 
