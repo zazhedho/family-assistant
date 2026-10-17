@@ -662,16 +662,20 @@ authorized Space UUID or exact user-facing name; a blank selector uses the
 user's Personal Space. Every reminder operation re-authorizes the selected
 Space and resource.
 
-### Production deployment: Docker image and Hermes on one VPS
+### Production deployment: Docker image and Hermes per VPS
 
-The VPS needs Docker Compose, Nginx, Hermes, access to PostgreSQL (Neon is
+Each VPS needs Docker Compose, Nginx, Hermes, access to PostgreSQL (Neon is
 supported), and optionally Redis. The application repository does not need to
 be cloned on the VPS. GitHub Actions builds `ghcr.io/<owner>/family-assistant:latest`
-from changes on `main`, then deploys the `backend` service from
-`/opt/apps/family-assistant/docker-compose.yml`. Set the GitHub Actions
-`Production` secrets `VPS_HOST`, `VPS_USER`, and `VPS_SSH_KEY`; grant the VPS
-access to the GHCR package if it is private. README and Hermes plugin changes
-alone do not trigger an image build or deploy.
+from changes on `main`, then deploys the target's Compose file
+(`docker-compose.yml` on `vps-amd64`; `compose.yaml` on `oci-arm64`). Set the GitHub Actions
+`Production` secrets `VPS_HOST`, `VPS_USER`, and `VPS_SSH_KEY` for the legacy
+`vps-amd64` target, and `OCI_VPS_HOST`, `OCI_VPS_USER`, and `OCI_VPS_SSH_KEY`
+for `oci-arm64`. Each target must have its own `/opt/apps/family-assistant/.env`
+provisioned before deployment. The workflow never copies environment files
+between VPSes or modifies the target `.env`. Grant each VPS access to the GHCR
+package if it is private. README and Hermes plugin changes alone do not trigger
+an image build or deploy.
 
 Follow steps 1–8 in order for a fresh server. Commands run on the VPS as the
 service administrator (`root` in this guide), except the explicitly labelled
@@ -742,6 +746,12 @@ Before step 1:
    `MCP_IDENTITY_SECRET`, `JWT_KEY`, and database credentials out of Git.
    Fresh databases migrate on first container start; no manual SQL patch is needed.
 
+   The bridge URL is target-specific: use
+   `http://host.docker.internal:3011` on `vps-amd64` and
+   `http://host.docker.internal:2000` on `oci-arm64`. Keep each VPS's database,
+   Redis, and other environment values in that VPS's own `.env`; deployment
+   checks for the file but never copies or rewrites it.
+
 3. Install and configure Hermes on the host, not inside the backend container:
 
    ```sh
@@ -791,8 +801,9 @@ Before step 1:
    that number's WhatsApp Linked Devices screen. Only the default profile owns
    this session. Do not start a second gateway for the same bot number.
    Install/start the background gateway only after step 7.
-   Its WhatsApp bridge listens on host loopback port `3010`.
-   The backend container reaches it through a host-only Nginx proxy on `3011`.
+   Its WhatsApp bridge listens on host loopback port `3010` on the legacy
+   `vps-amd64` target. The backend container reaches it through a host-only
+   Nginx proxy on `3011`.
    Create the Compose network with `docker compose create backend`, then find
    its gateway with `docker network inspect family-assistant_default`. Use that
    address in both `extra_hosts` above and the Nginx `listen` directive. Save
@@ -813,6 +824,35 @@ Before step 1:
    Keep `3011` bound to the Docker gateway, and keep `3010`, `8086`, and `8087`
    off public interfaces. Test Nginx with `nginx -t`, then reload it with
    `systemctl reload nginx`.
+
+   The OCI Compose target maps `host.docker.internal` to Docker's `host-gateway`
+   address (`172.17.0.1` on this VPS). Nginx listens on `172.17.0.1:2000` and
+   forwards to `127.0.0.1:2000`. This keeps the bridge reachable through the
+   Docker host gateway without exposing Hermes publicly. Configure this Nginx
+   site once on OCI; deployments leave the host Nginx configuration untouched:
+
+   ```sh
+   sudo install -d -m 0755 /etc/nginx/sites-available /etc/nginx/sites-enabled
+   sudo tee /etc/nginx/sites-available/family-assistant-hermes-bridge.conf >/dev/null <<'NGINX'
+   server {
+       listen 172.17.0.1:2000;
+       server_name _;
+       location / {
+           proxy_http_version 1.1;
+           proxy_set_header Host 127.0.0.1:2000;
+           proxy_pass http://127.0.0.1:2000;
+       }
+   }
+   NGINX
+   sudo ln -sfn /etc/nginx/sites-available/family-assistant-hermes-bridge.conf /etc/nginx/sites-enabled/family-assistant-hermes-bridge.conf
+   sudo nginx -t && sudo systemctl reload nginx
+   ```
+
+   Allow only the Family Assistant Docker subnet through UFW:
+   `sudo ufw allow from 172.19.0.0/16 to 172.17.0.1 port 2000 proto tcp comment 'Family Assistant Hermes bridge'`.
+   Do not open port `2000` to public interfaces.
+   Verify from the backend container with
+   `docker exec family-assistant wget -qO- http://host.docker.internal:2000/health`.
 
 4. Start the backend **before activating the new identity plugin**:
 

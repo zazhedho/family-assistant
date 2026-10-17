@@ -71,18 +71,12 @@ jobs:
         run: |
           set -euo pipefail
 
-          source_host=""
-          source_user=""
-          source_key=""
           case "$TARGET" in
             oci-arm64)
               deploy_host="$OCI_VPS_HOST"
               deploy_user="$OCI_VPS_USER"
               deploy_key="$OCI_VPS_SSH_KEY"
               expected_arch=arm64
-              source_host="$VPS_HOST"
-              source_user="$VPS_USER"
-              source_key="$VPS_SSH_KEY"
               ;;
             vps-amd64)
               deploy_host="$VPS_HOST"
@@ -115,21 +109,9 @@ jobs:
             exit 1
           fi
 
-          if [[ "$TARGET" == "oci-arm64" ]]; then
-            if [[ -z "$source_host" || -z "$source_user" || -z "$source_key" ]]; then
-              echo "Missing old VPS connection secrets needed to copy the existing env file."
-              exit 1
-            fi
-            if [[ ! "$source_host" =~ ^[A-Za-z0-9][A-Za-z0-9.-]*$ || ! "$source_user" =~ ^[A-Za-z_][A-Za-z0-9_-]*$ ]]; then
-              echo "Invalid old VPS host or user secret."
-              exit 1
-            fi
-          fi
-
           temp_dir="$(mktemp -d)"
           trap 'rm -rf "$temp_dir"' EXIT
           target_key_file="${temp_dir}/target_key"
-          source_key_file="${temp_dir}/source_key"
           known_hosts="${temp_dir}/known_hosts"
           umask 077
           printf '%s\n' "$deploy_key" > "$target_key_file"
@@ -140,16 +122,6 @@ jobs:
             exit 1
           fi
           cat "${temp_dir}/target_hosts" > "$known_hosts"
-
-          if [[ "$TARGET" == "oci-arm64" ]]; then
-            printf '%s\n' "$source_key" > "$source_key_file"
-            ssh-keyscan -T 10 -H "$source_host" > "${temp_dir}/source_hosts" 2>/dev/null
-            if [[ ! -s "${temp_dir}/source_hosts" ]]; then
-              echo "Could not scan old VPS SSH host key."
-              exit 1
-            fi
-            cat "${temp_dir}/source_hosts" >> "$known_hosts"
-          fi
 
           ssh_options=(
             -o UserKnownHostsFile="$known_hosts"
@@ -167,10 +139,8 @@ jobs:
             ssh -i "$target_key_file" "${ssh_options[@]}" "${deploy_user}@${deploy_host}" \
               "sudo -n install -d -m 0750 /opt/apps/family-assistant && sudo -n install -d -m 0755 /var/log/apps/family-assistant"
 
-            ssh -i "$source_key_file" "${ssh_options[@]}" "${source_user}@${source_host}" \
-              "test -r /opt/apps/family-assistant/.env && cat /opt/apps/family-assistant/.env" |
-              ssh -i "$target_key_file" "${ssh_options[@]}" "${deploy_user}@${deploy_host}" \
-                "sudo -n sh -c 'umask 077; cat > /opt/apps/family-assistant/.env.tmp && mv /opt/apps/family-assistant/.env.tmp /opt/apps/family-assistant/.env'"
+            ssh -i "$target_key_file" "${ssh_options[@]}" "${deploy_user}@${deploy_host}" \
+              "if ! sudo -n test -r /opt/apps/family-assistant/.env; then echo 'Target .env is missing; provision it before deployment.' >&2; exit 1; fi"
 
             ssh -i "$target_key_file" "${ssh_options[@]}" "${deploy_user}@${deploy_host}" \
               "sudo -n sh -c 'umask 022; cat > /opt/apps/family-assistant/compose.yaml.tmp && mv /opt/apps/family-assistant/compose.yaml.tmp /opt/apps/family-assistant/compose.yaml'" \
