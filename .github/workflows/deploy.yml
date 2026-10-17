@@ -46,8 +46,8 @@ jobs:
           set -euo pipefail
           build_run="$(gh api "repos/${GH_REPOSITORY}/actions/workflows/build.yml/runs?branch=main&per_page=1" --jq '.workflow_runs[0] | [.conclusion // "", .head_sha // ""] | @tsv')"
           IFS=$'\t' read -r build_conclusion build_sha <<< "$build_run"
-          if [[ "$build_conclusion" != success || ! "$build_sha" =~ ^[0-9a-f]{40}$ ]]; then
-            echo "The latest main image build is missing or unsuccessful."
+          if [[ "$build_conclusion" != success || ! "$build_sha" =~ ^[0-9a-f]{40}$ || "$build_sha" != "$GITHUB_SHA" ]]; then
+            echo "No successful main image build exists for this commit; deployment skipped."
             exit 1
           fi
           echo "sha=${build_sha}" >> "$GITHUB_OUTPUT"
