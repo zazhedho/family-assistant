@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import logging
 import os
 import secrets
 import time
@@ -18,6 +19,8 @@ from decimal import Decimal, InvalidOperation
 from typing import Any
 
 
+logger = logging.getLogger(__name__)
+
 IDENTITY_ARGUMENT_NAME = "__hermes_identity"
 IDENTITY_VERSION = "v1"
 _IDENTITY_SECRET_ENV = "FAMILY_ASSISTANT_IDENTITY_SECRET"
@@ -26,7 +29,7 @@ _WHATSAPP_PLATFORMS = {"whatsapp", "whatsapp_cloud"}
 _MESSAGE_PLATFORMS = _WHATSAPP_PLATFORMS | {
     "telegram", "discord", "slack", "signal", "matrix", "mattermost",
 }
-_current_identity: ContextVar[dict[str, str] | None] = ContextVar(
+_current_identity: ContextVar[dict[str, Any] | None] = ContextVar(
     "family_assistant_identity", default=None
 )
 
@@ -37,7 +40,7 @@ def register(ctx: Any) -> None:
     ctx.register_middleware("tool_request", inject_identity)
 
 
-def capture_gateway_identity(event: Any, **_: Any) -> None:
+def capture_gateway_identity(event: Any, gateway: Any = None, **_: Any) -> None:
     source = getattr(event, "source", None)
     platform = _text(getattr(source, "platform", ""))
     if platform not in _MESSAGE_PLATFORMS:
@@ -53,11 +56,45 @@ def capture_gateway_identity(event: Any, **_: Any) -> None:
     chat_id = _text(getattr(source, "chat_id", "")) or external_id
     chat_type = _text(getattr(source, "chat_type", ""))
     identity = _identity(platform, external_id, chat_id, chat_type)
+    identity["shared"] = _is_shared_session(source, chat_type, gateway)
     message_at = _message_timestamp(event)
     if message_at is not None:
         identity["message_at"] = str(message_at)
     _current_identity.set(identity)
     return None
+
+
+def _shared_session_helper() -> Any:
+    """Hermes' own shared-session predicate, or None on releases that lack it."""
+    try:
+        from gateway.session import is_shared_multi_user_session
+    except ImportError:
+        return None
+    return is_shared_multi_user_session
+
+
+def _is_shared_session(source: Any, chat_type: str, gateway: Any) -> bool:
+    """True when the session for ``source`` may serve several members at once.
+
+    Hermes steers/queues follow-up messages from other members into the running
+    turn of a shared session without running ``pre_gateway_dispatch`` for them,
+    so the captured sender could be the wrong person. Fails closed: anything
+    that cannot be positively resolved for a non-DM chat counts as shared.
+    """
+    if chat_type == "dm":
+        return False
+    helper = _shared_session_helper()
+    config = getattr(gateway, "config", None)
+    if helper is None or config is None:
+        return True
+    try:
+        return bool(helper(
+            source,
+            group_sessions_per_user=getattr(config, "group_sessions_per_user", True),
+            thread_sessions_per_user=getattr(config, "thread_sessions_per_user", False),
+        ))
+    except Exception:
+        return True
 
 
 def inject_message_time(**_: Any) -> dict[str, str] | None:
@@ -120,6 +157,14 @@ def inject_identity(tool_name: str = "", args: dict[str, Any] | None = None, **_
     if not secret or not identity:
         # Family Assistant is configured to fail closed when this envelope is required.
         return None
+    if identity.get("shared"):
+        logger.warning(
+            "family-assistant-identity: refusing to sign %s for a shared multi-user "
+            "session (platform=%s chat=...%s). Set group_sessions_per_user: true so "
+            "each member gets their own session; the backend will reject this call.",
+            tool_name, identity.get("channel", ""), str(identity.get("chat_id", ""))[-4:],
+        )
+        return None
 
     envelope = {
         "version": IDENTITY_VERSION,
@@ -153,7 +198,7 @@ def verify_signature(secret: str, envelope: dict[str, Any]) -> bool:
     return hmac.compare_digest(signature, expected)
 
 
-def _session_identity() -> dict[str, str] | None:
+def _session_identity() -> dict[str, Any] | None:
     current = _current_identity.get()
     if current:
         return current
@@ -177,6 +222,10 @@ def _session_identity() -> dict[str, str] | None:
         chat_id = _text(os.environ.get("HERMES_SESSION_CHAT_ID", ""))
         chat_type = _text(os.environ.get("HERMES_SESSION_CHAT_TYPE", ""))
     if platform not in _MESSAGE_PLATFORMS or not external_id:
+        return None
+    if chat_type != "dm":
+        # This fallback can be a stale session creator (internal/queued events), which is
+        # not necessarily the member who asked. Only a DM has exactly one possible sender.
         return None
     return _identity(platform, external_id, chat_id or external_id, chat_type)
 
@@ -209,7 +258,7 @@ def _text(value: Any) -> str:
     return str(value or "").strip()
 
 
-def _identity(platform: str, external_id: str, chat_id: str, chat_type: str) -> dict[str, str]:
+def _identity(platform: str, external_id: str, chat_id: str, chat_type: str) -> dict[str, Any]:
     return {
         "provider": "hermes",
         "external_id": external_id if platform in _WHATSAPP_PLATFORMS else f"{platform}:{external_id}",

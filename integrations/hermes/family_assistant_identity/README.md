@@ -30,6 +30,20 @@ The plugin uses Hermes' `tools.override` capability to replace model-supplied
 identity arguments with the signed messaging sender envelope. Grant that
 capability once when enabling the plugin; it persists across gateway restarts.
 
+### Group sessions must be per-user
+
+Set `group_sessions_per_user: true` in the Hermes gateway configuration (it is
+Hermes' default). The plugin fails closed otherwise: when a non-DM chat runs a
+session shared by all members (`group_sessions_per_user: false`, or a thread
+session with `thread_sessions_per_user: false`), it logs a warning and does not
+sign tool calls, so the backend rejects them as unauthenticated. Hermes steers,
+queues, and batches messages from other members into the running turn of a
+shared session without running `pre_gateway_dispatch` for them, so a tool call
+requested by member B would otherwise be signed as member A and run with A's
+permissions. The same refusal applies when the shared-session state cannot be
+determined (older Hermes without `is_shared_multi_user_session`), and the
+session-environment fallback only signs DMs. Direct messages are unaffected.
+
 ### Platform support and compatibility
 
 One plugin supports WhatsApp, WhatsApp Cloud, Telegram, Discord, Slack, Signal,

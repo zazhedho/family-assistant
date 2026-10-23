@@ -406,6 +406,10 @@ func (s *ServiceUser) Update(ctx context.Context, id string, req dto.UserUpdate)
 
 	if req.Phone != "" {
 		phone := utils.NormalizePhoneTo62(req.Phone)
+		if phone != data.Phone {
+			// The new number has not been proven by its owner; UserRepo.Update uses Save, which writes NULL.
+			data.PhoneVerifiedAt = nil
+		}
 		data.Phone = phone
 	}
 

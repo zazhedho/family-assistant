@@ -402,6 +402,53 @@ func TestUpdateNormalizesEmailToLowercase(t *testing.T) {
 	}
 }
 
+func TestUpdateClearsPhoneVerificationWhenPhoneChanges(t *testing.T) {
+	verifiedAt := time.Date(2026, 9, 21, 10, 0, 0, 0, time.UTC)
+	repo := &userRepoMock{
+		user: domainuser.Users{Id: "user-1", Role: utils.RoleViewer, Phone: "6281111111111", PhoneVerifiedAt: &verifiedAt},
+	}
+	service := &ServiceUser{
+		UserRepo:       repo,
+		BlacklistRepo:  &authRepoMock{},
+		RoleRepo:       &roleRepoUserMock{},
+		PermissionRepo: &permissionRepoUserMock{},
+	}
+
+	user, err := service.Update(authContext("user-1", "Jane Doe", utils.RoleViewer), "user-1", dto.UserUpdate{
+		Phone: "0812-2222-2222",
+	})
+	if err != nil {
+		t.Fatalf("expected success, got %v", err)
+	}
+
+	if user.Phone != "6281222222222" || user.PhoneVerifiedAt != nil || repo.updated.PhoneVerifiedAt != nil {
+		t.Fatalf("expected new phone with cleared verification, got phone=%s returned=%v persisted=%v", user.Phone, user.PhoneVerifiedAt, repo.updated.PhoneVerifiedAt)
+	}
+}
+
+func TestUpdateKeepsPhoneVerificationWhenPhoneIsUnchanged(t *testing.T) {
+	verifiedAt := time.Date(2026, 9, 21, 10, 0, 0, 0, time.UTC)
+	repo := &userRepoMock{
+		user: domainuser.Users{Id: "user-1", Role: utils.RoleViewer, Phone: "6281111111111", PhoneVerifiedAt: &verifiedAt},
+	}
+	service := &ServiceUser{
+		UserRepo:       repo,
+		BlacklistRepo:  &authRepoMock{},
+		RoleRepo:       &roleRepoUserMock{},
+		PermissionRepo: &permissionRepoUserMock{},
+	}
+
+	for _, req := range []dto.UserUpdate{{Phone: "0811-1111-1111"}, {Name: "Jane Doe"}} {
+		user, err := service.Update(authContext("user-1", "Jane Doe", utils.RoleViewer), "user-1", req)
+		if err != nil {
+			t.Fatalf("expected success, got %v", err)
+		}
+		if user.PhoneVerifiedAt == nil || !user.PhoneVerifiedAt.Equal(verifiedAt) || repo.updated.PhoneVerifiedAt == nil {
+			t.Fatalf("expected verification kept for %+v, got returned=%v persisted=%v", req, user.PhoneVerifiedAt, repo.updated.PhoneVerifiedAt)
+		}
+	}
+}
+
 func TestLoginUserAcceptsEmailIdentifier(t *testing.T) {
 	t.Setenv("JWT_KEY", "test-secret-must-be-at-least-32-bytes")
 

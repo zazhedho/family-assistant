@@ -25,6 +25,9 @@ type AccountRegisterOutput struct {
 }
 
 func AccountRegister(ctx context.Context, registrar interfaceonboarding.ServiceOnboardingInterface, input AccountRegisterInput) (AccountRegisterOutput, error) {
+	if err := requireDirectMessage(ctx); err != nil {
+		return AccountRegisterOutput{}, err
+	}
 	request, ok := ExternalRequestFromContext(ctx)
 	if !ok || strings.TrimSpace(request.Provider) == "" || strings.TrimSpace(request.ExternalID) == "" {
 		return AccountRegisterOutput{}, MapToolError(serviceidentity.ErrUnauthenticated)

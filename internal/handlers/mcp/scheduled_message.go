@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"errors"
+	"strings"
 
 	domainidentity "family-assistant/internal/domain/identity"
 	domainscheduledmessage "family-assistant/internal/domain/scheduledmessage"
@@ -16,11 +17,11 @@ import (
 )
 
 type spaceChannelBindToolInput struct {
-	Space string `json:"space,omitempty" jsonschema:"Space UUID or exact name; blank selects Personal Space"`
+	Space string `json:"space,omitempty" jsonschema:"Space UUID or exact name to bind; required in a group or other shared chat"`
 }
 
 type scheduledMessageCreateToolInput struct {
-	Space             string `json:"space,omitempty" jsonschema:"Space UUID or exact name; blank selects Personal Space"`
+	Space             string `json:"space,omitempty" jsonschema:"Space UUID or exact name; blank selects Personal Space in a private chat or the bound Space in a group or other shared chat"`
 	Target            string `json:"target" jsonschema:"DM or GROUP"`
 	RecipientMemberID string `json:"recipient_member_id,omitempty" jsonschema:"recipient member UUID for a DM target"`
 	SpaceChannelID    string `json:"space_channel_id,omitempty" jsonschema:"bound group channel UUID for a GROUP target"`
@@ -32,7 +33,7 @@ type scheduledMessageCreateToolInput struct {
 }
 
 type scheduledMessageListToolInput struct {
-	Space      string `json:"space,omitempty" jsonschema:"Space UUID or exact name; blank selects Personal Space"`
+	Space      string `json:"space,omitempty" jsonschema:"Space UUID or exact name; blank selects Personal Space in a private chat or the bound Space in a group or other shared chat"`
 	ScheduleID string `json:"schedule_id,omitempty" jsonschema:"optional schedule UUID for a single schedule and delivery history"`
 	Status     string `json:"status,omitempty" jsonschema:"optional ACTIVE, SENT, FAILED, CANCELLED, or UNSUBSCRIBED filter"`
 }
@@ -46,7 +47,7 @@ type ScheduledMessageTargetsOutput struct {
 }
 
 type scheduledMessageUpdateToolInput struct {
-	Space       string  `json:"space,omitempty" jsonschema:"Space UUID or exact name; blank selects Personal Space"`
+	Space       string  `json:"space,omitempty" jsonschema:"Space UUID or exact name; blank selects Personal Space in a private chat or the bound Space in a group or other shared chat"`
 	ScheduleID  string  `json:"schedule_id" jsonschema:"schedule UUID"`
 	ContentMode *string `json:"content_mode,omitempty" jsonschema:"optional FIXED or AI"`
 	Content     *string `json:"content,omitempty" jsonschema:"optional fixed text or AI theme"`
@@ -56,7 +57,7 @@ type scheduledMessageUpdateToolInput struct {
 }
 
 type scheduledMessageMutationToolInput struct {
-	Space      string `json:"space,omitempty" jsonschema:"Space UUID or exact name; blank selects Personal Space"`
+	Space      string `json:"space,omitempty" jsonschema:"Space UUID or exact name; blank selects Personal Space in a private chat or the bound Space in a group or other shared chat"`
 	ScheduleID string `json:"schedule_id" jsonschema:"schedule UUID"`
 }
 
@@ -232,7 +233,12 @@ func scheduledMessageUnsubscribe(ctx context.Context, resolver interfaceidentity
 	return scheduledMessageOutput(unsubscribed), nil
 }
 
-func spaceChannelBind(ctx context.Context, resolver interfaceidentity.Resolver, service interfacescheduledmessage.Service, input spaceChannelBindToolInput) (dto.SpaceChannelOutput, error) {
+func spaceChannelBind(ctx context.Context, resolver interfaceidentity.Resolver, binder interfacescheduledmessage.GroupBinder, input spaceChannelBindToolInput) (dto.SpaceChannelOutput, error) {
+	// Binding is always explicit: a blank selector must not fall back to the group's
+	// current binding (or Personal Space), so the user names the Space to bind.
+	if _, shared := isVerifiedSharedChat(ctx); shared && strings.TrimSpace(input.Space) == "" {
+		return dto.SpaceChannelOutput{}, &MCPError{Code: "invalid_input", Message: "space is required to bind a group chat to a Space; ask the user which Space to use"}
+	}
 	actor, request, err := selectVerifiedScheduledActor(ctx, resolver, input.Space)
 	if err != nil {
 		return dto.SpaceChannelOutput{}, MapToolError(err)
@@ -240,10 +246,10 @@ func spaceChannelBind(ctx context.Context, resolver interfaceidentity.Resolver, 
 	if request.Channel != "whatsapp" || request.ChatType != "group" || request.ChatID == "" {
 		return dto.SpaceChannelOutput{}, MapToolError(interfacescheduledmessage.ErrInvalidWhatsAppIdentity)
 	}
-	if service == nil {
-		return dto.SpaceChannelOutput{}, MapToolError(errors.New("scheduled message service is not configured"))
+	if binder == nil {
+		return dto.SpaceChannelOutput{}, MapToolError(errors.New("space channel binder is not configured"))
 	}
-	bound, err := service.BindCurrentGroup(ctx, actor, dto.SpaceChannelBindInput{
+	bound, err := binder.BindCurrentGroup(ctx, actor, dto.SpaceChannelBindInput{
 		Space: actor.SpaceID, CurrentChannel: request.Channel,
 		CurrentChatID: request.ChatID, CurrentChatType: request.ChatType,
 	})
@@ -251,7 +257,7 @@ func spaceChannelBind(ctx context.Context, resolver interfaceidentity.Resolver, 
 		return dto.SpaceChannelOutput{}, MapToolError(err)
 	}
 	if bound == nil {
-		return dto.SpaceChannelOutput{}, MapToolError(errors.New("scheduled message service returned no channel"))
+		return dto.SpaceChannelOutput{}, MapToolError(errors.New("space channel binder returned no channel"))
 	}
 	return dto.SpaceChannelOutput{
 		ID: bound.ID, SpaceID: bound.SpaceID, Channel: bound.Channel,
@@ -284,12 +290,17 @@ func scheduledMessageOutput(schedule *domainscheduledmessage.Schedule) dto.Sched
 	}
 }
 
-func registerScheduledMessageTools(server *mcpsdk.Server, resolver interfaceidentity.Resolver, service interfacescheduledmessage.Service) {
+// registerGroupBindTool registers space_channel_bind independently of the
+// scheduled-message lane, so a group can be bound to a Space with the lane off.
+func registerGroupBindTool(server *mcpsdk.Server, resolver interfaceidentity.Resolver, binder interfacescheduledmessage.GroupBinder) {
 	addTool(server, &mcpsdk.Tool{Name: "space_channel_bind", Description: "Bind the current verified WhatsApp group to an authorized Space."}, func(ctx context.Context, input spaceChannelBindToolInput) (dto.SpaceChannelOutput, error) {
-		return spaceChannelBind(ctx, resolver, service, input)
+		return spaceChannelBind(ctx, resolver, binder, input)
 	})
+}
+
+func registerScheduledMessageTools(server *mcpsdk.Server, resolver interfaceidentity.Resolver, service interfacescheduledmessage.Service) {
 	addTool(server, &mcpsdk.Tool{Name: "scheduled_message_targets", Description: "List recipients and bound groups available in a Space."}, func(ctx context.Context, input struct {
-		Space string `json:"space,omitempty" jsonschema:"Space UUID or exact name; blank selects Personal Space"`
+		Space string `json:"space,omitempty" jsonschema:"Space UUID or exact name; blank selects Personal Space in a private chat or the bound Space in a group or other shared chat"`
 	}) (ScheduledMessageTargetsOutput, error) {
 		output, err := scheduledMessageTargets(ctx, resolver, service, input.Space)
 		return ScheduledMessageTargetsOutput{Targets: output}, err

@@ -240,7 +240,7 @@ func TestHTTPHandlerExposesOnlyCurrentMCPToolsWhenRemindersAreAbsent(t *testing.
 		got = append(got, tool.Name)
 	}
 	sort.Strings(got)
-	want := []string{"account_link", "account_register", "activity_create", "activity_create_with_reminder", "activity_delete", "activity_list", "activity_update", "identity_link", "identity_revoke", "invitation_accept", "invitation_create", "invitation_list", "invitation_revoke", "member_remove", "member_update_role", "reminder_complete", "reminder_create", "reminder_delete", "reminder_list", "reminder_update", "space_archive", "space_create", "space_get_members", "space_list", "space_update"}
+	want := []string{"account_link", "account_register", "activity_create", "activity_create_with_reminder", "activity_delete", "activity_list", "activity_update", "identity_link", "identity_revoke", "invitation_accept", "invitation_create", "invitation_list", "invitation_revoke", "member_remove", "member_update_role", "reminder_complete", "reminder_create", "reminder_delete", "reminder_list", "reminder_update", "space_archive", "space_channel_bind", "space_create", "space_get_members", "space_list", "space_update"}
 	if strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Fatalf("tools = %v, want %v", got, want)
 	}
@@ -390,6 +390,9 @@ func TestHTTPHandlerUsesSignedIdentityEnvelopeForToolCalls(t *testing.T) {
 		}
 	}
 	identity := newSignedIdentityEnvelope("identity-secret", time.Now())
+	// account_register is DM-only, so sign a private chat instead of the default group.
+	identity.ChatID, identity.ChatType = identity.ExternalID, "dm"
+	identity.Signature = signIdentityEnvelope("identity-secret", identity)
 	response := callMCPServer(t, server.URL, "stale-profile", "server-secret", "tools/call", map[string]any{
 		"name": "account_register",
 		"arguments": map[string]any{
@@ -440,6 +443,7 @@ func TestHTTPHandlerProtectedSpaceToolMapsSuccessForbiddenAndNotFound(t *testing
 		ID: "member-1", SpaceID: spaceID, SpaceName: "Jane", SpaceType: domainspace.TypePersonal,
 		UserID: "user-1", RoleID: "role-owner", RoleName: "space_owner", Status: domainspace.StatusActive,
 	}
+	expectedOutput := membershipOutput(expectedMember)
 	resolver := &resolverStub{
 		actor: domainidentity.ActorContext{UserID: "user-1", Memberships: []domainspace.ResolvedMembership{{
 			ID: "00000000-0000-0000-0000-000000000301", SpaceID: spaceID, SpaceName: "Jane", SpaceType: domainspace.TypePersonal,
@@ -478,13 +482,13 @@ func TestHTTPHandlerProtectedSpaceToolMapsSuccessForbiddenAndNotFound(t *testing
 					t.Fatalf("space service args = calls:%d user:%q space:%q, want one call for trusted user and selected Space", service.membersCalls, service.membersUser, service.membersSpace)
 				}
 				var payload struct {
-					Members []domainspace.ResolvedMembership `json:"members"`
+					Members []MembershipOutput `json:"members"`
 				}
 				if err := json.Unmarshal(response.Result.StructuredOutput, &payload); err != nil {
 					t.Fatalf("decode success structured output: %v", err)
 				}
-				if len(payload.Members) != 1 || payload.Members[0] != expectedMember {
-					t.Fatalf("success payload = %+v, want %+v", payload.Members, []domainspace.ResolvedMembership{expectedMember})
+				if len(payload.Members) != 1 || payload.Members[0] != expectedOutput {
+					t.Fatalf("success payload = %+v, want %+v", payload.Members, []MembershipOutput{expectedOutput})
 				}
 				return
 			}

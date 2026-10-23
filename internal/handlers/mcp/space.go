@@ -9,14 +9,13 @@ import (
 	interfaceidentity "family-assistant/internal/interfaces/identity"
 	interfacespace "family-assistant/internal/interfaces/space"
 	serviceauthorization "family-assistant/internal/services/authorization"
-	serviceidentity "family-assistant/internal/services/identity"
 	"family-assistant/utils"
 
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 type SpaceGetMembersInput struct {
-	Space string `json:"space,omitempty" jsonschema:"Space UUID or exact user-facing name; blank selects Personal Space"`
+	Space string `json:"space,omitempty" jsonschema:"Space UUID or exact user-facing name; blank selects Personal Space in a private chat or the bound Space in a group or other shared chat"`
 }
 
 type SpaceCreateInput struct {
@@ -45,15 +44,51 @@ type MemberRemoveInput struct {
 	MemberID string `json:"member_id" jsonschema:"member UUID"`
 }
 
+// MembershipOutput omits user_email, user_id and role_id: group chats share one
+// LLM session, so membership results must not leak contact details or internal IDs.
+type MembershipOutput struct {
+	ID            string `json:"id"`
+	SpaceID       string `json:"space_id"`
+	SpaceName     string `json:"space_name"`
+	SpaceType     string `json:"space_type"`
+	SpaceCategory string `json:"space_category"`
+	UserName      string `json:"user_name"`
+	RoleName      string `json:"role_name"`
+	Status        string `json:"status"`
+}
+
 type SpaceListOutput struct {
-	Spaces []domainspace.ResolvedMembership `json:"spaces"`
+	Spaces []MembershipOutput `json:"spaces"`
 }
 
 type SpaceMembersOutput struct {
-	Members []domainspace.ResolvedMembership `json:"members"`
+	Members []MembershipOutput `json:"members"`
 }
 
-func SpaceList(ctx context.Context, resolver interfaceidentity.Resolver, service interfacespace.ServiceSpaceInterface) ([]domainspace.ResolvedMembership, error) {
+func membershipOutput(membership domainspace.ResolvedMembership) MembershipOutput {
+	return MembershipOutput{
+		ID: membership.ID, SpaceID: membership.SpaceID, SpaceName: membership.SpaceName,
+		SpaceType: membership.SpaceType, SpaceCategory: membership.SpaceCategory,
+		UserName: membership.UserName, RoleName: membership.RoleName, Status: membership.Status,
+	}
+}
+
+func membershipOutputs(memberships []domainspace.ResolvedMembership) []MembershipOutput {
+	output := make([]MembershipOutput, 0, len(memberships))
+	for _, membership := range memberships {
+		output = append(output, membershipOutput(membership))
+	}
+	return output
+}
+
+func membershipResult(membership *domainspace.ResolvedMembership) (MembershipOutput, error) {
+	if membership == nil {
+		return MembershipOutput{}, MapToolError(errors.New("space service returned no membership"))
+	}
+	return membershipOutput(*membership), nil
+}
+
+func SpaceList(ctx context.Context, resolver interfaceidentity.Resolver, service interfacespace.ServiceSpaceInterface) ([]MembershipOutput, error) {
 	actor, err := RequireActor(ctx, resolver)
 	if err != nil {
 		return nil, MapToolError(err)
@@ -65,10 +100,7 @@ func SpaceList(ctx context.Context, resolver interfaceidentity.Resolver, service
 	if err != nil {
 		return nil, MapToolError(err)
 	}
-	if memberships == nil {
-		memberships = []domainspace.ResolvedMembership{}
-	}
-	return memberships, nil
+	return membershipOutputs(memberships), nil
 }
 
 func SpaceCreate(ctx context.Context, resolver interfaceidentity.Resolver, service interfacespace.ServiceSpaceInterface, input SpaceCreateInput) (*domainspace.Space, error) {
@@ -88,7 +120,7 @@ func SpaceCreate(ctx context.Context, resolver interfaceidentity.Resolver, servi
 	return created, nil
 }
 
-func SpaceGetMembers(ctx context.Context, resolver interfaceidentity.Resolver, service interfacespace.ServiceSpaceInterface, input SpaceGetMembersInput) ([]domainspace.ResolvedMembership, error) {
+func SpaceGetMembers(ctx context.Context, resolver interfaceidentity.Resolver, service interfacespace.ServiceSpaceInterface, input SpaceGetMembersInput) ([]MembershipOutput, error) {
 	actor, err := RequireActor(ctx, resolver)
 	if err != nil {
 		return nil, MapToolError(err)
@@ -96,7 +128,7 @@ func SpaceGetMembers(ctx context.Context, resolver interfaceidentity.Resolver, s
 	if service == nil {
 		return nil, MapToolError(errors.New("space service is not configured"))
 	}
-	selected, err := serviceidentity.SelectSpace(ctx, actor, input.Space, selectorPermissions(resolver))
+	selected, err := selectActorSpace(ctx, resolver, actor, input.Space)
 	if err != nil {
 		return nil, MapToolError(err)
 	}
@@ -104,10 +136,7 @@ func SpaceGetMembers(ctx context.Context, resolver interfaceidentity.Resolver, s
 	if err != nil {
 		return nil, MapToolError(err)
 	}
-	if members == nil {
-		members = []domainspace.ResolvedMembership{}
-	}
-	return members, nil
+	return membershipOutputs(members), nil
 }
 
 func SpaceUpdate(ctx context.Context, resolver interfaceidentity.Resolver, service interfacespace.ServiceSpaceInterface, input SpaceUpdateInput) (*domainspace.Space, error) {
@@ -143,42 +172,42 @@ func SpaceArchive(ctx context.Context, resolver interfaceidentity.Resolver, serv
 	return archived, nil
 }
 
-func MemberUpdateRole(ctx context.Context, resolver interfaceidentity.Resolver, service interfacespace.ServiceSpaceInterface, input MemberUpdateRoleInput) (*domainspace.ResolvedMembership, error) {
+func MemberUpdateRole(ctx context.Context, resolver interfaceidentity.Resolver, service interfacespace.ServiceSpaceInterface, input MemberUpdateRoleInput) (MembershipOutput, error) {
 	actor, err := selectSpaceActor(ctx, resolver, input.Space)
 	if err != nil {
-		return nil, MapToolError(err)
+		return MembershipOutput{}, MapToolError(err)
 	}
 	memberID, err := utils.ParseUUID(input.MemberID, "member_id", true)
 	if err != nil {
-		return nil, MapToolError(err)
+		return MembershipOutput{}, MapToolError(err)
 	}
 	if service == nil {
-		return nil, MapToolError(errors.New("space service is not configured"))
+		return MembershipOutput{}, MapToolError(errors.New("space service is not configured"))
 	}
 	updated, err := service.UpdateMemberRole(ctx, actor.UserID, actor.SpaceID, memberID, dto.MemberRoleUpdateInput{Role: input.Role})
 	if err != nil {
-		return nil, MapToolError(err)
+		return MembershipOutput{}, MapToolError(err)
 	}
-	return updated, nil
+	return membershipResult(updated)
 }
 
-func MemberRemove(ctx context.Context, resolver interfaceidentity.Resolver, service interfacespace.ServiceSpaceInterface, input MemberRemoveInput) (*domainspace.ResolvedMembership, error) {
+func MemberRemove(ctx context.Context, resolver interfaceidentity.Resolver, service interfacespace.ServiceSpaceInterface, input MemberRemoveInput) (MembershipOutput, error) {
 	actor, err := selectSpaceActor(ctx, resolver, input.Space)
 	if err != nil {
-		return nil, MapToolError(err)
+		return MembershipOutput{}, MapToolError(err)
 	}
 	memberID, err := utils.ParseUUID(input.MemberID, "member_id", true)
 	if err != nil {
-		return nil, MapToolError(err)
+		return MembershipOutput{}, MapToolError(err)
 	}
 	if service == nil {
-		return nil, MapToolError(errors.New("space service is not configured"))
+		return MembershipOutput{}, MapToolError(errors.New("space service is not configured"))
 	}
 	removed, err := service.RemoveMember(ctx, actor.UserID, actor.SpaceID, memberID)
 	if err != nil {
-		return nil, MapToolError(err)
+		return MembershipOutput{}, MapToolError(err)
 	}
-	return removed, nil
+	return membershipResult(removed)
 }
 
 func registerSpaceTools(server *mcpsdk.Server, resolver interfaceidentity.Resolver, service interfacespace.ServiceSpaceInterface) {
@@ -211,12 +240,12 @@ func registerSpaceTools(server *mcpsdk.Server, resolver interfaceidentity.Resolv
 	})
 	addTool(server, &mcpsdk.Tool{
 		Name: "member_update_role", Description: "Change an authorized shared Space member role to admin, member, or viewer.",
-	}, func(ctx context.Context, input MemberUpdateRoleInput) (*domainspace.ResolvedMembership, error) {
+	}, func(ctx context.Context, input MemberUpdateRoleInput) (MembershipOutput, error) {
 		return MemberUpdateRole(ctx, resolver, service, input)
 	})
 	addTool(server, &mcpsdk.Tool{
 		Name: "member_remove", Description: "Deactivate a member from an authorized shared Space.",
-	}, func(ctx context.Context, input MemberRemoveInput) (*domainspace.ResolvedMembership, error) {
+	}, func(ctx context.Context, input MemberRemoveInput) (MembershipOutput, error) {
 		return MemberRemove(ctx, resolver, service, input)
 	})
 }

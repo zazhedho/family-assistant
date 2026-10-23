@@ -286,23 +286,24 @@ X-Hermes-Channel: whatsapp
 ```
 
 The endpoint is `http://127.0.0.1:8081/mcp` by default. With scheduled messages
-disabled, it exposes these **25 existing tools**; enabling the feature adds seven
+disabled, it exposes these **26 tools**; enabling the feature adds six
 more, for 32 total. Hermes adds its MCP server prefix to tool names:
 
 | Tool | Purpose |
 | --- | --- |
-| `account_register` | Register with name, birth date, and explicit consent; create the Personal Space. |
-| `account_link` | Link an existing account matching the signed WhatsApp phone number. |
-| `identity_link` | Link using an account-owner-issued one-time code. |
+| `account_register` | Register with name, birth date, and explicit consent; create the Personal Space and mark the WhatsApp number verified. This is the only registration path (no web UI). Private chat only. |
+| `account_link` | Link an existing account whose verified phone number matches the signed WhatsApp number. |
+| `identity_link` | Link using a one-time code issued through an authenticated web/API session (in practice admin-assisted). Private chat only. |
 | `identity_revoke` | Revoke the current external identity link. |
 | `space_create` | Create a shared Space. |
+| `space_channel_bind` | Bind the currently verified WhatsApp group to an authorized Space (owner/admin; the Space must be named). |
 | `space_list` | List accessible personal/shared Spaces. |
-| `space_get_members` | List active members of a Space. |
+| `space_get_members` | List active members of a Space (names and roles; no emails or internal IDs). |
 | `space_update` | Update shared Space details. |
 | `space_archive` | Archive a shared Space. |
 | `member_update_role` | Change a shared Space member's role. |
 | `member_remove` | Remove a shared Space member. |
-| `invitation_create` | Issue an expiring invitation. |
+| `invitation_create` | Issue an expiring invitation. Private chat only. |
 | `invitation_accept` | Accept an invitation using its token. |
 | `invitation_list` | List pending invitations without exposing their tokens. |
 | `invitation_revoke` | Revoke a pending invitation. |
@@ -320,13 +321,12 @@ more, for 32 total. Hermes adds its MCP server prefix to tool names:
 ### Scheduled messages: opt-in rollout
 
 `SCHEDULED_MESSAGES_ENABLED` defaults to `false`. While disabled, the scheduled-message
-worker and seven tools below are absent; the existing 25 tools and reminder lane are
-unaffected. Apply migration 12 before enabling the feature. Fixed messages do not need
+worker and six tools below are absent; the existing 26 tools (including
+`space_channel_bind`) and reminder lane are unaffected. Apply migration 12 before enabling the feature. Fixed messages do not need
 an AI generator; AI-generated content does.
 
 | Tool | Purpose |
 | --- | --- |
-| `space_channel_bind` | Bind the currently verified WhatsApp group to an authorized Space. |
 | `scheduled_message_targets` | List eligible recipients and bound groups in a Space. |
 | `scheduled_message_create` | Create a fixed-content or AI-generated schedule. |
 | `scheduled_message_list` | List schedules and, for one selected schedule, delivery history. |
@@ -338,7 +338,7 @@ an AI generator; AI-generated content does.
 
 | Setting | Default | Notes |
 | --- | --- | --- |
-| `SCHEDULED_MESSAGES_ENABLED` | `false` | Registers the seven tools and starts this worker when enabled. |
+| `SCHEDULED_MESSAGES_ENABLED` | `false` | Registers the six tools and starts this worker when enabled. |
 | `SCHEDULED_MESSAGES_GENERATOR_URL` | unset | Optional; for AI schedules, use the private profile's full `/v1/chat/completions` URL. A bare endpoint is accepted only for a verified dedicated isolated profile instance; prefer the named profile route. |
 | `SCHEDULED_MESSAGES_GENERATOR_KEY` | unset | Secret; required together with the URL. Leave blank for fixed-only schedules. |
 | `SCHEDULED_MESSAGES_GENERATOR_MODEL` | `scheduled-messages` | Request model name; the named Hermes profile is the isolation boundary, not this value. |
@@ -545,8 +545,8 @@ The request's `model` value does not select or isolate a profile.
    started. Use your configured MCP server name if it differs from `family_assistant`.
    The Hermes connection test must succeed: raw `tools/list` returning 32 entries
    does not prove the client accepts their schemas. If discovery fails, disable
-   the lane and restore the 25-tool catalog before investigating the reported error.
-   Restart/reconnect Hermes if it cached the earlier 25-tool catalog, then repeat
+   the lane and restore the 26-tool catalog before investigating the reported error.
+   Restart/reconnect Hermes if it cached the earlier 26-tool catalog, then repeat
    the connection test.
    To disable the lane, set the flag back to `false` and recreate the backend;
    retain migration 12 and its history tables.
@@ -645,22 +645,75 @@ or activity deletion use lifecycle-safe soft-delete/revoke state changes, so
 historical audit records remain available while normal list tools hide removed
 rows.
 
-For an existing account whose phone number matches the current WhatsApp sender,
-Hermes calls `account_link` first. The account is linked without a password or
-one-time code. If no matching account exists, Hermes asks for the user's name and birth date,
+For an existing account whose **verified** phone number matches the current
+WhatsApp sender, Hermes calls `account_link` first. The account is linked
+without a password or one-time code. `account_link` matches only users whose
+`users.phone_verified_at` is set. `account_register` marks the WhatsApp number
+verified, and changing the phone through the profile/user update API clears the
+verification. Existing deployments must run a one-time manual backfill (fresh
+installs need none). It marks a phone verified only when the user has an ACTIVE
+or REVOKED Hermes WhatsApp identity proving the same number:
+
+```sql
+UPDATE users u
+SET phone_verified_at = NOW()
+WHERE u.phone_verified_at IS NULL
+  AND u.deleted_at IS NULL
+  AND u.phone IS NOT NULL AND u.phone <> ''
+  AND EXISTS (
+      SELECT 1 FROM external_identities ei
+      WHERE ei.user_id = u.id
+        AND ei.provider = 'hermes'
+        AND ei.status IN ('ACTIVE','REVOKED')
+        AND ei.deleted_at IS NULL
+        AND btrim(split_part(ei.external_id, '@', 1)) ~ '^[0-9]+$'
+        AND length(regexp_replace(btrim(split_part(ei.external_id, '@', 1)), '^0', '62')) BETWEEN 9 AND 15
+        AND regexp_replace(btrim(split_part(ei.external_id, '@', 1)), '^0', '62') = u.phone
+  );
+```
+
+Registration happens only through WhatsApp DM (`account_register`);
+there is no web registration UI, and WhatsApp-registered accounts have no
+password, so they cannot log in to the web/API. An account whose phone was never
+proven over WhatsApp (for example one created through the API or seed) cannot
+use `account_link`; the admin must confirm ownership before setting
+`phone_verified_at`. If no matching account exists, Hermes asks for the user's name and birth date,
 explains that the birth date is used for minimum-age validation, shows a
 confirmation summary, and then calls `account_register` once with
 `consent: true`. Email and password are not requested. Replaying the same
 profile is idempotent and returns the existing account; underage independent
-registration is rejected.
+registration is rejected. If the WhatsApp number already belongs to an
+unverified account, `account_register` returns `phone_already_registered`
+without changing or revealing anything about the other account; the user
+should contact the admin.
 
 `identity_link` remains the migration fallback for a different phone number and
-consumes a one-time code issued by an authenticated account owner. The signed
+consumes a one-time code issued through an authenticated web/API session
+(`POST /api/hermes/link-codes`), which WhatsApp-only users cannot do themselves,
+so it is in practice admin-assisted. The signed
 WhatsApp sender identity is resolved dynamically to the linked user, and
 `X-Hermes-Channel` is retained for audit provenance. Space selectors accept an
-authorized Space UUID or exact user-facing name; a blank selector uses the
-user's Personal Space. Every reminder operation re-authorizes the selected
-Space and resource.
+authorized Space UUID or exact user-facing name; in a private chat a blank
+selector uses the user's Personal Space. Every reminder operation
+re-authorizes the selected Space and resource.
+
+Shared chats (groups, threads, and channels) differ from DMs in several ways:
+
+- In any verified non-DM chat, a blank `space` selector uses the Space bound to
+  that chat with `space_channel_bind`. If the chat is unbound, the tool fails
+  with "space is required in a group chat that is not bound to a Space" and the
+  assistant should ask which Space to use. Explicit selectors, including
+  Personal, are honored. Activities recorded in a group before this change live
+  in the members' Personal Spaces.
+- `account_register`, `identity_link`, and `invitation_create` are refused in
+  non-DM chats with code `dm_required` ("must be done in a private chat"),
+  because their input or output (such as an invitation token) must not enter a
+  shared session.
+- Membership outputs (`space_list`, `space_get_members`, `member_update_role`,
+  `member_remove`) omit `user_email`, `user_id`, and `role_id`.
+- `space_channel_bind` is registered whether or not scheduled messages are
+  enabled. In a group a blank `space` is refused, so the Space to bind must be
+  named, and only that Space's owners/admins can bind it.
 
 ### Production deployment: Docker image and Hermes per VPS
 
@@ -961,6 +1014,12 @@ Before step 1:
    after explicit consent. Do not ask for a one-time code when account_link
    succeeds; identity_link is only for a different-number migration.
    Never claim a tool action succeeded if it failed.
+   In a group, if a tool says the space is required, ask which Space to use and
+   suggest an owner/admin bind the group with space_channel_bind. If a tool
+   returns dm_required, ask the user to continue in a private chat. If
+   account_register returns phone_already_registered, tell the user to contact
+   the admin; do not suggest identity_link. If a protected tool returns authentication required for a
+   group member, call account_link for the current sender.
    Use Family Assistant MCP for data; backend scheduler delivers reminders.
    Do not create Hermes cron jobs for Family Assistant reminders.
    Distinguish event time from database created_at/updated_at and processing time.
@@ -1048,7 +1107,7 @@ Before step 1:
    substituting the admin number/JID:
 
    ```yaml
-   group_sessions_per_user: false
+   group_sessions_per_user: true
    gateway:
      multiplex_profiles: true
      profile_routes:
@@ -1057,6 +1116,16 @@ Before step 1:
          chat_id: "<admin-number>@s.whatsapp.net"
          profile: admin
    ```
+
+   Keep `group_sessions_per_user: true`. In a shared group session Hermes
+   steers, queues, and batches other members' messages into the running turn
+   without the identity hook running for them, so a tool call one member asked
+   for could be signed as another member and run with that member's
+   permissions. The identity plugin refuses to sign tool calls in shared
+   multi-user sessions (fail closed; the backend then returns `authentication
+   required`), so a shared configuration makes Family Assistant tools unusable
+   in groups. Responses stay consistent across members through the shared
+   `SOUL.md` rules.
 
    In `/root/.hermes/profiles/admin/config.yaml`, merge the admin WhatsApp
    toolsets. The following matches the capabilities enabled on the current
@@ -1116,8 +1185,9 @@ Before step 1:
    ```
 
    The MCP test must list `account_link`. Then send `tautkan akun saya` from a
-   WhatsApp number already stored in `users.phone`: the tool should return
-   `status=existing`. Send a reminder from a permitted chat and verify it is
+   WhatsApp number stored in `users.phone` with `phone_verified_at` set: the
+   tool should return `status=existing`. A number whose phone is not verified
+   must not link this way; the admin must verify it first. Send a reminder from a permitted chat and verify it is
    delivered there after the due time. A successful `tools/list` alone does not
    prove that signed WhatsApp identity works. If the agent still sees an old
    tool list, use `/new` in that WhatsApp chat. If a fresh session returns
@@ -1136,7 +1206,8 @@ Before step 1:
    - Send an explicit earlier time: it is preserved; an ambiguous date prompts
      a question. Add a relative reminder and verify it is calculated from the
      event time and delivered to the originating DM/group.
-   - Group participants share one session; terminal/file/code-execution tools
+   - Each group member has their own session in the group, and tool calls are
+     attributed to the sender; terminal/file/code-execution tools
      are unavailable there, including to the admin. Only the admin DM targets
      `admin`. A sender outside the allowlist receives no bot reply.
    - WhatsApp replies show neither reasoning nor tool-progress messages.
@@ -1219,6 +1290,51 @@ complete every step below using the same release checkout as the backend.
    not prove the updated timestamp plugin is running. Use `/new` only if a
    changed tool catalog needs a fresh conversation; it resets chat history
    and is not a substitute for updating the plugin or restarting the gateway.
+
+#### Release notes: phone verification and shared-chat privacy
+
+This release adds no migrations (12 remains the latest), changes the plugin
+files, and requires a per-user group session configuration:
+
+1. Back up the database first.
+2. Deploy the backend. Migrations are unchanged; with `RUN_MIGRATION=true`
+   nothing new applies. Check with
+   `SELECT version, dirty FROM schema_migrations;` (expect version 12, not dirty).
+3. Set `group_sessions_per_user: true` in the default profile's
+   `config.yaml`, re-copy the plugin files to both the default and admin
+   profiles (steps 2 and 3 above), and restart the gateway.
+4. As a Space owner/admin, bind each family group from inside that group with
+   `space_channel_bind`, naming the Space. Until then, tools that need a Space
+   fail in that group and the assistant asks which Space to use.
+5. Send `/new` in each group so old shared-session history, which may contain
+   private data, is not carried over.
+6. Run the one-time manual backfill SQL from the `account_link` section above
+   (once, on this existing deployment), then find accounts that will not be
+   able to use `account_link`:
+
+   ```sql
+   SELECT id, name, created_at FROM users
+   WHERE phone IS NOT NULL AND phone <> ''
+     AND phone_verified_at IS NULL AND deleted_at IS NULL;
+   ```
+
+   Expect no rows when every account came from WhatsApp. Any row is an account
+   whose phone was not proven over WhatsApp (for example created via the API or
+   seed); the admin should confirm ownership before manually setting
+   `phone_verified_at`.
+7. Recommended: there is no web registration UI, so disable public
+   registration at runtime (no restart needed):
+
+   ```sql
+   UPDATE app_configs
+   SET value = 'false', is_active = TRUE, updated_at = NOW()
+   WHERE config_key = 'auth.public_registration_enabled' AND deleted_at IS NULL;
+   ```
+
+   Keep the HTTP API bound to localhost (do not expose port 8086 publicly).
+
+Rollback is a normal image rollback; backfilled `phone_verified_at` values are
+harmless to older code.
 
 Default health check:
 

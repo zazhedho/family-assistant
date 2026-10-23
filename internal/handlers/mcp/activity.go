@@ -18,14 +18,14 @@ import (
 )
 
 type ActivityCreateInput struct {
-	Space      string `json:"space,omitempty" jsonschema:"Space UUID or exact user-facing name; blank selects Personal Space"`
+	Space      string `json:"space,omitempty" jsonschema:"Space UUID or exact user-facing name; blank selects Personal Space in a private chat or the bound Space in a group or other shared chat"`
 	Kind       string `json:"kind" jsonschema:"short event type such as breastfeeding, diaper, sleep, or note"`
 	Note       string `json:"note" jsonschema:"human-readable details"`
 	OccurredAt string `json:"occurred_at,omitempty" jsonschema:"RFC3339 event time ONLY when the user specifies a time. Omit for now or no stated time: backend uses the trusted WhatsApp message timestamp, not processing time. Never use another record's created_at or updated_at."`
 }
 
 type ActivityListInput struct {
-	Space  string `json:"space,omitempty" jsonschema:"Space UUID or exact user-facing name; blank selects Personal Space"`
+	Space  string `json:"space,omitempty" jsonschema:"Space UUID or exact user-facing name; blank selects Personal Space in a private chat or the bound Space in a group or other shared chat"`
 	Kind   string `json:"kind,omitempty" jsonschema:"optional event type filter"`
 	Search string `json:"search,omitempty" jsonschema:"optional case-insensitive literal substring search in note; combine with kind and time filters"`
 	From   string `json:"from,omitempty" jsonschema:"optional RFC3339 lower bound"`
@@ -34,7 +34,7 @@ type ActivityListInput struct {
 }
 
 type ActivityUpdateInput struct {
-	Space      string  `json:"space,omitempty" jsonschema:"Space UUID or exact user-facing name; blank selects Personal Space"`
+	Space      string  `json:"space,omitempty" jsonschema:"Space UUID or exact user-facing name; blank selects Personal Space in a private chat or the bound Space in a group or other shared chat"`
 	ActivityID string  `json:"activity_id" jsonschema:"activity UUID"`
 	Kind       *string `json:"kind,omitempty" jsonschema:"optional replacement event type"`
 	Note       *string `json:"note,omitempty" jsonschema:"optional replacement details"`
@@ -42,7 +42,7 @@ type ActivityUpdateInput struct {
 }
 
 type ActivityDeleteInput struct {
-	Space      string `json:"space,omitempty" jsonschema:"Space UUID or exact user-facing name; blank selects Personal Space"`
+	Space      string `json:"space,omitempty" jsonschema:"Space UUID or exact user-facing name; blank selects Personal Space in a private chat or the bound Space in a group or other shared chat"`
 	ActivityID string `json:"activity_id" jsonschema:"activity UUID"`
 }
 

@@ -17,7 +17,7 @@ import (
 )
 
 type ReminderCreateInput struct {
-	Space            string `json:"space,omitempty" jsonschema:"Space UUID or exact user-facing name; blank selects Personal Space"`
+	Space            string `json:"space,omitempty" jsonschema:"Space UUID or exact user-facing name; blank selects Personal Space in a private chat or the bound Space in a group or other shared chat"`
 	Title            string `json:"title" jsonschema:"the reminder title"`
 	Description      string `json:"description,omitempty" jsonschema:"optional details"`
 	ScheduledAt      string `json:"scheduled_at" jsonschema:"RFC3339 scheduled time"`
@@ -25,19 +25,19 @@ type ReminderCreateInput struct {
 }
 
 type ReminderListInput struct {
-	Space  string `json:"space,omitempty" jsonschema:"Space UUID or exact user-facing name; blank selects Personal Space"`
+	Space  string `json:"space,omitempty" jsonschema:"Space UUID or exact user-facing name; blank selects Personal Space in a private chat or the bound Space in a group or other shared chat"`
 	Status string `json:"status,omitempty" jsonschema:"PENDING, SENT, COMPLETED, or CANCELLED"` //nolint:misspell // persisted API enum; preserve spelling.
 	From   string `json:"from,omitempty" jsonschema:"RFC3339 lower bound"`
 	To     string `json:"to,omitempty" jsonschema:"RFC3339 upper bound"`
 }
 
 type ReminderCompleteInput struct {
-	Space      string `json:"space,omitempty" jsonschema:"Space UUID or exact user-facing name; blank selects Personal Space"`
+	Space      string `json:"space,omitempty" jsonschema:"Space UUID or exact user-facing name; blank selects Personal Space in a private chat or the bound Space in a group or other shared chat"`
 	ReminderID string `json:"reminder_id" jsonschema:"reminder UUID"`
 }
 
 type ReminderUpdateInput struct {
-	Space            string  `json:"space,omitempty" jsonschema:"Space UUID or exact user-facing name; blank selects Personal Space"`
+	Space            string  `json:"space,omitempty" jsonschema:"Space UUID or exact user-facing name; blank selects Personal Space in a private chat or the bound Space in a group or other shared chat"`
 	ReminderID       string  `json:"reminder_id" jsonschema:"reminder UUID"`
 	Title            *string `json:"title,omitempty" jsonschema:"optional replacement title"`
 	Description      *string `json:"description,omitempty" jsonschema:"optional replacement details"`
@@ -47,7 +47,7 @@ type ReminderUpdateInput struct {
 }
 
 type ReminderDeleteInput struct {
-	Space      string `json:"space,omitempty" jsonschema:"Space UUID or exact user-facing name; blank selects Personal Space"`
+	Space      string `json:"space,omitempty" jsonschema:"Space UUID or exact user-facing name; blank selects Personal Space in a private chat or the bound Space in a group or other shared chat"`
 	ReminderID string `json:"reminder_id" jsonschema:"reminder UUID"`
 }
 

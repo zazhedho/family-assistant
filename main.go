@@ -165,11 +165,17 @@ func run() error {
 		return fmt.Errorf("start scheduled message lane: %w", err)
 	}
 
+	groupBinder := newGroupBinder(scheduledMessageLaneDependencies{
+		db: routes.DB, spaces: spaceRepository, authorizer: authorizationService.NewAuthorizer(), audit: audit,
+	})
+
 	mcpServer, mcpListener := startMCPServer(mcpConfig.Enabled, func() (*http.Server, net.Listener, error) {
 		return mcpHandler.Listen(mcpConfig, identityResolver, identityLink, accountRegistrar, spaces, reminders, mcpHandler.ToolServices{
 			Invitation:       invitations,
 			Activity:         activities,
 			ScheduledMessage: scheduledMessages,
+			GroupBinder:      groupBinder,
+			GroupSpaces:      identityRepo.NewGroupSpaceRepository(routes.DB),
 		})
 	})
 	httpServer, httpListener := bindHTTPServer(serverContext, fmt.Sprintf(":%s", port), routes.App, mcpListener)
@@ -260,6 +266,16 @@ func startScheduledMessageLane(ctx context.Context, cfg config.ScheduledMessageC
 		return nil, err
 	}
 	return service, nil
+}
+
+// newGroupBinder builds the narrow service behind space_channel_bind. Binding only
+// needs the repository, space lookup, authorizer and audit, so it needs no due
+// index, generator or bridge, starts no worker, and works with the lane disabled.
+func newGroupBinder(dependencies scheduledMessageLaneDependencies) interfacescheduledmessage.GroupBinder {
+	return scheduledMessageService.NewScheduledMessageService(
+		scheduledMessageRepo.NewRepository(dependencies.db), dependencies.spaces, dependencies.authorizer, dependencies.audit,
+		nil, nil, scheduledMessageService.ScheduledMessageServiceOptions{},
+	)
 }
 
 func newScheduledMessageGenerator(cfg config.ScheduledMessageConfig) (interfacescheduledmessage.Generator, error) {

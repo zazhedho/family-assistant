@@ -41,6 +41,12 @@ func TestStartScheduledMessageLaneSkipsDisabledConfig(t *testing.T) {
 	}
 }
 
+func TestNewGroupBinderNeedsNoScheduledMessageLane(t *testing.T) {
+	if binder := newGroupBinder(scheduledMessageLaneDependencies{}); binder == nil {
+		t.Fatal("newGroupBinder() = nil, want a binder available while the scheduled message lane is disabled")
+	}
+}
+
 func TestScheduledMessageGeneratorIsOptionalAndConstructedWhenConfigured(t *testing.T) {
 	generator, err := newScheduledMessageGenerator(config.ScheduledMessageConfig{})
 	if err != nil || generator != nil {

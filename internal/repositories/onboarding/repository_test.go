@@ -113,7 +113,7 @@ func onboardingLookupQuery() string {
 }
 
 func onboardingPhoneLookupQuery() string {
-	return `SELECT .*FROM users u.*JOIN spaces s.*s.created_by_user_id = u.id.*s.type = 'PERSONAL'.*s.status = 'ACTIVE'.*s.deleted_at IS NULL.*WHERE u.phone = \$1.*u.deleted_at IS NULL.*LIMIT \$2`
+	return `SELECT .*FROM users u.*JOIN spaces s.*s.created_by_user_id = u.id.*s.type = 'PERSONAL'.*s.status = 'ACTIVE'.*s.deleted_at IS NULL.*WHERE u.phone = \$1.*u.phone_verified_at IS NOT NULL.*u.deleted_at IS NULL.*LIMIT \$2`
 }
 
 func expectCreateBeforeIdentity(mock sqlmock.Sqlmock) {
@@ -263,6 +263,47 @@ func TestCreateKeepsNonIdentityDuplicateErrors(t *testing.T) {
 				t.Fatal(err)
 			}
 		})
+	}
+}
+
+func TestCreateMapsUsersPhoneUniqueViolationAndRollsBack(t *testing.T) {
+	db, mock := newOnboardingMockDB(t)
+	repo := NewRepository(db)
+	registration := validRegistration()
+	registration.User.Phone = "628123456789"
+
+	mock.ExpectBegin()
+	mock.ExpectExec(`INSERT INTO "users"`).
+		WillReturnError(&pgconn.PgError{Code: "23505", ConstraintName: "idx_users_phone"})
+	mock.ExpectRollback()
+
+	err := repo.Create(context.Background(), registration)
+	if !errors.Is(err, domainidentity.ErrPhoneAlreadyRegistered) {
+		t.Fatalf("error = %v, want ErrPhoneAlreadyRegistered", err)
+	}
+	if errors.Is(err, domainidentity.ErrIdentityConflict) {
+		t.Fatal("phone violation was mapped to ErrIdentityConflict")
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestCreateIdentityConflictIsNotPhoneAlreadyRegistered(t *testing.T) {
+	db, mock := newOnboardingMockDB(t)
+	repo := NewRepository(db)
+
+	expectCreateBeforeIdentity(mock)
+	mock.ExpectExec(`INSERT INTO "external_identities"`).
+		WillReturnError(&pgconn.PgError{Code: "23505", ConstraintName: "idx_users_phone"})
+	mock.ExpectRollback()
+
+	err := repo.Create(context.Background(), validRegistration())
+	if !errors.Is(err, domainidentity.ErrIdentityConflict) || errors.Is(err, domainidentity.ErrPhoneAlreadyRegistered) {
+		t.Fatalf("error = %v, want only ErrIdentityConflict", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
 	}
 }
 

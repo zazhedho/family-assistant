@@ -178,6 +178,34 @@ func TestRegisterCopiesWhatsAppPhoneToUser(t *testing.T) {
 	}
 }
 
+func TestRegisterMarksWhatsAppPhoneVerified(t *testing.T) {
+	h := newServiceHarness(t)
+	input := validInput()
+	input.ExternalID = "628123456789@s.whatsapp.net"
+
+	if _, err := h.service.Register(context.Background(), input); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	got := h.repository.created.User.PhoneVerifiedAt
+	if got == nil || !got.Equal(h.repository.created.User.CreatedAt) {
+		t.Fatalf("phone verified at = %v, want registration time %v", got, h.repository.created.User.CreatedAt)
+	}
+}
+
+func TestRegisterLeavesPhoneUnverifiedWithoutWhatsAppPhone(t *testing.T) {
+	h := newServiceHarness(t)
+	input := validInput()
+	input.Channel = "telegram"
+	input.ExternalID = "628123456789"
+
+	if _, err := h.service.Register(context.Background(), input); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	if got := h.repository.created.User.PhoneVerifiedAt; got != nil {
+		t.Fatalf("phone verified at = %v, want nil without a phone", got)
+	}
+}
+
 func TestRegisterDoesNotCopyNonWhatsAppIdentityToUserPhone(t *testing.T) {
 	h := newServiceHarness(t)
 	input := validInput()
@@ -220,6 +248,19 @@ func TestLinkExistingWhatsAppAccountByPhone(t *testing.T) {
 	}
 }
 
+func TestLinkExistingTreatsUnverifiedPhoneAsNotFound(t *testing.T) {
+	h := newServiceHarness(t)
+	// The repository hides users whose phone_verified_at is NULL, so the lookup reports not found.
+	h.repository.phoneErr = domainidentity.ErrIdentityNotFound
+
+	got, err := h.service.LinkExisting(context.Background(), dto.AccountLinkInput{
+		Provider: "hermes", ExternalID: "628123456789@s.whatsapp.net", Channel: "whatsapp",
+	})
+	if !errors.Is(err, domainidentity.ErrIdentityNotFound) || got != (dto.AccountRegistrationResult{}) || h.repository.phoneCalls != 1 || h.repository.linkCalls != 0 {
+		t.Fatalf("result = %+v, err = %v, phone calls = %d, link calls = %d", got, err, h.repository.phoneCalls, h.repository.linkCalls)
+	}
+}
+
 func TestLinkExistingRequiresKnownWhatsAppPhone(t *testing.T) {
 	h := newServiceHarness(t)
 	got, err := h.service.LinkExisting(context.Background(), dto.AccountLinkInput{
@@ -240,6 +281,22 @@ func TestRegisterRecoversConcurrentIdentityConflict(t *testing.T) {
 	got, err := h.service.Register(context.Background(), validInput())
 	if err != nil || got != (dto.AccountRegistrationResult{Status: StatusExisting, UserID: "winner-user", SpaceID: "winner-space"}) || h.repository.createCalls != 1 {
 		t.Fatalf("result = %+v, create calls = %d, err = %v", got, h.repository.createCalls, err)
+	}
+}
+
+func TestRegisterPropagatesPhoneAlreadyRegisteredWithoutCreatingAccount(t *testing.T) {
+	h := newServiceHarness(t)
+	h.repository.createErr = domainidentity.ErrPhoneAlreadyRegistered
+	got, err := h.service.Register(context.Background(), validInput())
+	if !errors.Is(err, domainidentity.ErrPhoneAlreadyRegistered) || got != (dto.AccountRegistrationResult{}) {
+		t.Fatalf("result = %+v, err = %v, want empty result and ErrPhoneAlreadyRegistered", got, err)
+	}
+	// No winner lookup: only the initial identity lookup ran, and nothing was linked.
+	if h.repository.findCalls != 1 || h.repository.createCalls != 1 || h.repository.linkCalls != 0 {
+		t.Fatalf("find calls = %d, create calls = %d, link calls = %d", h.repository.findCalls, h.repository.createCalls, h.repository.linkCalls)
+	}
+	if len(h.audit.events) != 1 || h.audit.events[0].Status != domainaudit.StatusFailed || h.audit.events[0].ErrorMessage != "phone_already_registered" {
+		t.Fatalf("audit events = %+v, want one failed phone_already_registered event", h.audit.events)
 	}
 }
 

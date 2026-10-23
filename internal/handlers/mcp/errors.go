@@ -23,6 +23,9 @@ var (
 	ErrMCPInvalidInput    = errors.New("invalid input")
 	ErrMCPConflict        = errors.New("conflict")
 	ErrMCPInternal        = errors.New("internal server error")
+
+	// ErrMCPPhoneAlreadyRegistered carries no detail about the other account.
+	ErrMCPPhoneAlreadyRegistered = errors.New("this phone number is already registered to another account; ask the admin for help")
 )
 
 type MCPError struct {
@@ -74,6 +77,8 @@ func MapToolError(err error, logger ...*slog.Logger) error {
 		return &MCPError{Code: "invalid_input", Message: ErrMCPInvalidInput.Error(), cause: err}
 	case errors.Is(err, servicereminder.ErrConflict), errors.Is(err, interfacescheduledmessage.ErrConflict), errors.Is(err, domainidentity.ErrIdentityConflict), errors.Is(err, domaininvitation.ErrMembershipConflict):
 		return &MCPError{Code: "conflict", Message: ErrMCPConflict.Error(), cause: err}
+	case errors.Is(err, domainidentity.ErrPhoneAlreadyRegistered):
+		return &MCPError{Code: "phone_already_registered", Message: ErrMCPPhoneAlreadyRegistered.Error(), cause: err}
 	case errors.Is(err, domainidentity.ErrIdentityNotFound):
 		return &MCPError{Code: "not_found", Message: ErrMCPNotFound.Error(), cause: err}
 	default:

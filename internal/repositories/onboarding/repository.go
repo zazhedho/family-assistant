@@ -54,7 +54,7 @@ func (r *Repository) FindByPhone(ctx context.Context, phone string) (domainonboa
 		Table("users u").
 		Select("u.id::text AS user_id, s.id::text AS space_id").
 		Joins("JOIN spaces s ON s.created_by_user_id = u.id AND s.type = 'PERSONAL' AND s.status = 'ACTIVE' AND s.deleted_at IS NULL").
-		Where("u.phone = ? AND u.deleted_at IS NULL", phone).
+		Where("u.phone = ? AND u.phone_verified_at IS NOT NULL AND u.deleted_at IS NULL", phone).
 		Take(&account).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return domainonboarding.AccountRef{}, domainidentity.ErrIdentityNotFound
@@ -91,6 +91,9 @@ func (r *Repository) Create(ctx context.Context, registration domainonboarding.R
 			omit = append(omit, "phone")
 		}
 		if err := tx.WithContext(ctx).Omit(omit...).Create(&registration.User).Error; err != nil {
+			if isUserPhoneDuplicate(err) {
+				return domainidentity.ErrPhoneAlreadyRegistered
+			}
 			return err
 		}
 		if err := tx.WithContext(ctx).Create(&registration.Space).Error; err != nil {
@@ -106,6 +109,14 @@ func (r *Repository) Create(ctx context.Context, registration domainonboarding.R
 		return identityErr
 	})
 	return err
+}
+
+// usersPhoneUniqueIndex is the partial unique index on users.phone.
+const usersPhoneUniqueIndex = "idx_users_phone"
+
+func isUserPhoneDuplicate(err error) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == "23505" && pgErr.ConstraintName == usersPhoneUniqueIndex
 }
 
 func isExternalIdentityDuplicate(err error) bool {

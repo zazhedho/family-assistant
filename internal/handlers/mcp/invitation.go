@@ -12,7 +12,6 @@ import (
 	interfaceidentity "family-assistant/internal/interfaces/identity"
 	interfaceinvitation "family-assistant/internal/interfaces/invitation"
 	serviceauthorization "family-assistant/internal/services/authorization"
-	serviceidentity "family-assistant/internal/services/identity"
 	"family-assistant/utils"
 
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
@@ -47,6 +46,10 @@ type InvitationRevokeInput struct {
 }
 
 func InvitationCreate(ctx context.Context, resolver interfaceidentity.Resolver, service interfaceinvitation.ServiceInvitationInterface, input InvitationCreateInput) (InvitationCreateOutput, error) {
+	// The bearer token returned here would be usable by any group member.
+	if err := requireDirectMessage(ctx); err != nil {
+		return InvitationCreateOutput{}, err
+	}
 	actor, err := RequireActor(ctx, resolver)
 	if err != nil {
 		return InvitationCreateOutput{}, MapToolError(err)
@@ -54,7 +57,7 @@ func InvitationCreate(ctx context.Context, resolver interfaceidentity.Resolver, 
 	if service == nil {
 		return InvitationCreateOutput{}, MapToolError(errors.New("invitation service is not configured"))
 	}
-	selected, err := serviceidentity.SelectSpace(ctx, actor, input.Space, selectorPermissions(resolver))
+	selected, err := selectActorSpace(ctx, resolver, actor, input.Space)
 	if err != nil {
 		return InvitationCreateOutput{}, MapToolError(err)
 	}
@@ -94,7 +97,7 @@ func InvitationList(ctx context.Context, resolver interfaceidentity.Resolver, se
 	if service == nil {
 		return nil, MapToolError(errors.New("invitation service is not configured"))
 	}
-	selected, err := serviceidentity.SelectSpace(ctx, actor, input.Space, selectorPermissions(resolver))
+	selected, err := selectActorSpace(ctx, resolver, actor, input.Space)
 	if err != nil {
 		return nil, MapToolError(err)
 	}
@@ -116,7 +119,7 @@ func InvitationRevoke(ctx context.Context, resolver interfaceidentity.Resolver, 
 	if service == nil {
 		return nil, MapToolError(errors.New("invitation service is not configured"))
 	}
-	selected, err := serviceidentity.SelectSpace(ctx, actor, input.Space, selectorPermissions(resolver))
+	selected, err := selectActorSpace(ctx, resolver, actor, input.Space)
 	if err != nil {
 		return nil, MapToolError(err)
 	}

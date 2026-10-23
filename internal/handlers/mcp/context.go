@@ -80,7 +80,7 @@ func selectSpaceActor(ctx context.Context, resolver interfaceidentity.Resolver, 
 	if err != nil {
 		return domainidentity.ActorContext{}, err
 	}
-	return serviceidentity.SelectSpace(ctx, actor, selector, selectorPermissions(resolver))
+	return selectActorSpace(ctx, resolver, actor, selector)
 }
 
 func selectorPermissions(resolver interfaceidentity.Resolver) interfaceidentity.PermissionLoader {

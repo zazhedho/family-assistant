@@ -110,10 +110,16 @@ func (s *scheduledMessageServiceStub) BindCurrentGroup(_ context.Context, actor 
 	}, s.bindErr
 }
 
-func TestScheduledMessageToolsExposeSevenOnlyWhenServiceConfigured(t *testing.T) {
+func TestScheduledMessageToolsExposeSixOnlyWhenServiceConfigured(t *testing.T) {
 	disabled := newScheduledMessageMCPServer(t, nil, scheduledResolver(scheduledTestSpaceID), "")
-	if got := scheduledToolNames(t, disabled.URL); len(got) != 25 {
-		t.Fatalf("disabled tools/list count = %d, want 25", len(got))
+	disabledTools := scheduledToolNames(t, disabled.URL)
+	if len(disabledTools) != 26 || !containsString(disabledTools, "space_channel_bind") {
+		t.Fatalf("disabled tools/list = %v, want 26 tools including space_channel_bind", disabledTools)
+	}
+	for _, name := range disabledTools {
+		if strings.HasPrefix(name, "scheduled_message_") {
+			t.Fatalf("disabled tools/list exposes %s without a scheduled message service", name)
+		}
 	}
 
 	enabledService := &scheduledMessageServiceStub{}
@@ -128,6 +134,46 @@ func TestScheduledMessageToolsExposeSevenOnlyWhenServiceConfigured(t *testing.T)
 	}
 	if len(got) != 32 || strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Fatalf("enabled tools/list = %v, want exactly %v", got, want)
+	}
+}
+
+func containsString(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
+}
+
+func TestSpaceChannelBindWorksWithoutScheduledMessageService(t *testing.T) {
+	binder := &scheduledMessageServiceStub{}
+	resolver := scheduledResolver(scheduledTestSpaceID)
+	handler := NewHTTPHandler(config.MCPConfig{ServerKey: "secret", IdentitySecret: scheduledTestSecret}, resolver, nil, nil, nil, nil, ToolServices{GroupBinder: binder})
+	server := httptest.NewServer(handler)
+	t.Cleanup(server.Close)
+	initializeMCPServer(t, server.URL)
+
+	names := scheduledToolNames(t, server.URL)
+	if len(names) != 26 || !containsString(names, "space_channel_bind") || containsString(names, "scheduled_message_create") {
+		t.Fatalf("tools/list = %v, want 26 tools with space_channel_bind and no scheduled_message tools", names)
+	}
+	identity := scheduledIdentity("nonce-bind-no-lane")
+	response := callScheduledTool(t, server.URL, "space_channel_bind", map[string]any{"space": scheduledTestSpaceID}, &identity)
+	if response.Result == nil || response.Result.IsError {
+		t.Fatalf("space_channel_bind failed without scheduled message service: %+v", response)
+	}
+	if binder.bindCalls != 1 || binder.bindInput.Space != scheduledTestSpaceID || binder.bindInput.CurrentChatID != "120363@g.us" {
+		t.Fatalf("bind input = %+v, calls=%d; want one verified group bind", binder.bindInput, binder.bindCalls)
+	}
+}
+
+func TestSpaceChannelBindFailsClosedWithoutBinder(t *testing.T) {
+	server := newScheduledMessageMCPServer(t, nil, scheduledResolver(scheduledTestSpaceID), scheduledTestSecret)
+	identity := scheduledIdentity("nonce-bind-no-binder")
+	response := callScheduledTool(t, server.URL, "space_channel_bind", map[string]any{"space": scheduledTestSpaceID}, &identity)
+	if response.Result == nil || !response.Result.IsError {
+		t.Fatalf("space_channel_bind without a binder = %+v, want a tool error", response)
 	}
 }
 
@@ -335,6 +381,9 @@ func TestScheduledMessageCancelAndUnsubscribeUseAuthenticatedActor(t *testing.T)
 func newScheduledMessageMCPServer(t *testing.T, service interfacescheduledmessage.Service, resolver *resolverStub, identitySecret string) *httptest.Server {
 	t.Helper()
 	services := ToolServices{ScheduledMessage: service}
+	if service != nil {
+		services.GroupBinder = service
+	}
 	handler := NewHTTPHandler(config.MCPConfig{ServerKey: "secret", IdentitySecret: identitySecret}, resolver, nil, nil, nil, nil, services)
 	server := httptest.NewServer(handler)
 	t.Cleanup(server.Close)

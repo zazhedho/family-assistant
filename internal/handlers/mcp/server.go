@@ -22,6 +22,12 @@ type ToolServices struct {
 	Invitation       interfaceinvitation.ServiceInvitationInterface
 	Activity         interfaceactivity.ServiceActivityInterface
 	ScheduledMessage interfacescheduledmessage.Service
+	// GroupBinder backs space_channel_bind, which is registered whether or not the
+	// scheduled-message lane is enabled; when nil the tool fails closed.
+	GroupBinder interfacescheduledmessage.GroupBinder
+	// GroupSpaces resolves the Space bound to a WhatsApp group; without it a blank
+	// space selector in a group fails closed.
+	GroupSpaces interfaceidentity.GroupSpaceLookup
 }
 
 type mcpDependencies struct {
@@ -45,6 +51,7 @@ func NewHTTPHandler(cfg config.MCPConfig, resolver interfaceidentity.Resolver, l
 	registerReminderTools(sdkServer, reminderService, resolver)
 	registerInvitationTools(sdkServer, resolver, toolServices.Invitation)
 	registerActivityTools(sdkServer, resolver, toolServices.Activity, reminderService)
+	registerGroupBindTool(sdkServer, resolver, toolServices.GroupBinder)
 	if toolServices.ScheduledMessage != nil {
 		registerScheduledMessageTools(sdkServer, resolver, toolServices.ScheduledMessage)
 	}
@@ -57,7 +64,7 @@ func NewHTTPHandler(cfg config.MCPConfig, resolver interfaceidentity.Resolver, l
 	})
 
 	mux := http.NewServeMux()
-	mux.Handle("/mcp", NewAuthMiddleware(cfg).Handler(sdkHandler))
+	mux.Handle("/mcp", NewAuthMiddleware(cfg).Handler(groupSpaceLookupHandler(toolServices.GroupSpaces, sdkHandler)))
 	return mux
 }
 
@@ -94,4 +101,12 @@ func listenMCP(cfg config.MCPConfig, dependencies mcpDependencies, listen func(s
 		return nil, nil, err
 	}
 	return server, listener, nil
+}
+
+// groupSpaceLookupHandler exposes the group Space lookup to tool handlers through
+// the request context, next to the identity verifier set by the auth middleware.
+func groupSpaceLookupHandler(lookup interfaceidentity.GroupSpaceLookup, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		next.ServeHTTP(w, r.WithContext(withGroupSpaceLookup(r.Context(), lookup)))
+	})
 }

@@ -31,6 +31,9 @@ type IdentityRevokeOutput struct {
 }
 
 func IdentityLink(ctx context.Context, service interfaceidentity.LinkService, input IdentityLinkInput) (IdentityLinkOutput, error) {
+	if err := requireDirectMessage(ctx); err != nil {
+		return IdentityLinkOutput{}, err
+	}
 	request, ok := ExternalRequestFromContext(ctx)
 	if !ok || strings.TrimSpace(request.Provider) == "" || strings.TrimSpace(request.ExternalID) == "" {
 		return IdentityLinkOutput{}, MapToolError(serviceidentity.ErrUnauthenticated)

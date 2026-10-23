@@ -18,6 +18,8 @@ var (
 	ErrInvalidLinkToken = errors.New("invalid link token")
 	ErrIdentityConflict = errors.New("external identity is already linked")
 	ErrIdentityNotFound = errors.New("external identity not found")
+	// ErrPhoneAlreadyRegistered means the phone number already belongs to another account.
+	ErrPhoneAlreadyRegistered = errors.New("phone number is already registered")
 )
 
 func NormalizeProvider(provider string) string {

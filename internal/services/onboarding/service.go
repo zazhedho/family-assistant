@@ -191,11 +191,17 @@ func (s *Service) newRegistration(name string, birthDate *time.Time, provider, e
 	userID := utils.CreateUUID()
 	spaceID := utils.CreateUUID()
 	viewerRoleID = strings.TrimSpace(viewerRoleID)
+	// A WhatsApp-delivered phone is proven by the signed channel identity, so it is verified at registration.
+	var phoneVerifiedAt *time.Time
+	if strings.TrimSpace(phone) != "" {
+		phoneVerifiedAt = &now
+	}
 	registration := domainonboarding.Registration{
 		User: domainuser.Users{
 			Id:                    userID,
 			Name:                  name,
 			Phone:                 phone,
+			PhoneVerifiedAt:       phoneVerifiedAt,
 			Role:                  utils.RoleViewer,
 			RoleId:                &viewerRoleID,
 			LoginProvider:         provider,
@@ -304,6 +310,8 @@ func failureCategory(err error) string {
 		return "unauthenticated"
 	case errors.Is(err, domainidentity.ErrIdentityConflict):
 		return "conflict"
+	case errors.Is(err, domainidentity.ErrPhoneAlreadyRegistered):
+		return "phone_already_registered"
 	default:
 		return "internal"
 	}

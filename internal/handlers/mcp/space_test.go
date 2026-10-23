@@ -254,7 +254,7 @@ func TestMemberUpdateRoleValidatesMemberUUIDAndPassesRole(t *testing.T) {
 	if err != nil {
 		t.Fatalf("member_update_role: %v", err)
 	}
-	if updated == nil || service.roleCalls != 1 || service.roleUser != "user-1" || service.roleSpace != spaceID || service.roleMember != memberID || service.roleName != "space_viewer" {
+	if updated.ID != memberID || service.roleCalls != 1 || service.roleUser != "user-1" || service.roleSpace != spaceID || service.roleMember != memberID || service.roleName != "space_viewer" {
 		t.Fatalf("unexpected role update: result=%+v service=%+v", updated, service)
 	}
 }
@@ -274,7 +274,7 @@ func TestMemberRemovePassesSelectedSpaceAndMember(t *testing.T) {
 	if err != nil {
 		t.Fatalf("member_remove: %v", err)
 	}
-	if removed == nil || service.removeCalls != 1 || service.removeUser != "user-1" || service.removeSpace != spaceID || service.removeMember != memberID {
+	if removed.ID != memberID || service.removeCalls != 1 || service.removeUser != "user-1" || service.removeSpace != spaceID || service.removeMember != memberID {
 		t.Fatalf("unexpected member removal: result=%+v service=%+v", removed, service)
 	}
 }

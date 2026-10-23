@@ -219,7 +219,11 @@ func TestActivityCreateWithReminderRequiresReminderServiceBeforeActivity(t *test
 
 func activityReminderHTTPServer(t *testing.T, resolver *resolverStub, activityService *mcpActivityServiceStub, reminderService interfacereminder.ServiceReminderInterface, identitySecret string) *httptest.Server {
 	t.Helper()
-	handler := NewHTTPHandler(config.MCPConfig{ServerKey: "secret", IdentitySecret: identitySecret}, resolver, nil, nil, nil, reminderService, ToolServices{Activity: activityService})
+	handler := NewHTTPHandler(config.MCPConfig{ServerKey: "secret", IdentitySecret: identitySecret}, resolver, nil, nil, nil, reminderService, ToolServices{
+		Activity: activityService,
+		// The signed test identity is a WhatsApp group, so blank-space calls need its bound Space.
+		GroupSpaces: &groupSpaceLookupStub{spaceID: mcpSpaceID, found: true},
+	})
 	server := httptest.NewServer(handler)
 	t.Cleanup(server.Close)
 	initializeMCPServer(t, server.URL)

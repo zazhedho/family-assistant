@@ -7,10 +7,107 @@ from unittest.mock import patch
 from integrations.hermes.family_assistant_identity import plugin
 
 
+def _hermes_is_shared(source, *, group_sessions_per_user=True, thread_sessions_per_user=False):
+    """Stand-in mirroring gateway.session.is_shared_multi_user_session."""
+    if source.chat_type == "dm":
+        return False
+    return not (thread_sessions_per_user if source.thread_id else group_sessions_per_user)
+
+
+def _gateway(group_sessions_per_user=True, thread_sessions_per_user=False):
+    return SimpleNamespace(config=SimpleNamespace(
+        group_sessions_per_user=group_sessions_per_user,
+        thread_sessions_per_user=thread_sessions_per_user,
+    ))
+
+
+PER_USER = _gateway(group_sessions_per_user=True)
+SHARED = _gateway(group_sessions_per_user=False)
+SECRET_ENV = {"FAMILY_ASSISTANT_IDENTITY_SECRET": "identity-secret"}
+
+
 class FamilyAssistantIdentityPluginTest(unittest.TestCase):
     def setUp(self):
         plugin._current_identity.set(None)
         self.addCleanup(plugin._current_identity.set, None)
+        patcher = patch.object(plugin, "_shared_session_helper", return_value=_hermes_is_shared)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def _group_event(self, chat_type="group", thread_id=None):
+        return SimpleNamespace(source=SimpleNamespace(
+            platform="telegram", user_id="12345", chat_id="group-chat-9876",
+            chat_type=chat_type, thread_id=thread_id,
+        ))
+
+    def _sign_after_capture(self, event, **kwargs):
+        plugin.capture_gateway_identity(event, **kwargs)
+        with patch.dict(os.environ, SECRET_ENV):
+            return plugin.inject_identity("mcp_family_assistant_space_list", {})
+
+    def test_shared_group_session_is_not_signed_and_warns(self):
+        with self.assertLogs(plugin.logger, level="WARNING") as logs:
+            result = self._sign_after_capture(self._group_event(), gateway=SHARED)
+        self.assertIsNone(result)
+        self.assertTrue(plugin._current_identity.get()["shared"])
+        self.assertEqual(len(logs.records), 1)
+        message = logs.records[0].getMessage()
+        self.assertIn("group_sessions_per_user", message)
+        self.assertNotIn("12345", message)
+        self.assertNotIn("group-chat-9876", message)
+
+    def test_per_user_group_session_is_signed(self):
+        result = self._sign_after_capture(self._group_event(), gateway=PER_USER)
+        self.assertIsNotNone(result)
+        self.assertFalse(plugin._current_identity.get()["shared"])
+        envelope = result["args"][plugin.IDENTITY_ARGUMENT_NAME]
+        self.assertEqual(envelope["external_id"], "telegram:12345")
+        self.assertTrue(plugin.verify_signature("identity-secret", envelope))
+
+    def test_dm_is_signed_even_when_group_sessions_are_shared(self):
+        result = self._sign_after_capture(self._group_event(chat_type="dm"), gateway=SHARED)
+        self.assertIsNotNone(result)
+        self.assertFalse(plugin._current_identity.get()["shared"])
+
+    def test_thread_in_per_user_groups_is_shared_unless_threads_are_per_user(self):
+        event = self._group_event(chat_type="thread", thread_id="t1")
+        with self.assertLogs(plugin.logger, level="WARNING"):
+            self.assertIsNone(self._sign_after_capture(event, gateway=PER_USER))
+        gateway = _gateway(group_sessions_per_user=True, thread_sessions_per_user=True)
+        self.assertIsNotNone(self._sign_after_capture(event, gateway=gateway))
+
+    def test_unresolvable_shared_state_for_group_fails_closed(self):
+        def raising_helper(*args, **kwargs):
+            raise RuntimeError("boom")
+
+        cases = {
+            "helper unavailable": (None, PER_USER),
+            "no gateway": (_hermes_is_shared, None),
+            "gateway without config": (_hermes_is_shared, SimpleNamespace()),
+            "helper raises": (raising_helper, PER_USER),
+        }
+        for name, (helper, gateway) in cases.items():
+            with self.subTest(name=name):
+                with patch.object(plugin, "_shared_session_helper", return_value=helper), \
+                        self.assertLogs(plugin.logger, level="WARNING"):
+                    self.assertIsNone(self._sign_after_capture(self._group_event(), gateway=gateway))
+
+    def test_unavailable_helper_does_not_affect_dm(self):
+        with patch.object(plugin, "_shared_session_helper", return_value=None):
+            self.assertIsNotNone(self._sign_after_capture(self._group_event(chat_type="dm")))
+
+    def test_session_fallback_refuses_group_chat_but_signs_dm(self):
+        base = {
+            "HERMES_SESSION_PLATFORM": "telegram", "HERMES_SESSION_USER_ID": "12345",
+            "HERMES_SESSION_CHAT_ID": "chat", **SECRET_ENV,
+        }
+        for chat_type in ("group", "channel", "thread", ""):
+            with self.subTest(chat_type=chat_type):
+                with patch.dict(os.environ, {**base, "HERMES_SESSION_CHAT_TYPE": chat_type}):
+                    self.assertIsNone(plugin._session_identity())
+                    self.assertIsNone(plugin.inject_identity("mcp_family_assistant_space_list", {}))
+        with patch.dict(os.environ, {**base, "HERMES_SESSION_CHAT_TYPE": "dm"}):
+            self.assertIsNotNone(plugin.inject_identity("mcp_family_assistant_space_list", {}))
 
     def test_captures_whatsapp_sender_from_gateway_event(self):
         event = SimpleNamespace(
@@ -20,10 +117,11 @@ class FamilyAssistantIdentityPluginTest(unittest.TestCase):
                 user_id_alt="",
                 chat_id="120363@g.us",
                 chat_type="group",
+                thread_id=None,
             )
         )
 
-        result = plugin.capture_gateway_identity(event)
+        result = plugin.capture_gateway_identity(event, gateway=PER_USER, session_store=None)
 
         self.assertIsNone(result)
         self.assertEqual(
@@ -34,15 +132,16 @@ class FamilyAssistantIdentityPluginTest(unittest.TestCase):
                 "channel": "whatsapp",
                 "chat_id": "120363@g.us",
                 "chat_type": "group",
+                "shared": False,
             },
         )
 
     def test_message_time_is_captured_signed_and_cannot_be_overridden(self):
         message_at = datetime(2026, 9, 29, 23, 59, tzinfo=timezone.utc)
         event = SimpleNamespace(timestamp=message_at, source=SimpleNamespace(
-            platform="whatsapp", user_id="sender", chat_id="group", chat_type="group",
+            platform="whatsapp", user_id="sender", chat_id="group", chat_type="group", thread_id=None,
         ))
-        plugin.capture_gateway_identity(event)
+        plugin.capture_gateway_identity(event, gateway=PER_USER)
         with patch.dict(os.environ, {"FAMILY_ASSISTANT_IDENTITY_SECRET": "identity-secret"}):
             result = plugin.inject_identity("mcp_family_assistant_activity_create", {
                 "kind": "note", "note": "now", "__hermes_identity": {"message_at": 1},
@@ -60,9 +159,9 @@ class FamilyAssistantIdentityPluginTest(unittest.TestCase):
             with self.subTest(platform=platform):
                 event = SimpleNamespace(timestamp=message_at, source=SimpleNamespace(
                     platform=SimpleNamespace(value=platform), user_id="12345",
-                    chat_id="group", chat_type="group",
+                    chat_id="group", chat_type="group", thread_id=None,
                 ))
-                plugin.capture_gateway_identity(event)
+                plugin.capture_gateway_identity(event, gateway=PER_USER)
                 with patch.dict(os.environ, {"FAMILY_ASSISTANT_IDENTITY_SECRET": "identity-secret"}):
                     result = plugin.inject_identity("mcp_family_assistant_activity_create", {})
                 self.assertIsNotNone(result)
@@ -78,7 +177,7 @@ class FamilyAssistantIdentityPluginTest(unittest.TestCase):
     def test_non_whatsapp_session_fallback_uses_the_same_namespace(self):
         with patch.dict(os.environ, {
             "HERMES_SESSION_PLATFORM": "telegram", "HERMES_SESSION_USER_ID": "12345",
-            "HERMES_SESSION_CHAT_ID": "group", "HERMES_SESSION_CHAT_TYPE": "group",
+            "HERMES_SESSION_CHAT_ID": "chat", "HERMES_SESSION_CHAT_TYPE": "dm",
             "FAMILY_ASSISTANT_IDENTITY_SECRET": "identity-secret",
         }):
             result = plugin.inject_identity("mcp_family_assistant_space_list", {})
