@@ -114,6 +114,36 @@ func TestRunOnceAllowsFixedTextAboveGeneratorOutputBound(t *testing.T) {
 	}
 }
 
+func TestRunOnceSkipsPostgresWhenRedisHasNoDueDelivery(t *testing.T) {
+	now := time.Date(2026, 10, 14, 10, 0, 0, 0, time.UTC)
+	clock := &testClock{now: now}
+	repo := newMemoryScheduledRepository()
+	index := newTestDueIndex()
+	index.MarkReconciled(index.ReconcileVersion())
+	scheduler := newTestScheduler(t, repo, index, nil, &testSender{}, testScheduledConfig(), clock)
+
+	if err := scheduler.RunOnce(context.Background(), now); err != nil {
+		t.Fatalf("RunOnce() error = %v", err)
+	}
+	if len(repo.events) != 0 {
+		t.Fatalf("repository calls = %v, want none", repo.events)
+	}
+}
+
+func TestRunOnceUsesPostgresWhenRedisIndexIsDegraded(t *testing.T) {
+	now := time.Date(2026, 10, 14, 10, 0, 0, 0, time.UTC)
+	clock := &testClock{now: now}
+	repo := newMemoryScheduledRepository()
+	scheduler := newTestScheduler(t, repo, newTestDueIndex(), nil, &testSender{}, testScheduledConfig(), clock)
+
+	if err := scheduler.RunOnce(context.Background(), now); err != nil {
+		t.Fatalf("RunOnce() error = %v", err)
+	}
+	if len(repo.events) != 1 || repo.events[0] != "claim:2" {
+		t.Fatalf("repository calls = %v, want one database claim", repo.events)
+	}
+}
+
 func TestRunOnceRetriesWhenGeneratedOutputExceedsOutputBound(t *testing.T) {
 	now := time.Date(2026, 10, 14, 10, 0, 0, 0, time.UTC)
 	clock := &testClock{now: now}

@@ -164,13 +164,10 @@ func (s *ScheduledMessageScheduler) shouldClaim(ctx context.Context, now time.Ti
 		return s.useDatabaseFallback(now), nil
 	}
 	hasDue, err := s.index.HasDue(ctx, now)
-	if err == nil && hasDue {
-		return true, nil
+	if err == nil {
+		return hasDue, nil
 	}
-	if s.useDatabaseFallback(now) {
-		return true, nil
-	}
-	return false, nil
+	return s.useDatabaseFallback(now), nil
 }
 
 func (s *ScheduledMessageScheduler) useDatabaseFallback(now time.Time) bool {
