@@ -212,7 +212,7 @@ func reminderHTTPError(err error) (int, string) {
 		return http.StatusUnauthorized, "authentication required"
 	case errors.Is(err, serviceauthorization.ErrForbidden):
 		return http.StatusForbidden, "forbidden"
-	case errors.Is(err, serviceauthorization.ErrNotFound), errors.Is(err, gorm.ErrRecordNotFound):
+	case errors.Is(err, serviceauthorization.ErrNotFound), errors.Is(err, serviceidentity.ErrNotFound), errors.Is(err, gorm.ErrRecordNotFound):
 		return http.StatusNotFound, "not found"
 	case errors.Is(err, serviceauthorization.ErrInvalidResource), errors.Is(err, utils.ErrInvalidUUID),
 		errors.Is(err, utils.ErrInvalidTime), errors.Is(err, domainreminder.ErrInvalidStatus):

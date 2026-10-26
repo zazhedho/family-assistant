@@ -3,6 +3,7 @@ package handlerreminder
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -16,6 +17,7 @@ import (
 	"family-assistant/internal/dto"
 	interfacereminder "family-assistant/internal/interfaces/reminder"
 	serviceauthorization "family-assistant/internal/services/authorization"
+	serviceidentity "family-assistant/internal/services/identity"
 	servicereminder "family-assistant/internal/services/reminder"
 
 	"github.com/gin-gonic/gin"
@@ -231,6 +233,7 @@ func TestReminderHTTPMapsServiceErrorsSafely(t *testing.T) {
 	}{
 		{name: "forbidden", err: serviceauthorization.ErrForbidden, want: http.StatusForbidden},
 		{name: "not found", err: serviceauthorization.ErrNotFound, want: http.StatusNotFound},
+		{name: "identity not found", err: fmt.Errorf("select space: %w", serviceidentity.ErrNotFound), want: http.StatusNotFound},
 		{name: "conflict", err: servicereminder.ErrConflict, want: http.StatusConflict},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
