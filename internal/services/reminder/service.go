@@ -142,11 +142,13 @@ func (s *service) CreateReplacing(ctx context.Context, actor domainidentity.Acto
 	for _, replaced := range result.Replaced {
 		s.removeReminderFromIndex(ctx, replaced.ID)
 	}
-	resource := result.Reminder
-	if resource == nil {
-		resource = created
+	if result.Outcome != domainreminder.ReplaceOutcomeKeptExisting {
+		resource := result.Reminder
+		if resource == nil {
+			resource = created
+		}
+		s.writeAudit(ctx, auditEvent(actor, domainaudit.ActionCreate, resource.SpaceID, resource.ID, resource.CreatedByMemberID, domainaudit.StatusSuccess, nil))
 	}
-	s.writeAudit(ctx, auditEvent(actor, domainaudit.ActionCreate, resource.SpaceID, resource.ID, resource.CreatedByMemberID, domainaudit.StatusSuccess, nil))
 	for _, replaced := range result.Replaced {
 		s.writeAudit(ctx, auditEvent(actor, domainaudit.ActionDelete, replaced.SpaceID, replaced.ID, replaced.CreatedByMemberID, domainaudit.StatusSuccess, nil))
 	}

@@ -862,7 +862,8 @@ func TestCreateReplacingKeptExistingDoesNotIndex(t *testing.T) {
 	repo := &reminderRepositoryStub{replaceResult: &domainreminder.ReplaceResult{Outcome: domainreminder.ReplaceOutcomeKeptExisting, Reminder: later}}
 	spaces, a := replacingFixture("space_member", "reminders:create")
 	index := &reminderIndexWriterStub{}
-	svc := NewReminderService(repo, spaces, authorization.NewAuthorizer(), nil, index)
+	audit := &auditStoreStub{}
+	svc := NewReminderService(repo, spaces, authorization.NewAuthorizer(), audit, index)
 
 	result, err := svc.CreateReplacing(context.Background(), a, dto.ReminderCreateInput{Title: "Diaper", ScheduledAt: time.Date(2026, 9, 28, 10, 0, 0, 0, time.UTC), ReplaceKey: "diaper"})
 	if err != nil {
@@ -873,6 +874,9 @@ func TestCreateReplacingKeptExistingDoesNotIndex(t *testing.T) {
 	}
 	if len(index.upserts) != 0 || len(index.removed) != 0 {
 		t.Fatalf("index touched: %+v %v", index.upserts, index.removed)
+	}
+	if len(audit.events) != 0 {
+		t.Fatalf("audit events = %+v, want none", audit.events)
 	}
 }
 
