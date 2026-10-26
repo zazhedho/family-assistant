@@ -11,6 +11,7 @@ import (
 	domainactivity "family-assistant/internal/domain/activity"
 	domainidentity "family-assistant/internal/domain/identity"
 	domainpermission "family-assistant/internal/domain/permission"
+	domainreminder "family-assistant/internal/domain/reminder"
 	domainspace "family-assistant/internal/domain/space"
 	interfacereminder "family-assistant/internal/interfaces/reminder"
 	"family-assistant/pkg/config"
@@ -262,5 +263,73 @@ func requireMCPToolError(t *testing.T, response mcpServerResponse) {
 	t.Helper()
 	if response.Error != nil || response.Result == nil || !response.Result.IsError {
 		t.Fatalf("response = %+v, want MCP tool error", response)
+	}
+}
+
+func TestActivityCreateWithReminderReplacePreviousUsesActivityKind(t *testing.T) {
+	activityService := &mcpActivityServiceStub{created: &domainactivity.Activity{ID: "activity-1", SpaceID: mcpSpaceID, Kind: "Diaper"}}
+	reminderService := &reminderToolServiceStub{replaceResult: &domainreminder.ReplaceResult{
+		Outcome: domainreminder.ReplaceOutcomeKeptExisting,
+		Reminder: &domainreminder.Reminder{
+			ID: "kept-1", SpaceID: mcpSpaceID, Title: "Later", Status: domainreminder.StatusPending,
+			ScheduledAt: time.Date(2026, 9, 30, 8, 0, 0, 0, time.UTC),
+		},
+	}}
+	server := activityReminderHTTPServer(t, activityReminderResolver(), activityService, reminderService, "")
+	arguments := activityReminderArguments(map[string]any{
+		"title": "Diaper check", "after_minutes": 240, "replace_previous": true,
+	})
+	arguments["activity"].(map[string]any)["kind"] = "Diaper"
+	response := callActivityReminderTool(t, server.URL, arguments)
+	if response.Error != nil || response.Result == nil || response.Result.IsError {
+		t.Fatalf("response = %+v", response)
+	}
+	var output struct {
+		Status   string          `json:"status"`
+		Reminder *ReminderOutput `json:"reminder"`
+	}
+	if err := json.Unmarshal(response.Result.StructuredOutput, &output); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if reminderService.createInput.ReplaceKey != "Diaper" {
+		t.Fatalf("replace key = %q", reminderService.createInput.ReplaceKey)
+	}
+	if output.Status != "created" || output.Reminder == nil || output.Reminder.ID != "kept-1" || output.Reminder.ReplaceOutcome != "kept_existing" {
+		t.Fatalf("output = %s", response.Result.StructuredOutput)
+	}
+}
+
+func TestActivityCreateWithReminderRejectsReplaceWithoutKind(t *testing.T) {
+	activityService := &mcpActivityServiceStub{created: &domainactivity.Activity{ID: "activity-1", SpaceID: mcpSpaceID}}
+	reminderService := &reminderToolServiceStub{}
+	server := activityReminderHTTPServer(t, activityReminderResolver(), activityService, reminderService, "")
+	arguments := activityReminderArguments(map[string]any{
+		"title": "Diaper check", "after_minutes": 240, "replace_previous": true,
+	})
+	arguments["activity"].(map[string]any)["kind"] = "  "
+	requireMCPToolError(t, callActivityReminderTool(t, server.URL, arguments))
+	if activityService.createCalls != 0 || reminderService.createCalls != 0 {
+		t.Fatalf("rejected request reached services: activity=%d reminder=%d", activityService.createCalls, reminderService.createCalls)
+	}
+}
+
+func TestActivityCreateWithReminderWithoutReplaceKeepsBehavior(t *testing.T) {
+	activityService := &mcpActivityServiceStub{created: &domainactivity.Activity{ID: "activity-1", SpaceID: mcpSpaceID, Kind: "feeding"}}
+	reminderService := &reminderToolServiceStub{}
+	server := activityReminderHTTPServer(t, activityReminderResolver(), activityService, reminderService, "")
+	response := callActivityReminderTool(t, server.URL, activityReminderArguments(map[string]any{
+		"title": "Follow up", "after_minutes": 15,
+	}))
+	if response.Error != nil || response.Result == nil || response.Result.IsError {
+		t.Fatalf("response = %+v", response)
+	}
+	if reminderService.createInput.ReplaceKey != "" {
+		t.Fatalf("replace key = %q, want empty", reminderService.createInput.ReplaceKey)
+	}
+	raw := string(response.Result.StructuredOutput)
+	for _, field := range []string{"replace_outcome", "replace_key", "replaced_reminders"} {
+		if strings.Contains(raw, field) {
+			t.Fatalf("output contains %s: %s", field, raw)
+		}
 	}
 }

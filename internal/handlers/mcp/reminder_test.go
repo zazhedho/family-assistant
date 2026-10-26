@@ -46,6 +46,7 @@ type reminderToolServiceStub struct {
 	deleteID      string
 	deleteCalls   int
 	deleteErr     error
+	replaceResult *domainreminder.ReplaceResult
 }
 
 func (s *reminderToolServiceStub) Create(_ context.Context, actor domainidentity.ActorContext, input dto.ReminderCreateInput) (*domainreminder.Reminder, error) {
@@ -64,6 +65,13 @@ func (s *reminderToolServiceStub) CreateReplacing(ctx context.Context, actor dom
 	reminder, err := s.Create(ctx, actor, input)
 	if err != nil {
 		return domainreminder.ReplaceResult{}, err
+	}
+	if s.replaceResult != nil {
+		result := *s.replaceResult
+		if result.Reminder == nil {
+			result.Reminder = reminder
+		}
+		return result, nil
 	}
 	return domainreminder.ReplaceResult{Outcome: domainreminder.ReplaceOutcomeNone, Reminder: reminder}, nil
 }
@@ -265,3 +273,45 @@ func TestReminderToolsMapServiceErrorsSafely(t *testing.T) {
 }
 
 var _ interfacereminder.ServiceReminderInterface = (*reminderToolServiceStub)(nil)
+
+func TestReminderCreatePassesReplaceKeyAndReturnsOutcome(t *testing.T) {
+	key := "diaper"
+	service := &reminderToolServiceStub{replaceResult: &domainreminder.ReplaceResult{
+		Outcome: domainreminder.ReplaceOutcomeReplaced,
+		Replaced: []domainreminder.Reminder{{
+			ID: "old-1", SpaceID: mcpSpaceID, Title: "Old", Status: domainreminder.StatusCancelled,
+			ScheduledAt: time.Date(2026, 9, 20, 4, 0, 0, 0, time.UTC), ReplaceKey: &key,
+		}},
+	}}
+	got, err := ReminderCreate(mcpExternalContext(), mcpReminderResolver(), service, ReminderCreateInput{
+		Title: "Diaper", ScheduledAt: "2026-09-20T08:00:00+07:00", ReplaceKey: " Diaper ",
+	})
+	if err != nil {
+		t.Fatalf("create reminder: %v", err)
+	}
+	if service.createInput.ReplaceKey != " Diaper " {
+		t.Fatalf("service replace key = %q", service.createInput.ReplaceKey)
+	}
+	if got.ReplaceOutcome != "replaced" || len(got.ReplacedReminders) != 1 || got.ReplacedReminders[0].ID != "old-1" || got.ReplacedReminders[0].Status != "CANCELLED" {
+		t.Fatalf("output = %+v", got)
+	}
+}
+
+func TestReminderCreateKeptExistingReturnsKeptReminder(t *testing.T) {
+	service := &reminderToolServiceStub{replaceResult: &domainreminder.ReplaceResult{
+		Outcome: domainreminder.ReplaceOutcomeKeptExisting,
+		Reminder: &domainreminder.Reminder{
+			ID: "kept-1", SpaceID: mcpSpaceID, Title: "Later", Status: domainreminder.StatusPending,
+			ScheduledAt: time.Date(2026, 9, 21, 8, 0, 0, 0, time.UTC),
+		},
+	}}
+	got, err := ReminderCreate(mcpExternalContext(), mcpReminderResolver(), service, ReminderCreateInput{
+		Title: "Diaper", ScheduledAt: "2026-09-20T08:00:00+07:00", ReplaceKey: "diaper",
+	})
+	if err != nil {
+		t.Fatalf("create reminder: %v", err)
+	}
+	if got.ID != "kept-1" || got.ReplaceOutcome != "kept_existing" || len(got.ReplacedReminders) != 0 {
+		t.Fatalf("output = %+v", got)
+	}
+}

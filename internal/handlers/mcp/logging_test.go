@@ -150,3 +150,16 @@ func mcpLogAttrValues(attrs []slog.Attr) map[string]string {
 	}
 	return values
 }
+
+func TestMCPToolLogAttrsIncludeReplaceFields(t *testing.T) {
+	attrs := mcpToolLogAttrs(
+		"reminder_create",
+		ReminderCreateInput{Title: "private title", ScheduledAt: "2026-09-29T10:30:00+07:00", ReplaceKey: "diaper"},
+		ReminderOutput{ID: "reminder-1", Title: "private title", Status: "PENDING", ReplaceOutcome: "replaced"},
+		time.Millisecond, nil,
+	)
+	got := mcpLogAttrValues(attrs)
+	if got["input_replace_key"] != "diaper" || got["output_replace_outcome"] != "replaced" {
+		t.Fatalf("attrs = %+v", got)
+	}
+}

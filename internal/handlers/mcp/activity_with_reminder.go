@@ -20,6 +20,7 @@ type ActivityReminderInput struct {
 	ScheduledAt      string `json:"scheduled_at,omitempty" jsonschema:"absolute RFC3339 timestamp; provide exactly one of scheduled_at or after_minutes"`
 	AfterMinutes     *int64 `json:"after_minutes,omitempty" jsonschema:"positive integer minutes after activity.occurred_at; provide exactly one of scheduled_at or after_minutes"`
 	AssigneeMemberID string `json:"assignee_member_id,omitempty"`
+	ReplacePrevious  bool   `json:"replace_previous,omitempty" jsonschema:"true for interval-based reminders (e.g. 4 hours after the last diaper change): uses the activity kind as replace key so older pending reminders of that kind are replaced; never for milk-leftover reminders"`
 }
 
 type ActivityCreateWithReminderInput struct {
@@ -81,6 +82,14 @@ func ActivityCreateWithReminder(ctx context.Context, resolver interfaceidentity.
 		return ActivityCreateWithReminderOutput{}, MapToolError(err)
 	}
 
+	replaceKey := ""
+	if input.Reminder.ReplacePrevious {
+		replaceKey = strings.TrimSpace(input.Activity.Kind)
+		if replaceKey == "" {
+			return ActivityCreateWithReminderOutput{}, MapToolError(&serviceauthorization.ValidationError{Field: "replace_previous", Reason: "requires an activity kind"})
+		}
+	}
+
 	activity, err := ActivityCreate(ctx, resolver, activityService, input.Activity)
 	if err != nil {
 		return ActivityCreateWithReminderOutput{}, err
@@ -95,6 +104,7 @@ func ActivityCreateWithReminder(ctx context.Context, resolver interfaceidentity.
 	reminder, err := ReminderCreate(ctx, resolver, reminderService, ReminderCreateInput{
 		Space: activity.SpaceID, Title: input.Reminder.Title, Description: input.Reminder.Description,
 		ScheduledAt: scheduledAt.Format(time.RFC3339Nano), AssigneeMemberID: assigneeMemberID,
+		ReplaceKey: replaceKey,
 	})
 	if err != nil {
 		//nolint:nilerr // Reminder failure is reported as partial success after activity persistence.

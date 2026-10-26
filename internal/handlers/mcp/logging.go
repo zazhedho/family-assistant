@@ -94,7 +94,7 @@ func safeMCPLogField(key string) bool {
 	switch key {
 	case "id", "space_id", "user_id", "member_id", "assignee_member_id", "activity_id", "reminder_id", "invitation_id",
 		"status", "kind", "category", "role", "role_name", "occurred_at", "scheduled_at", "after_minutes", "clear_assignee",
-		"from", "to", "limit":
+		"from", "to", "limit", "replace_key", "replace_outcome", "replace_previous":
 		return true
 	default:
 		return false
