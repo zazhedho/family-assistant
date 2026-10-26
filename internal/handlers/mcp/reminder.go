@@ -61,13 +61,14 @@ type ReminderOutput struct {
 	Status           string  `json:"status"`
 	ScheduledAt      string  `json:"scheduled_at"`
 
-	ReplaceKey        *string                  `json:"replace_key,omitempty"`
-	ReplaceOutcome    string                   `json:"replace_outcome,omitempty"`
-	ReplacedReminders []ReplacedReminderOutput `json:"replaced_reminders,omitempty"`
+	ReplaceKey         *string                  `json:"replace_key,omitempty"`
+	ReplaceOutcome     string                   `json:"replace_outcome,omitempty"`
+	ReplacedReminders  []ReplacedReminderOutput `json:"replaced_reminders,omitempty"`
+	CompletedReminders []ReplacedReminderOutput `json:"completed_reminders,omitempty"`
 }
 
-// ReplacedReminderOutput is the non-recursive shape of a reminder cancelled by
-// replacement; the JSON schema generator rejects self-referencing types.
+// ReplacedReminderOutput is the non-recursive shape of a reminder cancelled or
+// completed by replacement; the JSON schema generator rejects self-referencing types.
 type ReplacedReminderOutput struct {
 	ID               string  `json:"id"`
 	SpaceID          string  `json:"space_id"`
@@ -120,13 +121,20 @@ func ReminderCreate(ctx context.Context, resolver interfaceidentity.Resolver, se
 		output.ReplaceOutcome = string(result.Outcome)
 	}
 	for i := range result.Replaced {
-		replaced := reminderOutput(&result.Replaced[i])
-		output.ReplacedReminders = append(output.ReplacedReminders, ReplacedReminderOutput{
-			ID: replaced.ID, SpaceID: replaced.SpaceID, Title: replaced.Title, Description: replaced.Description,
-			AssigneeMemberID: replaced.AssigneeMemberID, Status: replaced.Status, ScheduledAt: replaced.ScheduledAt, ReplaceKey: replaced.ReplaceKey,
-		})
+		output.ReplacedReminders = append(output.ReplacedReminders, replacedReminderOutput(&result.Replaced[i]))
+	}
+	for i := range result.Completed {
+		output.CompletedReminders = append(output.CompletedReminders, replacedReminderOutput(&result.Completed[i]))
 	}
 	return output, nil
+}
+
+func replacedReminderOutput(reminder *domainreminder.Reminder) ReplacedReminderOutput {
+	out := reminderOutput(reminder)
+	return ReplacedReminderOutput{
+		ID: out.ID, SpaceID: out.SpaceID, Title: out.Title, Description: out.Description,
+		AssigneeMemberID: out.AssigneeMemberID, Status: out.Status, ScheduledAt: out.ScheduledAt, ReplaceKey: out.ReplaceKey,
+	}
 }
 
 func ReminderList(ctx context.Context, resolver interfaceidentity.Resolver, service interfacereminder.ServiceReminderInterface, input ReminderListInput) ([]ReminderOutput, error) {
@@ -246,7 +254,7 @@ func reminderOutput(reminder *domainreminder.Reminder) ReminderOutput {
 
 func registerReminderTools(server *mcpsdk.Server, service interfacereminder.ServiceReminderInterface, resolver interfaceidentity.Resolver) {
 	addTool(server, &mcpsdk.Tool{
-		Name: "reminder_create", Description: "Create a reminder in an authorized Space. For interval-based reminders such as diaper changes, pass replace_key so the newest event replaces older pending reminders with the same key. If replace_outcome is kept_existing, no new reminder was created; the returned reminder is the later one already pending.",
+		Name: "reminder_create", Description: "Create a reminder in an authorized Space. For interval-based reminders such as diaper changes, pass replace_key so the newest event replaces older pending reminders with the same key. Earlier SENT reminders with the same key count as handled: they are marked COMPLETED and listed in completed_reminders. If replace_outcome is kept_existing, no new reminder was created; the returned reminder is the later one already pending.",
 	}, func(ctx context.Context, input ReminderCreateInput) (ReminderOutput, error) {
 		return ReminderCreate(ctx, resolver, service, input)
 	})

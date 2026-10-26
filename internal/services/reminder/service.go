@@ -130,11 +130,17 @@ func (s *service) CreateReplacing(ctx context.Context, actor domainidentity.Acto
 		}
 		return domainreminder.ReplaceResult{}, err
 	}
-	// The repository returns pre-cancel copies; reflect the cancellation so callers never see them as pending.
+	// The repository returns pre-update copies; reflect the cancellation and completion so callers see the stored state.
 	for i := range result.Replaced {
 		result.Replaced[i].Status = domainreminder.StatusCancelled
 		result.Replaced[i].UpdatedAt = now
 		result.Replaced[i].DeletedAt = gorm.DeletedAt{Time: now, Valid: true}
+	}
+	for i := range result.Completed {
+		completedAt := now
+		result.Completed[i].Status = domainreminder.StatusCompleted
+		result.Completed[i].CompletedAt = &completedAt
+		result.Completed[i].UpdatedAt = now
 	}
 	if result.Outcome != domainreminder.ReplaceOutcomeKeptExisting {
 		s.indexReminder(ctx, result.Reminder)
@@ -158,6 +164,16 @@ func (s *service) CreateReplacing(ctx context.Context, actor domainidentity.Acto
 			metadata["replace_key"] = *replaceKey
 		}
 		s.writeAudit(ctx, auditEvent(actor, domainaudit.ActionDelete, replaced.SpaceID, replaced.ID, replaced.CreatedByMemberID, domainaudit.StatusSuccess, metadata))
+	}
+	for _, completed := range result.Completed {
+		metadata := map[string]any{"reason": "superseded"}
+		if result.Reminder != nil {
+			metadata["superseded_by_reminder_id"] = result.Reminder.ID
+		}
+		if replaceKey != nil {
+			metadata["replace_key"] = *replaceKey
+		}
+		s.writeAudit(ctx, auditEvent(actor, domainaudit.ActionUpdate, completed.SpaceID, completed.ID, completed.CreatedByMemberID, domainaudit.StatusSuccess, metadata))
 	}
 	return result, nil
 }

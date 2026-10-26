@@ -58,8 +58,9 @@ func isReplaceKeyViolation(err error) bool {
 }
 
 // CreateReplacing inserts the reminder and, when it carries a replace key,
-// cancels earlier pending reminders with the same key in the same space within
-// one transaction. A later pending reminder is kept and nothing is written.
+// cancels earlier pending reminders and completes earlier sent reminders with
+// the same key in the same space within one transaction. A later pending
+// reminder is kept and nothing is written.
 func (r *Repository) CreateReplacing(ctx context.Context, reminder *domainreminder.Reminder, now time.Time) (domainreminder.ReplaceResult, error) {
 	if reminder == nil {
 		return domainreminder.ReplaceResult{}, domainreminder.ErrReminderRequired
@@ -91,36 +92,50 @@ func (r *Repository) CreateReplacing(ctx context.Context, reminder *domainremind
 func (r *Repository) replaceOnce(ctx context.Context, reminder *domainreminder.Reminder, now time.Time) (domainreminder.ReplaceResult, error) {
 	var result domainreminder.ReplaceResult
 	err := r.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		var existing []domainreminder.Reminder
+		var matching []domainreminder.Reminder
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
-			Where("space_id = ? AND replace_key = ? AND status = ?", reminder.SpaceID, *reminder.ReplaceKey, domainreminder.StatusPending).
+			Where("space_id = ? AND replace_key = ? AND status IN ?", reminder.SpaceID, *reminder.ReplaceKey,
+				[]domainreminder.Status{domainreminder.StatusPending, domainreminder.StatusSent}).
 			Order("scheduled_at DESC").
-			Find(&existing).Error; err != nil {
+			Find(&matching).Error; err != nil {
 			return err
 		}
-		if len(existing) > 0 && existing[0].ScheduledAt.After(reminder.ScheduledAt) {
-			kept := existing[0]
+		var pending, sent []domainreminder.Reminder
+		for i := range matching {
+			switch {
+			case matching[i].Status == domainreminder.StatusPending:
+				pending = append(pending, matching[i])
+			case !matching[i].ScheduledAt.After(reminder.ScheduledAt):
+				sent = append(sent, matching[i])
+			}
+		}
+		if len(pending) > 0 && pending[0].ScheduledAt.After(reminder.ScheduledAt) {
+			kept := pending[0]
 			result = domainreminder.ReplaceResult{Outcome: domainreminder.ReplaceOutcomeKeptExisting, Reminder: &kept}
 			return nil
 		}
-		if len(existing) > 0 {
-			ids := make([]string, 0, len(existing))
-			for i := range existing {
-				ids = append(ids, existing[i].ID)
-			}
+		if len(pending) > 0 {
 			if err := tx.Model(&domainreminder.Reminder{}).
-				Where("id IN ?", ids).
+				Where("id IN ?", reminderIDs(pending)).
 				Updates(map[string]any{"status": domainreminder.StatusCancelled, "deleted_at": now, "updated_at": now}).Error; err != nil {
+				return err
+			}
+		}
+		// A sent reminder was due before the new event, so the new event handled it.
+		if len(sent) > 0 {
+			if err := tx.Model(&domainreminder.Reminder{}).
+				Where("id IN ?", reminderIDs(sent)).
+				Updates(map[string]any{"status": domainreminder.StatusCompleted, "completed_at": now, "updated_at": now}).Error; err != nil {
 				return err
 			}
 		}
 		if err := insertReminder(tx, reminder); err != nil {
 			return err
 		}
-		result = domainreminder.ReplaceResult{Outcome: domainreminder.ReplaceOutcomeCreated, Reminder: reminder}
-		if len(existing) > 0 {
+		result = domainreminder.ReplaceResult{Outcome: domainreminder.ReplaceOutcomeCreated, Reminder: reminder, Completed: sent}
+		if len(pending) > 0 {
 			result.Outcome = domainreminder.ReplaceOutcomeReplaced
-			result.Replaced = existing
+			result.Replaced = pending
 		}
 		return nil
 	})
@@ -128,6 +143,14 @@ func (r *Repository) replaceOnce(ctx context.Context, reminder *domainreminder.R
 		return domainreminder.ReplaceResult{}, err
 	}
 	return result, nil
+}
+
+func reminderIDs(reminders []domainreminder.Reminder) []string {
+	ids := make([]string, 0, len(reminders))
+	for i := range reminders {
+		ids = append(ids, reminders[i].ID)
+	}
+	return ids
 }
 
 func (r *Repository) ClaimDueForNotification(ctx context.Context, now, staleBefore time.Time, limit int) ([]domainreminder.Reminder, error) {

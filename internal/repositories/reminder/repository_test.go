@@ -297,7 +297,7 @@ const replaceKeyIndex = "ux_reminders_pending_replace_key"
 
 var replaceInsertSQL = regexp.QuoteMeta(`INSERT INTO "reminders" ("id","space_id","created_by_member_id","assignee_member_id","title","description","scheduled_at","status","delivery_provider","delivery_target","completed_at","created_at","updated_at","replace_key") VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`)
 
-const replaceSelectSQL = `SELECT \* FROM "reminders" WHERE \(space_id = \$1 AND replace_key = \$2 AND status = \$3\) AND "reminders"\."deleted_at" IS NULL ORDER BY scheduled_at DESC FOR UPDATE`
+const replaceSelectSQL = `SELECT \* FROM "reminders" WHERE \(space_id = \$1 AND replace_key = \$2 AND status IN \(\$3,\$4\)\) AND "reminders"\."deleted_at" IS NULL ORDER BY scheduled_at DESC FOR UPDATE`
 
 func replaceFixture(key string) *domainreminder.Reminder {
 	r := reminderFixture()
@@ -350,7 +350,7 @@ func TestCreateReplacingCreatesWhenNoPending(t *testing.T) {
 	repo := NewRepository(db)
 	r := replaceFixture("bill")
 	mock.ExpectBegin()
-	mock.ExpectQuery(replaceSelectSQL).WithArgs(spaceID, "bill", domainreminder.StatusPending).WillReturnRows(sqlmock.NewRows(reminderColumns()))
+	mock.ExpectQuery(replaceSelectSQL).WithArgs(spaceID, "bill", domainreminder.StatusPending, domainreminder.StatusSent).WillReturnRows(sqlmock.NewRows(reminderColumns()))
 	expectReplaceInsert(mock, r).WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectCommit()
 
@@ -376,7 +376,7 @@ func TestCreateReplacingCancelsEarlierPending(t *testing.T) {
 		AddRow(id1, spaceID, memberID, nil, "a", "", r.ScheduledAt.Add(-time.Hour), "PENDING", nil, now, now, nil).
 		AddRow(id2, spaceID, memberID, nil, "b", "", r.ScheduledAt.Add(-2*time.Hour), "PENDING", nil, now, now, nil)
 	mock.ExpectBegin()
-	mock.ExpectQuery(replaceSelectSQL).WithArgs(spaceID, "bill", domainreminder.StatusPending).WillReturnRows(rows)
+	mock.ExpectQuery(replaceSelectSQL).WithArgs(spaceID, "bill", domainreminder.StatusPending, domainreminder.StatusSent).WillReturnRows(rows)
 	mock.ExpectExec(`UPDATE "reminders" SET .* WHERE id IN \(\$4,\$5\)`).
 		WithArgs(now, domainreminder.StatusCancelled, now, id1, id2).
 		WillReturnResult(sqlmock.NewResult(0, 2))
@@ -402,7 +402,7 @@ func TestCreateReplacingTieReplaces(t *testing.T) {
 	now := time.Date(2026, 9, 18, 9, 0, 0, 0, time.UTC)
 	id1 := "00000000-0000-4000-8000-000000000111"
 	mock.ExpectBegin()
-	mock.ExpectQuery(replaceSelectSQL).WithArgs(spaceID, "bill", domainreminder.StatusPending).WillReturnRows(existingRow(id1, r.ScheduledAt))
+	mock.ExpectQuery(replaceSelectSQL).WithArgs(spaceID, "bill", domainreminder.StatusPending, domainreminder.StatusSent).WillReturnRows(existingRow(id1, r.ScheduledAt))
 	mock.ExpectExec(`UPDATE "reminders" SET .* WHERE id IN \(\$4\)`).
 		WithArgs(now, domainreminder.StatusCancelled, now, id1).
 		WillReturnResult(sqlmock.NewResult(0, 1))
@@ -427,7 +427,7 @@ func TestCreateReplacingKeepsLaterPendingReminder(t *testing.T) {
 	r := replaceFixture("bill")
 	laterID := "00000000-0000-4000-8000-000000000113"
 	mock.ExpectBegin()
-	mock.ExpectQuery(replaceSelectSQL).WithArgs(spaceID, "bill", domainreminder.StatusPending).WillReturnRows(existingRow(laterID, r.ScheduledAt.Add(time.Hour)))
+	mock.ExpectQuery(replaceSelectSQL).WithArgs(spaceID, "bill", domainreminder.StatusPending, domainreminder.StatusSent).WillReturnRows(existingRow(laterID, r.ScheduledAt.Add(time.Hour)))
 	mock.ExpectCommit()
 
 	res, err := repo.CreateReplacing(context.Background(), r, time.Now())
@@ -449,7 +449,7 @@ func TestCreateReplacingOnlyTouchesSameSpaceAndKey(t *testing.T) {
 	now := time.Date(2026, 9, 18, 9, 0, 0, 0, time.UTC)
 	id1 := "00000000-0000-4000-8000-000000000111"
 	mock.ExpectBegin()
-	mock.ExpectQuery(replaceSelectSQL).WithArgs(spaceID, "bill", "PENDING").WillReturnRows(existingRow(id1, r.ScheduledAt.Add(-time.Hour)))
+	mock.ExpectQuery(replaceSelectSQL).WithArgs(spaceID, "bill", "PENDING", "SENT").WillReturnRows(existingRow(id1, r.ScheduledAt.Add(-time.Hour)))
 	mock.ExpectExec(`UPDATE "reminders" SET .* WHERE id IN \(\$4\)`).
 		WithArgs(now, domainreminder.StatusCancelled, now, id1).
 		WillReturnResult(sqlmock.NewResult(0, 1))
@@ -458,6 +458,114 @@ func TestCreateReplacingOnlyTouchesSameSpaceAndKey(t *testing.T) {
 
 	if _, err := repo.CreateReplacing(context.Background(), r, now); err != nil {
 		t.Fatalf("create replacing: %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("sql expectations: %v", err)
+	}
+}
+
+func TestCreateReplacingCompletesEarlierSentReminder(t *testing.T) {
+	db, mock := newReminderMockDB(t)
+	repo := NewRepository(db)
+	r := replaceFixture("bill")
+	now := time.Date(2026, 9, 18, 9, 0, 0, 0, time.UTC)
+	sentID := "00000000-0000-4000-8000-000000000121"
+	rows := sqlmock.NewRows(reminderColumns()).
+		AddRow(sentID, spaceID, memberID, nil, "old", "", r.ScheduledAt.Add(-4*time.Hour), "SENT", nil, now, now, nil)
+	mock.ExpectBegin()
+	mock.ExpectQuery(replaceSelectSQL).WithArgs(spaceID, "bill", domainreminder.StatusPending, domainreminder.StatusSent).WillReturnRows(rows)
+	mock.ExpectExec(`UPDATE "reminders" SET .*completed_at.*status.*updated_at.* WHERE id IN \(\$4\)`).
+		WithArgs(now, domainreminder.StatusCompleted, now, sentID).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	expectReplaceInsert(mock, r).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit()
+
+	res, err := repo.CreateReplacing(context.Background(), r, now)
+	if err != nil {
+		t.Fatalf("create replacing: %v", err)
+	}
+	if res.Outcome != domainreminder.ReplaceOutcomeCreated || len(res.Replaced) != 0 || len(res.Completed) != 1 || res.Completed[0].ID != sentID {
+		t.Fatalf("unexpected result %+v", res)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("sql expectations: %v", err)
+	}
+}
+
+func TestCreateReplacingCancelsPendingAndCompletesSent(t *testing.T) {
+	db, mock := newReminderMockDB(t)
+	repo := NewRepository(db)
+	r := replaceFixture("bill")
+	now := time.Date(2026, 9, 18, 9, 0, 0, 0, time.UTC)
+	pendingID, sentID := "00000000-0000-4000-8000-000000000122", "00000000-0000-4000-8000-000000000123"
+	rows := sqlmock.NewRows(reminderColumns()).
+		AddRow(pendingID, spaceID, memberID, nil, "a", "", r.ScheduledAt.Add(-time.Hour), "PENDING", nil, now, now, nil).
+		AddRow(sentID, spaceID, memberID, nil, "b", "", r.ScheduledAt.Add(-5*time.Hour), "SENT", nil, now, now, nil)
+	mock.ExpectBegin()
+	mock.ExpectQuery(replaceSelectSQL).WithArgs(spaceID, "bill", domainreminder.StatusPending, domainreminder.StatusSent).WillReturnRows(rows)
+	mock.ExpectExec(`UPDATE "reminders" SET .*deleted_at.*status.*updated_at.* WHERE id IN \(\$4\)`).
+		WithArgs(now, domainreminder.StatusCancelled, now, pendingID).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(`UPDATE "reminders" SET .*completed_at.*status.*updated_at.* WHERE id IN \(\$4\)`).
+		WithArgs(now, domainreminder.StatusCompleted, now, sentID).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	expectReplaceInsert(mock, r).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit()
+
+	res, err := repo.CreateReplacing(context.Background(), r, now)
+	if err != nil {
+		t.Fatalf("create replacing: %v", err)
+	}
+	if res.Outcome != domainreminder.ReplaceOutcomeReplaced || len(res.Replaced) != 1 || res.Replaced[0].ID != pendingID || len(res.Completed) != 1 || res.Completed[0].ID != sentID {
+		t.Fatalf("unexpected result %+v", res)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("sql expectations: %v", err)
+	}
+}
+
+func TestCreateReplacingKeptExistingLeavesSentUntouched(t *testing.T) {
+	db, mock := newReminderMockDB(t)
+	repo := NewRepository(db)
+	r := replaceFixture("bill")
+	laterID, sentID := "00000000-0000-4000-8000-000000000124", "00000000-0000-4000-8000-000000000125"
+	rows := sqlmock.NewRows(reminderColumns()).
+		AddRow(laterID, spaceID, memberID, nil, "later", "", r.ScheduledAt.Add(time.Hour), "PENDING", nil, r.ScheduledAt, r.ScheduledAt, nil).
+		AddRow(sentID, spaceID, memberID, nil, "sent", "", r.ScheduledAt.Add(-5*time.Hour), "SENT", nil, r.ScheduledAt, r.ScheduledAt, nil)
+	mock.ExpectBegin()
+	mock.ExpectQuery(replaceSelectSQL).WithArgs(spaceID, "bill", domainreminder.StatusPending, domainreminder.StatusSent).WillReturnRows(rows)
+	mock.ExpectCommit()
+
+	res, err := repo.CreateReplacing(context.Background(), r, time.Now())
+	if err != nil {
+		t.Fatalf("create replacing: %v", err)
+	}
+	if res.Outcome != domainreminder.ReplaceOutcomeKeptExisting || res.Reminder == nil || res.Reminder.ID != laterID || len(res.Completed) != 0 {
+		t.Fatalf("unexpected result %+v", res)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("sql expectations: %v", err)
+	}
+}
+
+func TestCreateReplacingIgnoresSentScheduledAfterNewReminder(t *testing.T) {
+	db, mock := newReminderMockDB(t)
+	repo := NewRepository(db)
+	r := replaceFixture("bill")
+	sentID := "00000000-0000-4000-8000-000000000126"
+	rows := sqlmock.NewRows(reminderColumns()).
+		AddRow(sentID, spaceID, memberID, nil, "sent", "", r.ScheduledAt.Add(time.Hour), "SENT", nil, r.ScheduledAt, r.ScheduledAt, nil)
+	mock.ExpectBegin()
+	mock.ExpectQuery(replaceSelectSQL).WithArgs(spaceID, "bill", domainreminder.StatusPending, domainreminder.StatusSent).WillReturnRows(rows)
+	expectReplaceInsert(mock, r).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit()
+
+	res, err := repo.CreateReplacing(context.Background(), r, time.Now())
+	if err != nil {
+		t.Fatalf("create replacing: %v", err)
+	}
+	if res.Outcome != domainreminder.ReplaceOutcomeCreated || len(res.Completed) != 0 {
+		t.Fatalf("unexpected result %+v", res)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("sql expectations: %v", err)

@@ -327,7 +327,7 @@ func TestActivityCreateWithReminderWithoutReplaceKeepsBehavior(t *testing.T) {
 		t.Fatalf("replace key = %q, want empty", reminderService.createInput.ReplaceKey)
 	}
 	raw := string(response.Result.StructuredOutput)
-	for _, field := range []string{"replace_outcome", "replace_key", "replaced_reminders"} {
+	for _, field := range []string{"replace_outcome", "replace_key", "replaced_reminders", "completed_reminders"} {
 		if strings.Contains(raw, field) {
 			t.Fatalf("output contains %s: %s", field, raw)
 		}

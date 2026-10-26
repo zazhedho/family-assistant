@@ -118,6 +118,44 @@ func TestReminderReplaceKeyAgainstPostgres(t *testing.T) {
 		}
 	})
 
+	t.Run("completes_sent", func(t *testing.T) {
+		f := seedReplaceFixture(t, db, "sent")
+		key := "care-sent"
+		other := "care-sent-other"
+		sent, err := repo.CreateReplacing(ctx, newReminder(f, &key, base), now)
+		if err != nil {
+			t.Fatal(err)
+		}
+		otherSent, err := repo.CreateReplacing(ctx, newReminder(f, &other, base), now)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := db.Exec(`UPDATE reminders SET status = 'SENT', notified_at = ? WHERE id IN ?`, now, []string{sent.Reminder.ID, otherSent.Reminder.ID}).Error; err != nil {
+			t.Fatal(err)
+		}
+		next, err := repo.CreateReplacing(ctx, newReminder(f, &key, base.Add(4*time.Hour)), now)
+		if err != nil || next.Outcome != domainreminder.ReplaceOutcomeCreated {
+			t.Fatalf("next = %+v, %v; want created", next, err)
+		}
+		if len(next.Completed) != 1 || next.Completed[0].ID != sent.Reminder.ID {
+			t.Fatalf("completed = %+v, want only %s", next.Completed, sent.Reminder.ID)
+		}
+		statusOf := func(id string) (string, bool, bool) {
+			var status string
+			var completed, deleted bool
+			if err := db.Raw(`SELECT status, completed_at IS NOT NULL, deleted_at IS NOT NULL FROM reminders WHERE id = ?`, id).Row().Scan(&status, &completed, &deleted); err != nil {
+				t.Fatal(err)
+			}
+			return status, completed, deleted
+		}
+		if status, completed, deleted := statusOf(sent.Reminder.ID); status != "COMPLETED" || !completed || deleted {
+			t.Fatalf("sent row status=%s completed=%v deleted=%v, want COMPLETED, not deleted", status, completed, deleted)
+		}
+		if status, completed, _ := statusOf(otherSent.Reminder.ID); status != "SENT" || completed {
+			t.Fatalf("other-key row status=%s completed=%v, want untouched SENT", status, completed)
+		}
+	})
+
 	t.Run("isolation", func(t *testing.T) {
 		a := seedReplaceFixture(t, db, "iso-a")
 		b := seedReplaceFixture(t, db, "iso-b")

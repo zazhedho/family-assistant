@@ -861,6 +861,40 @@ func TestCreateReplacingRemovesReplacedFromIndexAndAudits(t *testing.T) {
 	}
 }
 
+func TestCreateReplacingMarksSupersededSentCompletedAndAudits(t *testing.T) {
+	sent := domainreminder.Reminder{ID: "sent-1", SpaceID: sharedSpaceID, CreatedByMemberID: "member-other", Status: domainreminder.StatusSent}
+	repo := &reminderRepositoryStub{replaceResult: &domainreminder.ReplaceResult{Outcome: domainreminder.ReplaceOutcomeCreated, Completed: []domainreminder.Reminder{sent}}}
+	spaces, a := replacingFixture("space_member", "reminders:create")
+	index := &reminderIndexWriterStub{}
+	audit := &auditStoreStub{}
+	svc := NewReminderService(repo, spaces, authorization.NewAuthorizer(), audit, index)
+
+	result, err := svc.CreateReplacing(context.Background(), a, dto.ReminderCreateInput{Title: "Diaper", ScheduledAt: time.Date(2026, 9, 28, 10, 0, 0, 0, time.UTC), ReplaceKey: "diaper"})
+	if err != nil {
+		t.Fatalf("create replacing: %v", err)
+	}
+	if len(result.Completed) != 1 {
+		t.Fatalf("result = %+v", result)
+	}
+	got := result.Completed[0]
+	if got.Status != domainreminder.StatusCompleted || got.CompletedAt == nil || !got.CompletedAt.Equal(repo.replaceNow) || repo.replaceNow.IsZero() {
+		t.Fatalf("completed = status %q completedAt %v now %v", got.Status, got.CompletedAt, repo.replaceNow)
+	}
+	if len(index.removed) != 0 {
+		t.Fatalf("index removed = %v, want none", index.removed)
+	}
+	if len(audit.events) != 2 {
+		t.Fatalf("audit events = %+v", audit.events)
+	}
+	e := audit.events[1]
+	if e.Action != domainaudit.ActionUpdate || e.ResourceID != "sent-1" || e.ResourceOwnerMemberID != "member-other" || e.Status != domainaudit.StatusSuccess {
+		t.Fatalf("complete audit = %+v", e)
+	}
+	if e.Metadata["reason"] != "superseded" || e.Metadata["replace_key"] != "diaper" || result.Reminder == nil || e.Metadata["superseded_by_reminder_id"] != result.Reminder.ID {
+		t.Fatalf("complete audit metadata = %+v, new reminder %+v", e.Metadata, result.Reminder)
+	}
+}
+
 func TestCreateReplacingKeptExistingDoesNotIndex(t *testing.T) {
 	later := &domainreminder.Reminder{ID: "later-1", SpaceID: sharedSpaceID, CreatedByMemberID: creatorID, Status: domainreminder.StatusPending}
 	repo := &reminderRepositoryStub{replaceResult: &domainreminder.ReplaceResult{Outcome: domainreminder.ReplaceOutcomeKeptExisting, Reminder: later}}

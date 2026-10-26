@@ -67,6 +67,9 @@ type ReplaceResult struct {
 	// Reminder is the newly created reminder, or the kept later one.
 	Reminder *Reminder
 	Replaced []Reminder
+	// Completed lists earlier SENT reminders with the same key, marked
+	// COMPLETED because the new event supersedes them.
+	Completed []Reminder
 }
 
 // NormalizeReplaceKey trims and lower-cases a replace key. Blank input yields

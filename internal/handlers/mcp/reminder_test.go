@@ -274,6 +274,28 @@ func TestReminderToolsMapServiceErrorsSafely(t *testing.T) {
 
 var _ interfacereminder.ServiceReminderInterface = (*reminderToolServiceStub)(nil)
 
+func TestReminderCreateReturnsCompletedReminders(t *testing.T) {
+	key := "diaper"
+	completedAt := time.Date(2026, 9, 20, 1, 0, 0, 0, time.UTC)
+	service := &reminderToolServiceStub{replaceResult: &domainreminder.ReplaceResult{
+		Outcome: domainreminder.ReplaceOutcomeCreated,
+		Completed: []domainreminder.Reminder{{
+			ID: "sent-1", SpaceID: mcpSpaceID, Title: "Sent", Status: domainreminder.StatusCompleted,
+			ScheduledAt: time.Date(2026, 9, 20, 0, 0, 0, 0, time.UTC), CompletedAt: &completedAt, ReplaceKey: &key,
+		}},
+	}}
+	got, err := ReminderCreate(mcpExternalContext(), mcpReminderResolver(), service, ReminderCreateInput{
+		Title: "Diaper", ScheduledAt: "2026-09-20T08:00:00+07:00", ReplaceKey: "diaper",
+	})
+	if err != nil {
+		t.Fatalf("create reminder: %v", err)
+	}
+	if got.ReplaceOutcome != "created" || len(got.ReplacedReminders) != 0 || len(got.CompletedReminders) != 1 ||
+		got.CompletedReminders[0].ID != "sent-1" || got.CompletedReminders[0].Status != "COMPLETED" {
+		t.Fatalf("output = %+v", got)
+	}
+}
+
 func TestReminderCreatePassesReplaceKeyAndReturnsOutcome(t *testing.T) {
 	key := "diaper"
 	service := &reminderToolServiceStub{replaceResult: &domainreminder.ReplaceResult{
