@@ -1,5 +1,11 @@
-# Stage 1: Build the Go application
-FROM golang:latest AS builder
+# syntax=docker/dockerfile:1
+
+# Stage 1: Build the Go application on the build host's native platform and
+# cross-compile for the target platform (no QEMU emulation of the compiler)
+FROM --platform=$BUILDPLATFORM golang:latest AS builder
+
+ARG TARGETOS
+ARG TARGETARCH
 
 WORKDIR /app
 
@@ -11,7 +17,8 @@ RUN go mod download
 COPY . .
 
 # Build the application
-RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o main .
+RUN --mount=type=cache,target=/root/.cache/go-build \
+    CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -o main .
 
 # Stage 2: Create the final image
 FROM alpine:latest

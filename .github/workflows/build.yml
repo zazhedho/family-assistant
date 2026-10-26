@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - '.dockerignore'
+      - '.github/workflows/build.yml'
       - 'Dockerfile'
       - 'entrypoint.sh'
       - 'go.mod'
@@ -43,6 +44,8 @@ jobs:
           file: ./Dockerfile
           push: true
           platforms: linux/amd64,linux/arm64
+          cache-from: type=gha
+          cache-to: type=gha,mode=max,ignore-error=true
           tags: |
             ghcr.io/${{ github.repository_owner }}/family-assistant:latest
             ghcr.io/${{ github.repository_owner }}/family-assistant:${{ github.sha }}
