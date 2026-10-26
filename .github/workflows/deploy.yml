@@ -185,29 +185,6 @@ jobs:
               image: ${image_ref}
           EOF
 
-          # Hermes reads MCP tool schemas only at startup, so a deploy that changes
-          # them must restart the gateway. The key stays on the host and never
-          # reaches argv or the job log; only a hash of tools/list is compared.
-          hermes_gateway=""
-          if [[ "$target" == oci-arm64 ]] && systemctl --user cat hermes-gateway.service >/dev/null 2>&1; then
-            hermes_gateway=hermes-gateway.service
-          fi
-          mcp_tools_hash() {
-            local key body
-            key="$(grep -h '^MCP_FAMILY_ASSISTANT_API_KEY=' "$HOME/.hermes/.env" 2>/dev/null | head -1 | cut -d= -f2- | tr -d "\"'")" || return 1
-            [[ -n "$key" ]] || return 1
-            body="$(printf 'header = "Authorization: Bearer %s"\n' "$key" |
-              curl -fsS --max-time 10 -K - \
-                -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' -H 'X-Hermes-Channel: whatsapp' \
-                -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' http://127.0.0.1:1000/mcp)" || return 1
-            [[ "$body" == *'"tools":'* ]] || return 1
-            printf '%s' "$body" | sha256sum | cut -d' ' -f1
-          }
-          tools_before=""
-          if [[ -n "$hermes_gateway" ]]; then
-            tools_before="$(mcp_tools_hash || true)"
-          fi
-
           sudo -n docker compose -f "$compose_file" -f "$override_file" config --quiet
           sudo -n docker compose -f "$compose_file" -f "$override_file" pull backend
           sudo -n docker compose -f "$compose_file" -f "$override_file" up -d --no-deps backend
@@ -222,29 +199,59 @@ jobs:
             exit 1
           fi
 
-          if [[ -n "$hermes_gateway" ]]; then
-            tools_after=""
-            for _ in $(seq 1 30); do
-              tools_after="$(mcp_tools_hash || true)"
-              [[ -n "$tools_after" ]] && break
-              sleep 2
-            done
-            if [[ -z "$tools_after" ]]; then
-              echo "MCP tools/list did not answer after deployment."
-              exit 1
-            fi
-            if [[ "$tools_before" == "$tools_after" ]]; then
-              echo "MCP tool schemas unchanged; Hermes gateway left running."
-            else
-              echo "MCP tool schemas changed; restarting Hermes gateway."
-              systemctl --user restart "$hermes_gateway"
-              sleep 5
-              if ! systemctl --user is-active --quiet "$hermes_gateway"; then
-                echo "Hermes gateway is not active after restart."
-                exit 1
-              fi
-            fi
-          else
+          # Hermes reads MCP tool schemas only at startup, so the gateway must restart
+          # whenever the deployed schemas differ from the ones it loaded. The hash it
+          # loaded is kept in a state file written only after a confirmed restart, so a
+          # failed run is retried by the next deploy. The key stays on the host and
+          # never reaches argv or the job log; only hashes are compared.
+          if [[ "$target" != oci-arm64 ]]; then
             echo "No Hermes gateway on this target; skipping MCP schema refresh."
+            exit 0
           fi
+          hermes_gateway=hermes-gateway.service
+          if ! systemctl --user cat "$hermes_gateway" >/dev/null 2>&1; then
+            echo "::warning::Hermes gateway unit not reachable for $(whoami); MCP schema refresh skipped."
+            exit 0
+          fi
+          mcp_key="$(grep -h '^MCP_FAMILY_ASSISTANT_API_KEY=' "$HOME/.hermes/.env" 2>/dev/null | head -1 | cut -d= -f2- | tr -d "\"'\r")" || true
+          if [[ -z "$mcp_key" ]]; then
+            echo "MCP API key not found in the Hermes env file."
+            exit 1
+          fi
+          mcp_tools_hash() {
+            local body
+            body="$(printf 'header = "Authorization: Bearer %s"\n' "$mcp_key" |
+              curl -fsS --connect-timeout 2 --max-time 10 -K - \
+                -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' -H 'X-Hermes-Channel: whatsapp' \
+                -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' http://127.0.0.1:1000/mcp)" || return 1
+            [[ "$body" == *'"tools":'* ]] || return 1
+            printf '%s' "$body" | sha256sum | cut -d' ' -f1
+          }
+
+          tools_hash=""
+          deadline=$((SECONDS + 60))
+          while (( SECONDS < deadline )); do
+            tools_hash="$(mcp_tools_hash || true)"
+            [[ -n "$tools_hash" ]] && break
+            sleep 2
+          done
+          if [[ -z "$tools_hash" ]]; then
+            echo "MCP tools/list did not answer after deployment."
+            exit 1
+          fi
+
+          loaded_file="$HOME/.hermes/mcp-tools.sha256"
+          loaded_hash="$(cat "$loaded_file" 2>/dev/null || true)"
+          if [[ "$tools_hash" == "$loaded_hash" ]] && systemctl --user is-active --quiet "$hermes_gateway"; then
+            echo "MCP tool schemas unchanged; Hermes gateway left running."
+            exit 0
+          fi
+          echo "MCP tool schemas changed or gateway inactive; restarting Hermes gateway."
+          systemctl --user restart "$hermes_gateway"
+          sleep 10
+          if ! systemctl --user is-active --quiet "$hermes_gateway"; then
+            echo "Hermes gateway is not active after restart."
+            exit 1
+          fi
+          printf '%s\n' "$tools_hash" > "$loaded_file"
           REMOTE

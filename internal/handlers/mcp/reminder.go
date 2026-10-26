@@ -163,13 +163,15 @@ func ReminderList(ctx context.Context, resolver interfaceidentity.Resolver, serv
 	if listInput.To, err = utils.ParseRFC3339(input.To, "to", false); err != nil {
 		return nil, MapToolError(err)
 	}
-	switch {
-	case listInput.From == nil && listInput.To == nil:
+	if listInput.From == nil {
 		now := time.Now()
-		from, to := now.Add(-reminderListDefaultLookback), now.Add(reminderListDefaultLookahead)
-		listInput.From, listInput.To = &from, &to
-	case listInput.From == nil:
-		from := listInput.To.Add(-reminderListDefaultLookahead)
+		from := now.Add(-reminderListDefaultLookback)
+		if listInput.To == nil {
+			to := now.Add(reminderListDefaultLookahead)
+			listInput.To = &to
+		} else if earlier := listInput.To.Add(-reminderListDefaultLookahead); earlier.Before(from) {
+			from = earlier
+		}
 		listInput.From = &from
 	}
 	reminders, err := service.List(ctx, actor, listInput)
@@ -275,7 +277,7 @@ func registerReminderTools(server *mcpsdk.Server, service interfacereminder.Serv
 		return ReminderCreate(ctx, resolver, service, input)
 	})
 	addTool(server, &mcpsdk.Tool{
-		Name: "reminder_list", Description: "List reminders in an authorized Space. Without from and to, it lists reminders scheduled from 24 hours ago to 30 days ahead; with only to, it lists the 30 days before to. Pass from for older history.",
+		Name: "reminder_list", Description: "List reminders in an authorized Space. Without from and to, it lists reminders scheduled from 24 hours ago to 30 days ahead; with only to, it starts at the earlier of 24 hours ago and 30 days before to. Pass from for older history.",
 	}, func(ctx context.Context, input ReminderListInput) (ReminderListOutput, error) {
 		output, err := ReminderList(ctx, resolver, service, input)
 		return ReminderListOutput{Reminders: output}, err

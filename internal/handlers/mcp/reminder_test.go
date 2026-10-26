@@ -242,6 +242,20 @@ func TestReminderListBoundsLowerWhenOnlyUpperGiven(t *testing.T) {
 	}
 }
 
+func TestReminderListKeepsRecentLowerBoundForFarUpperBound(t *testing.T) {
+	service := &reminderToolServiceStub{}
+	to := time.Now().Add(90 * 24 * time.Hour).UTC().Truncate(time.Second)
+	before := time.Now()
+	if _, err := ReminderList(mcpExternalContext(), mcpReminderResolver(), service, ReminderListInput{To: to.Format(time.RFC3339)}); err != nil {
+		t.Fatalf("list reminders: %v", err)
+	}
+	after := time.Now()
+	from := service.listInput.From
+	if from == nil || from.Before(before.Add(-reminderListDefaultLookback)) || from.After(after.Add(-reminderListDefaultLookback)) {
+		t.Fatalf("from = %v, want about 24h ago so upcoming reminders before to are included", from)
+	}
+}
+
 func TestReminderListKeepsExplicitLowerBoundOnly(t *testing.T) {
 	service := &reminderToolServiceStub{}
 	if _, err := ReminderList(mcpExternalContext(), mcpReminderResolver(), service, ReminderListInput{From: "2026-09-01T00:00:00Z"}); err != nil {
