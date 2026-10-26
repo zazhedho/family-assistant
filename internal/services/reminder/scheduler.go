@@ -413,7 +413,7 @@ func reminderMessage(reminder *domainreminder.Reminder, assigneeName, summary st
 		line = strings.TrimSpace(line)
 		switch {
 		case line == "":
-		case strings.HasPrefix(line, "↩️"):
+		case strings.HasPrefix(line, "↩"):
 			footer = line
 		default:
 			lines = append(lines, line)
@@ -446,16 +446,30 @@ func reminderMessage(reminder *domainreminder.Reminder, assigneeName, summary st
 }
 
 // reminderHeading bolds the title and keeps a leading emoji outside the bold
-// span; a title without one gets a bell.
+// span; a title without one gets a bell. Asterisks are dropped so they cannot
+// break WhatsApp's bold markers.
 func reminderHeading(title string) string {
-	title = strings.TrimSpace(title)
-	first := []rune(title)
-	if len(first) == 0 || unicode.IsLetter(first[0]) || unicode.IsDigit(first[0]) {
+	title = strings.Join(strings.Fields(strings.ReplaceAll(title, "*", "")), " ")
+	end := len(title)
+	for i, r := range title {
+		if !isEmojiRune(r) {
+			end = i
+			break
+		}
+	}
+	emoji, rest := title[:end], strings.TrimSpace(title[end:])
+	if emoji == "" || rest == "" {
 		return "🔔 *" + title + "*"
 	}
-	emoji, rest, found := strings.Cut(title, " ")
-	if !found || strings.TrimSpace(rest) == "" {
-		return "🔔 *" + title + "*"
+	return emoji + " *" + rest + "*"
+}
+
+// isEmojiRune reports whether r can be part of a leading emoji: a symbol, a
+// skin-tone modifier, or a joiner/variation selector inside an emoji sequence.
+func isEmojiRune(r rune) bool {
+	switch r {
+	case '\u200d', '\ufe0f', '\ufe0e', '\u20e3':
+		return true
 	}
-	return emoji + " *" + strings.TrimSpace(rest) + "*"
+	return unicode.Is(unicode.So, r) || unicode.Is(unicode.Sk, r)
 }

@@ -524,3 +524,60 @@ func TestReminderSchedulerSkipsSummaryWithoutKey(t *testing.T) {
 		t.Fatalf("calls = %d, messages = %+v", counter.calls, sender.messages)
 	}
 }
+
+func TestReminderHeadingEdgeCases(t *testing.T) {
+	tests := map[string]string{
+		"🧷 Waktunya cek popok":    "🧷 *Waktunya cek popok*",
+		"🧷Waktunya cek popok":     "🧷 *Waktunya cek popok*",
+		"👩‍🍼 Susu malam":          "👩‍🍼 *Susu malam*",
+		"🛁️ Mandi sore":           "🛁️ *Mandi sore*",
+		"(Penting) Bayar listrik": "🔔 *(Penting) Bayar listrik*",
+		"*Penting* bayar":         "🔔 *Penting bayar*",
+		"🧷":                       "🔔 *🧷*",
+		"Bayar listrik":           "🔔 *Bayar listrik*",
+	}
+	for title, want := range tests {
+		if got := reminderHeading(title); got != want {
+			t.Errorf("reminderHeading(%q) = %q, want %q", title, got, want)
+		}
+	}
+}
+
+func TestReminderMessageSummaryWithoutDescriptionAndCRLF(t *testing.T) {
+	scheduled := time.Date(2026, 10, 26, 21, 4, 0, 0, time.Local)
+	got := reminderMessage(&domainreminder.Reminder{Title: "🛁 Mandi", ScheduledAt: scheduled}, "", "📊 Hari ini: 1× mandi", scheduled)
+	if want := "🛁 *Mandi*\n\n📊 Hari ini: 1× mandi\n\n↩️ Reply pesan ini: *selesai*"; got != want {
+		t.Fatalf("summary only:\n got: %q\nwant: %q", got, want)
+	}
+	got = reminderMessage(&domainreminder.Reminder{Title: "🍼 Sisa susu", Description: "Dari feeding 14.29.\r\n↩ Reply: *habis*\r\n", ScheduledAt: scheduled}, "", "", scheduled)
+	if want := "🍼 *Sisa susu*\n\nDari feeding 14.29.\n\n↩ Reply: *habis*"; got != want {
+		t.Fatalf("crlf and bare arrow:\n got: %q\nwant: %q", got, want)
+	}
+}
+
+func TestReminderSchedulerSummaryStartsAtJakartaMidnight(t *testing.T) {
+	jakarta, err := time.LoadLocation("Asia/Jakarta")
+	if err != nil {
+		t.Skipf("tzdata unavailable: %v", err)
+	}
+	previous := time.Local
+	time.Local = jakarta
+	t.Cleanup(func() { time.Local = previous })
+
+	key := "diaper"
+	runAt := time.Date(2026, 10, 25, 17, 30, 0, 0, time.UTC) // 00:30 WIB on 26 Oct
+	reminders := &schedulerRepositoryStub{due: []domainreminder.Reminder{{
+		ID: "reminder-1", SpaceID: "space-1", Title: "🧷 Cek popok", ScheduledAt: runAt, ReplaceKey: &key,
+		DeliveryProvider: "whatsapp", DeliveryTarget: "120363@g.us",
+	}}}
+	counter := &activityCounterStub{}
+	scheduler := NewReminderScheduler(reminders, &identityResolverStub{}, &membershipResolverStub{}, map[string]interfacenotification.NotificationSender{"whatsapp": &schedulerSenderStub{}},
+		ReminderSchedulerOptions{Interval: time.Minute, Lease: time.Minute, BatchSize: 10, Activities: counter})
+
+	if err := scheduler.RunOnce(context.Background(), runAt); err != nil {
+		t.Fatalf("run once: %v", err)
+	}
+	if want := time.Date(2026, 10, 25, 17, 0, 0, 0, time.UTC); !counter.from.Equal(want) {
+		t.Fatalf("summary from = %v, want %v (00:00 WIB on 26 Oct)", counter.from.UTC(), want)
+	}
+}
