@@ -54,6 +54,14 @@ func (s *reminderHTTPServiceStub) Create(_ context.Context, actor domainidentity
 	return &domainreminder.Reminder{ID: httpReminderID, SpaceID: input.Space, Title: input.Title, AssigneeMemberID: input.AssigneeMemberID, Status: domainreminder.StatusPending, ScheduledAt: input.ScheduledAt}, nil
 }
 
+func (s *reminderHTTPServiceStub) CreateReplacing(ctx context.Context, actor domainidentity.ActorContext, input dto.ReminderCreateInput) (domainreminder.ReplaceResult, error) {
+	reminder, err := s.Create(ctx, actor, input)
+	if err != nil {
+		return domainreminder.ReplaceResult{}, err
+	}
+	return domainreminder.ReplaceResult{Outcome: domainreminder.ReplaceOutcomeNone, Reminder: reminder}, nil
+}
+
 func (s *reminderHTTPServiceStub) List(_ context.Context, actor domainidentity.ActorContext, input dto.ReminderListInput) ([]domainreminder.Reminder, error) {
 	s.listActor, s.listInput = actor, input
 	if s.listErr != nil {

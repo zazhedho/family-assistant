@@ -47,7 +47,15 @@ func NewReminderService(reminders interfacereminder.RepoReminderInterface, space
 	return &service{reminders: reminders, spaces: spaces, authorize: authorize, audit: audit, index: index}
 }
 
-func (s *service) Create(ctx context.Context, actor domainidentity.ActorContext, input dto.ReminderCreateInput) (created *domainreminder.Reminder, err error) {
+func (s *service) Create(ctx context.Context, actor domainidentity.ActorContext, input dto.ReminderCreateInput) (*domainreminder.Reminder, error) {
+	result, err := s.CreateReplacing(ctx, actor, input)
+	if err != nil {
+		return nil, err
+	}
+	return result.Reminder, nil
+}
+
+func (s *service) CreateReplacing(ctx context.Context, actor domainidentity.ActorContext, input dto.ReminderCreateInput) (result domainreminder.ReplaceResult, err error) {
 	spaceID := strings.TrimSpace(input.Space)
 	if spaceID == "" {
 		spaceID = strings.TrimSpace(actor.SpaceID)
@@ -58,9 +66,9 @@ func (s *service) Create(ctx context.Context, actor domainidentity.ActorContext,
 		}
 		ownerID := strings.TrimSpace(actor.MemberID)
 		resourceID := ""
-		if created != nil {
-			ownerID = strings.TrimSpace(created.CreatedByMemberID)
-			resourceID = strings.TrimSpace(created.ID)
+		if result.Reminder != nil {
+			ownerID = strings.TrimSpace(result.Reminder.CreatedByMemberID)
+			resourceID = strings.TrimSpace(result.Reminder.ID)
 		}
 		event := auditEvent(actor, domainaudit.ActionCreate, spaceID, resourceID, ownerID, domainaudit.StatusFailed, nil)
 		event.ErrorMessage = failureCategory(err)
@@ -68,37 +76,41 @@ func (s *service) Create(ctx context.Context, actor domainidentity.ActorContext,
 	}()
 
 	if strings.TrimSpace(input.Title) == "" {
-		return nil, &authorization.ValidationError{Field: "title", Reason: requiredReason}
+		return domainreminder.ReplaceResult{}, &authorization.ValidationError{Field: "title", Reason: requiredReason}
 	}
 	if input.ScheduledAt.IsZero() {
-		return nil, &authorization.ValidationError{Field: "scheduled_at", Reason: requiredReason}
+		return domainreminder.ReplaceResult{}, &authorization.ValidationError{Field: "scheduled_at", Reason: requiredReason}
 	}
 	deliveryProvider := strings.ToLower(strings.TrimSpace(input.DeliveryProvider))
 	deliveryTarget := strings.TrimSpace(input.DeliveryTarget)
 	if (deliveryProvider == "") != (deliveryTarget == "") {
-		return nil, &authorization.ValidationError{Field: "delivery_target", Reason: "provider and target are required together"}
+		return domainreminder.ReplaceResult{}, &authorization.ValidationError{Field: "delivery_target", Reason: "provider and target are required together"}
+	}
+	replaceKey, keyErr := domainreminder.NormalizeReplaceKey(input.ReplaceKey)
+	if keyErr != nil {
+		return domainreminder.ReplaceResult{}, &authorization.ValidationError{Field: "replace_key", Reason: "must be at most 128 characters"}
 	}
 
 	if err := s.authorize.Authorize(ctx, actor, createPermission, domainauthorization.Resource{SpaceID: spaceID}); err != nil {
-		return nil, err
+		return domainreminder.ReplaceResult{}, err
 	}
 
 	members, err := s.spaces.ListActiveMembers(ctx, spaceID)
 	if err != nil {
-		return nil, err
+		return domainreminder.ReplaceResult{}, err
 	}
 	if !hasMember(members, actor.MemberID, actor.UserID) {
-		return nil, authorization.ErrNotFound
+		return domainreminder.ReplaceResult{}, authorization.ErrNotFound
 	}
 	if input.AssigneeMemberID != nil {
 		assigneeID := strings.TrimSpace(*input.AssigneeMemberID)
 		if !hasMemberID(members, assigneeID) {
-			return nil, authorization.ErrNotFound
+			return domainreminder.ReplaceResult{}, authorization.ErrNotFound
 		}
 		input.AssigneeMemberID = &assigneeID
 	}
 
-	created = &domainreminder.Reminder{
+	created := &domainreminder.Reminder{
 		SpaceID:           spaceID,
 		CreatedByMemberID: strings.TrimSpace(actor.MemberID),
 		AssigneeMemberID:  input.AssigneeMemberID,
@@ -108,13 +120,37 @@ func (s *service) Create(ctx context.Context, actor domainidentity.ActorContext,
 		Status:            domainreminder.StatusPending,
 		DeliveryProvider:  deliveryProvider,
 		DeliveryTarget:    deliveryTarget,
+		ReplaceKey:        replaceKey,
 	}
-	if err := s.reminders.Create(ctx, created); err != nil {
-		return nil, err
+	now := time.Now().UTC()
+	result, err = s.reminders.CreateReplacing(ctx, created, now)
+	if err != nil {
+		if errors.Is(err, domainreminder.ErrReplaceKeyConflict) {
+			return domainreminder.ReplaceResult{}, ErrConflict
+		}
+		return domainreminder.ReplaceResult{}, err
 	}
-	s.indexReminder(ctx, created)
-	s.writeAudit(ctx, auditEvent(actor, domainaudit.ActionCreate, created.SpaceID, created.ID, created.CreatedByMemberID, domainaudit.StatusSuccess, nil))
-	return created, nil
+	// The repository returns pre-cancel copies; reflect the cancellation so callers never see them as pending.
+	for i := range result.Replaced {
+		result.Replaced[i].Status = domainreminder.StatusCancelled
+		result.Replaced[i].UpdatedAt = now
+		result.Replaced[i].DeletedAt = gorm.DeletedAt{Time: now, Valid: true}
+	}
+	if result.Outcome != domainreminder.ReplaceOutcomeKeptExisting {
+		s.indexReminder(ctx, result.Reminder)
+	}
+	for _, replaced := range result.Replaced {
+		s.removeReminderFromIndex(ctx, replaced.ID)
+	}
+	resource := result.Reminder
+	if resource == nil {
+		resource = created
+	}
+	s.writeAudit(ctx, auditEvent(actor, domainaudit.ActionCreate, resource.SpaceID, resource.ID, resource.CreatedByMemberID, domainaudit.StatusSuccess, nil))
+	for _, replaced := range result.Replaced {
+		s.writeAudit(ctx, auditEvent(actor, domainaudit.ActionDelete, replaced.SpaceID, replaced.ID, replaced.CreatedByMemberID, domainaudit.StatusSuccess, nil))
+	}
+	return result, nil
 }
 
 func (s *service) List(ctx context.Context, actor domainidentity.ActorContext, input dto.ReminderListInput) (result []domainreminder.Reminder, err error) {

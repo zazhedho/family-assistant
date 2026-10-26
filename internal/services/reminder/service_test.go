@@ -3,6 +3,8 @@ package servicereminder
 import (
 	"context"
 	"errors"
+	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -47,6 +49,11 @@ type reminderRepositoryStub struct {
 	deleteID     string
 	deleteStatus domainreminder.Status
 	deleteErr    error
+
+	replaceResult *domainreminder.ReplaceResult
+	replaceErr    error
+	replaceCalls  int
+	replaceNow    time.Time
 }
 
 type reminderIndexWrite struct {
@@ -70,7 +77,23 @@ func (s *reminderIndexWriterStub) Remove(_ context.Context, id string) error {
 	return s.err
 }
 
-func (s *reminderRepositoryStub) CreateReplacing(ctx context.Context, reminder *domainreminder.Reminder, _ time.Time) (domainreminder.ReplaceResult, error) {
+func (s *reminderRepositoryStub) CreateReplacing(ctx context.Context, reminder *domainreminder.Reminder, now time.Time) (domainreminder.ReplaceResult, error) {
+	s.replaceCalls++
+	s.replaceNow = now
+	if s.replaceErr != nil {
+		return domainreminder.ReplaceResult{}, s.replaceErr
+	}
+	if s.replaceResult != nil {
+		if s.replaceResult.Reminder == nil {
+			result := *s.replaceResult
+			result.Reminder = reminder
+			if err := s.Create(ctx, reminder); err != nil {
+				return domainreminder.ReplaceResult{}, err
+			}
+			return result, nil
+		}
+		return *s.replaceResult, nil
+	}
 	if err := s.Create(ctx, reminder); err != nil {
 		return domainreminder.ReplaceResult{}, err
 	}
@@ -771,3 +794,127 @@ func TestCompleteUnauthorizedMemberCannotLearnTerminalState(t *testing.T) {
 }
 
 func stringPtr(value string) *string { return &value }
+
+func replacingFixture(role string, perms ...string) (*spaceRepositoryStub, domainidentity.ActorContext) {
+	spaces := &spaceRepositoryStub{members: []domainspace.ResolvedMembership{
+		membership(sharedSpaceID, creatorID, role, "user-1"),
+	}}
+	return spaces, actor(sharedSpaceID, domainspace.TypeShared, creatorID, role, perms...)
+}
+
+func TestCreateReplacingNormalizesKeyAndIndexesNewReminder(t *testing.T) {
+	repo := &reminderRepositoryStub{}
+	spaces, a := replacingFixture("space_member", "reminders:create")
+	index := &reminderIndexWriterStub{}
+	svc := NewReminderService(repo, spaces, authorization.NewAuthorizer(), nil, index)
+	scheduledAt := time.Date(2026, 9, 28, 10, 0, 0, 0, time.UTC)
+
+	result, err := svc.CreateReplacing(context.Background(), a, dto.ReminderCreateInput{Title: "Diaper", ScheduledAt: scheduledAt, ReplaceKey: " Diaper "})
+	if err != nil {
+		t.Fatalf("create replacing: %v", err)
+	}
+	if repo.created == nil || repo.created.ReplaceKey == nil || *repo.created.ReplaceKey != "diaper" {
+		t.Fatalf("repo key = %v, want diaper", repo.created)
+	}
+	if result.Reminder == nil || result.Outcome != domainreminder.ReplaceOutcomeNone {
+		t.Fatalf("result = %+v", result)
+	}
+	if len(index.upserts) != 1 || index.upserts[0].id != reminderID {
+		t.Fatalf("index upserts = %+v", index.upserts)
+	}
+}
+
+func TestCreateReplacingRemovesReplacedFromIndexAndAudits(t *testing.T) {
+	old := domainreminder.Reminder{ID: "old-1", SpaceID: sharedSpaceID, CreatedByMemberID: "member-other", Status: domainreminder.StatusPending}
+	repo := &reminderRepositoryStub{replaceResult: &domainreminder.ReplaceResult{Outcome: domainreminder.ReplaceOutcomeReplaced, Replaced: []domainreminder.Reminder{old}}}
+	spaces, a := replacingFixture("space_member", "reminders:create")
+	index := &reminderIndexWriterStub{}
+	audit := &auditStoreStub{}
+	svc := NewReminderService(repo, spaces, authorization.NewAuthorizer(), audit, index)
+
+	result, err := svc.CreateReplacing(context.Background(), a, dto.ReminderCreateInput{Title: "Diaper", ScheduledAt: time.Date(2026, 9, 28, 10, 0, 0, 0, time.UTC), ReplaceKey: "diaper"})
+	if err != nil {
+		t.Fatalf("create replacing: %v", err)
+	}
+	if result.Outcome != domainreminder.ReplaceOutcomeReplaced || len(result.Replaced) != 1 {
+		t.Fatalf("result = %+v", result)
+	}
+	got := result.Replaced[0]
+	if got.Status != domainreminder.StatusCancelled || !got.DeletedAt.Valid || !got.DeletedAt.Time.Equal(repo.replaceNow) || repo.replaceNow.IsZero() {
+		t.Fatalf("replaced = status %q deletedAt %+v now %v", got.Status, got.DeletedAt, repo.replaceNow)
+	}
+	if len(index.removed) != 1 || index.removed[0] != "old-1" || len(index.upserts) != 1 {
+		t.Fatalf("index removed=%v upserts=%+v", index.removed, index.upserts)
+	}
+	if len(audit.events) != 2 {
+		t.Fatalf("audit events = %+v", audit.events)
+	}
+	if e := audit.events[0]; e.Action != domainaudit.ActionCreate || e.Status != domainaudit.StatusSuccess {
+		t.Fatalf("first audit = %+v", e)
+	}
+	if e := audit.events[1]; e.Action != domainaudit.ActionDelete || e.ResourceID != "old-1" || e.ResourceOwnerMemberID != "member-other" || e.Status != domainaudit.StatusSuccess {
+		t.Fatalf("delete audit = %+v", e)
+	}
+}
+
+func TestCreateReplacingKeptExistingDoesNotIndex(t *testing.T) {
+	later := &domainreminder.Reminder{ID: "later-1", SpaceID: sharedSpaceID, CreatedByMemberID: creatorID, Status: domainreminder.StatusPending}
+	repo := &reminderRepositoryStub{replaceResult: &domainreminder.ReplaceResult{Outcome: domainreminder.ReplaceOutcomeKeptExisting, Reminder: later}}
+	spaces, a := replacingFixture("space_member", "reminders:create")
+	index := &reminderIndexWriterStub{}
+	svc := NewReminderService(repo, spaces, authorization.NewAuthorizer(), nil, index)
+
+	result, err := svc.CreateReplacing(context.Background(), a, dto.ReminderCreateInput{Title: "Diaper", ScheduledAt: time.Date(2026, 9, 28, 10, 0, 0, 0, time.UTC), ReplaceKey: "diaper"})
+	if err != nil {
+		t.Fatalf("create replacing: %v", err)
+	}
+	if result.Outcome != domainreminder.ReplaceOutcomeKeptExisting || result.Reminder == nil || result.Reminder.ID != "later-1" {
+		t.Fatalf("result = %+v", result)
+	}
+	if len(index.upserts) != 0 || len(index.removed) != 0 {
+		t.Fatalf("index touched: %+v %v", index.upserts, index.removed)
+	}
+}
+
+func TestCreateReplacingRejectsLongKey(t *testing.T) {
+	repo := &reminderRepositoryStub{}
+	spaces, a := replacingFixture("space_member", "reminders:create")
+	svc := newReminderService(repo, spaces, nil)
+
+	_, err := svc.CreateReplacing(context.Background(), a, dto.ReminderCreateInput{Title: "x", ScheduledAt: time.Now().Add(time.Hour), ReplaceKey: strings.Repeat("a", 129)})
+	var validationErr *authorization.ValidationError
+	if !errors.As(err, &validationErr) || validationErr.Field != "replace_key" {
+		t.Fatalf("err = %v, want replace_key validation error", err)
+	}
+	if repo.replaceCalls != 0 {
+		t.Fatal("repo must not be called")
+	}
+}
+
+func TestCreateReplacingMapsConflict(t *testing.T) {
+	repo := &reminderRepositoryStub{replaceErr: fmt.Errorf("raw pg: %w", domainreminder.ErrReplaceKeyConflict)}
+	spaces, a := replacingFixture("space_member", "reminders:create")
+	svc := newReminderService(repo, spaces, nil)
+
+	_, err := svc.CreateReplacing(context.Background(), a, dto.ReminderCreateInput{Title: "x", ScheduledAt: time.Now().Add(time.Hour), ReplaceKey: "k"})
+	if !errors.Is(err, ErrConflict) {
+		t.Fatalf("err = %v, want ErrConflict", err)
+	}
+	if strings.Contains(err.Error(), "raw pg") {
+		t.Fatalf("raw message leaked: %v", err)
+	}
+}
+
+func TestCreateReplacingRequiresCreatePermission(t *testing.T) {
+	repo := &reminderRepositoryStub{}
+	spaces, a := replacingFixture("space_member")
+	svc := newReminderService(repo, spaces, nil)
+
+	_, err := svc.CreateReplacing(context.Background(), a, dto.ReminderCreateInput{Title: "x", ScheduledAt: time.Now().Add(time.Hour), ReplaceKey: "k"})
+	if !errors.Is(err, authorization.ErrForbidden) {
+		t.Fatalf("err = %v, want ErrForbidden", err)
+	}
+	if repo.replaceCalls != 0 {
+		t.Fatal("repo must not be called")
+	}
+}

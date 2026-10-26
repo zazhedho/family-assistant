@@ -60,6 +60,14 @@ func (s *reminderToolServiceStub) Create(_ context.Context, actor domainidentity
 	}, nil
 }
 
+func (s *reminderToolServiceStub) CreateReplacing(ctx context.Context, actor domainidentity.ActorContext, input dto.ReminderCreateInput) (domainreminder.ReplaceResult, error) {
+	reminder, err := s.Create(ctx, actor, input)
+	if err != nil {
+		return domainreminder.ReplaceResult{}, err
+	}
+	return domainreminder.ReplaceResult{Outcome: domainreminder.ReplaceOutcomeNone, Reminder: reminder}, nil
+}
+
 func (s *reminderToolServiceStub) List(_ context.Context, actor domainidentity.ActorContext, input dto.ReminderListInput) ([]domainreminder.Reminder, error) {
 	s.listCalls++
 	s.listActor, s.listInput = actor, input

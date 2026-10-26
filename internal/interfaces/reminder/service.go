@@ -10,6 +10,7 @@ import (
 
 type ServiceReminderInterface interface {
 	Create(context.Context, domainidentity.ActorContext, dto.ReminderCreateInput) (*domainreminder.Reminder, error)
+	CreateReplacing(context.Context, domainidentity.ActorContext, dto.ReminderCreateInput) (domainreminder.ReplaceResult, error)
 	List(context.Context, domainidentity.ActorContext, dto.ReminderListInput) ([]domainreminder.Reminder, error)
 	Complete(context.Context, domainidentity.ActorContext, string, string) (*domainreminder.Reminder, error)
 	Update(context.Context, domainidentity.ActorContext, string, string, dto.ReminderUpdateInput) (*domainreminder.Reminder, error)

@@ -14,6 +14,7 @@ type ReminderCreateInput struct {
 	AssigneeMemberID *string
 	DeliveryProvider string
 	DeliveryTarget   string
+	ReplaceKey       string
 }
 
 type ReminderListInput struct {
