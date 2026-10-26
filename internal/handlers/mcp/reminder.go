@@ -137,6 +137,13 @@ func replacedReminderOutput(reminder *domainreminder.Reminder) ReplacedReminderO
 	}
 }
 
+// Without bounds, reminder_list would return a Space's whole reminder history,
+// so the tool defaults to a window around now.
+const (
+	reminderListDefaultLookback  = 24 * time.Hour
+	reminderListDefaultLookahead = 30 * 24 * time.Hour
+)
+
 func ReminderList(ctx context.Context, resolver interfaceidentity.Resolver, service interfacereminder.ServiceReminderInterface, input ReminderListInput) ([]ReminderOutput, error) {
 	actor, err := selectSpaceActor(ctx, resolver, input.Space)
 	if err != nil {
@@ -155,6 +162,15 @@ func ReminderList(ctx context.Context, resolver interfaceidentity.Resolver, serv
 	}
 	if listInput.To, err = utils.ParseRFC3339(input.To, "to", false); err != nil {
 		return nil, MapToolError(err)
+	}
+	switch {
+	case listInput.From == nil && listInput.To == nil:
+		now := time.Now()
+		from, to := now.Add(-reminderListDefaultLookback), now.Add(reminderListDefaultLookahead)
+		listInput.From, listInput.To = &from, &to
+	case listInput.From == nil:
+		from := listInput.To.Add(-reminderListDefaultLookahead)
+		listInput.From = &from
 	}
 	reminders, err := service.List(ctx, actor, listInput)
 	if err != nil {
@@ -259,7 +275,7 @@ func registerReminderTools(server *mcpsdk.Server, service interfacereminder.Serv
 		return ReminderCreate(ctx, resolver, service, input)
 	})
 	addTool(server, &mcpsdk.Tool{
-		Name: "reminder_list", Description: "List reminders in an authorized Space.",
+		Name: "reminder_list", Description: "List reminders in an authorized Space. Without from and to, it lists reminders scheduled from 24 hours ago to 30 days ahead; with only to, it lists the 30 days before to. Pass from for older history.",
 	}, func(ctx context.Context, input ReminderListInput) (ReminderListOutput, error) {
 		output, err := ReminderList(ctx, resolver, service, input)
 		return ReminderListOutput{Reminders: output}, err

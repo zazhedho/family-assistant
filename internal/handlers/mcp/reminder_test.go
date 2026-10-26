@@ -212,6 +212,46 @@ func TestReminderListSelectsSpaceByNameAndMapsFilters(t *testing.T) {
 	}
 }
 
+func TestReminderListDefaultsWindowWithoutBounds(t *testing.T) {
+	service := &reminderToolServiceStub{}
+	before := time.Now()
+	if _, err := ReminderList(mcpExternalContext(), mcpReminderResolver(), service, ReminderListInput{Status: "PENDING"}); err != nil {
+		t.Fatalf("list reminders: %v", err)
+	}
+	after := time.Now()
+	from, to := service.listInput.From, service.listInput.To
+	if from == nil || to == nil {
+		t.Fatalf("window = %v..%v, want both bounds", from, to)
+	}
+	if from.Before(before.Add(-reminderListDefaultLookback)) || from.After(after.Add(-reminderListDefaultLookback)) {
+		t.Fatalf("from = %v, want about 24h ago", from)
+	}
+	if to.Before(before.Add(reminderListDefaultLookahead)) || to.After(after.Add(reminderListDefaultLookahead)) {
+		t.Fatalf("to = %v, want about 30 days ahead", to)
+	}
+}
+
+func TestReminderListBoundsLowerWhenOnlyUpperGiven(t *testing.T) {
+	service := &reminderToolServiceStub{}
+	if _, err := ReminderList(mcpExternalContext(), mcpReminderResolver(), service, ReminderListInput{To: "2026-09-21T00:00:00Z"}); err != nil {
+		t.Fatalf("list reminders: %v", err)
+	}
+	want := time.Date(2026, 9, 21, 0, 0, 0, 0, time.UTC).Add(-reminderListDefaultLookahead)
+	if service.listInput.From == nil || !service.listInput.From.Equal(want) {
+		t.Fatalf("from = %v, want %v", service.listInput.From, want)
+	}
+}
+
+func TestReminderListKeepsExplicitLowerBoundOnly(t *testing.T) {
+	service := &reminderToolServiceStub{}
+	if _, err := ReminderList(mcpExternalContext(), mcpReminderResolver(), service, ReminderListInput{From: "2026-09-01T00:00:00Z"}); err != nil {
+		t.Fatalf("list reminders: %v", err)
+	}
+	if service.listInput.From == nil || !service.listInput.From.Equal(time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)) || service.listInput.To != nil {
+		t.Fatalf("window = %v..%v, want explicit from and open end", service.listInput.From, service.listInput.To)
+	}
+}
+
 func TestReminderCompletePassesSelectedSpaceAndReminderID(t *testing.T) {
 	service := &reminderToolServiceStub{}
 	got, err := ReminderComplete(mcpExternalContext(), mcpReminderResolver(), service, ReminderCompleteInput{Space: mcpSpaceID, ReminderID: mcpReminderID})
