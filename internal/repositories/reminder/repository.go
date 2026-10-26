@@ -122,6 +122,7 @@ func (r *Repository) replaceOnce(ctx context.Context, reminder *domainreminder.R
 			}
 		}
 		// A sent reminder was due before the new event, so the new event handled it.
+		// completed_at records when this was detected, not when the event happened.
 		if len(sent) > 0 {
 			if err := tx.Model(&domainreminder.Reminder{}).
 				Where("id IN ?", reminderIDs(sent)).

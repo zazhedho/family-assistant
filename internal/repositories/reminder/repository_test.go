@@ -492,6 +492,34 @@ func TestCreateReplacingCompletesEarlierSentReminder(t *testing.T) {
 	}
 }
 
+func TestCreateReplacingCompletesSentScheduledAtSameTime(t *testing.T) {
+	db, mock := newReminderMockDB(t)
+	repo := NewRepository(db)
+	r := replaceFixture("bill")
+	now := time.Date(2026, 9, 18, 9, 0, 0, 0, time.UTC)
+	sentID := "00000000-0000-4000-8000-000000000127"
+	rows := sqlmock.NewRows(reminderColumns()).
+		AddRow(sentID, spaceID, memberID, nil, "old", "", r.ScheduledAt, "SENT", nil, now, now, nil)
+	mock.ExpectBegin()
+	mock.ExpectQuery(replaceSelectSQL).WithArgs(spaceID, "bill", domainreminder.StatusPending, domainreminder.StatusSent).WillReturnRows(rows)
+	mock.ExpectExec(`UPDATE "reminders" SET .*completed_at.*status.*updated_at.* WHERE id IN \(\$4\)`).
+		WithArgs(now, domainreminder.StatusCompleted, now, sentID).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	expectReplaceInsert(mock, r).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit()
+
+	res, err := repo.CreateReplacing(context.Background(), r, now)
+	if err != nil {
+		t.Fatalf("create replacing: %v", err)
+	}
+	if len(res.Completed) != 1 || res.Completed[0].ID != sentID {
+		t.Fatalf("unexpected result %+v", res)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("sql expectations: %v", err)
+	}
+}
+
 func TestCreateReplacingCancelsPendingAndCompletesSent(t *testing.T) {
 	db, mock := newReminderMockDB(t)
 	repo := NewRepository(db)

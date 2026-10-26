@@ -136,6 +136,8 @@ func (s *service) CreateReplacing(ctx context.Context, actor domainidentity.Acto
 		result.Replaced[i].UpdatedAt = now
 		result.Replaced[i].DeletedAt = gorm.DeletedAt{Time: now, Valid: true}
 	}
+	// Like replacement, superseding needs only create permission, not canComplete, so
+	// any member can close a sent reminder of the same key created by someone else.
 	for i := range result.Completed {
 		completedAt := now
 		result.Completed[i].Status = domainreminder.StatusCompleted
