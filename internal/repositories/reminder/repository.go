@@ -2,6 +2,8 @@ package repositoryreminder
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -9,6 +11,7 @@ import (
 	interfacereminder "family-assistant/internal/interfaces/reminder"
 	"family-assistant/utils"
 
+	"github.com/jackc/pgx/v5/pgconn"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
@@ -38,9 +41,93 @@ func (r *Repository) Create(ctx context.Context, reminder *domainreminder.Remind
 	if strings.TrimSpace(reminder.ID) == "" {
 		reminder.ID = utils.CreateUUID()
 	}
-	return r.DB.WithContext(ctx).
-		Select("id", "space_id", "created_by_member_id", "assignee_member_id", "title", "description", "scheduled_at", "status", "delivery_provider", "delivery_target", "completed_at", "created_at", "updated_at").
+	return insertReminder(r.DB.WithContext(ctx), reminder)
+}
+
+func insertReminder(db *gorm.DB, reminder *domainreminder.Reminder) error {
+	return db.
+		Select("id", "space_id", "created_by_member_id", "assignee_member_id", "title", "description", "scheduled_at", "status", "delivery_provider", "delivery_target", "completed_at", "created_at", "updated_at", "replace_key").
 		Create(reminder).Error
+}
+
+const replaceKeyIndexName = "ux_reminders_pending_replace_key"
+
+func isReplaceKeyViolation(err error) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == "23505" && pgErr.ConstraintName == replaceKeyIndexName
+}
+
+// CreateReplacing inserts the reminder and, when it carries a replace key,
+// cancels earlier pending reminders with the same key in the same space within
+// one transaction. A later pending reminder is kept and nothing is written.
+func (r *Repository) CreateReplacing(ctx context.Context, reminder *domainreminder.Reminder, now time.Time) (domainreminder.ReplaceResult, error) {
+	if reminder == nil {
+		return domainreminder.ReplaceResult{}, domainreminder.ErrReminderRequired
+	}
+	if err := validateSpaceID(reminder.SpaceID); err != nil {
+		return domainreminder.ReplaceResult{}, err
+	}
+	if reminder.ReplaceKey == nil {
+		if err := r.Create(ctx, reminder); err != nil {
+			return domainreminder.ReplaceResult{}, err
+		}
+		return domainreminder.ReplaceResult{Outcome: domainreminder.ReplaceOutcomeNone, Reminder: reminder}, nil
+	}
+	if strings.TrimSpace(reminder.ID) == "" {
+		reminder.ID = utils.CreateUUID()
+	}
+
+	var result domainreminder.ReplaceResult
+	var err error
+	for attempt := 0; attempt < 2; attempt++ {
+		result, err = r.replaceOnce(ctx, reminder, now)
+		if err == nil || !isReplaceKeyViolation(err) {
+			return result, err
+		}
+	}
+	return domainreminder.ReplaceResult{}, fmt.Errorf("%w: %w", domainreminder.ErrReplaceKeyConflict, err)
+}
+
+func (r *Repository) replaceOnce(ctx context.Context, reminder *domainreminder.Reminder, now time.Time) (domainreminder.ReplaceResult, error) {
+	var result domainreminder.ReplaceResult
+	err := r.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var existing []domainreminder.Reminder
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("space_id = ? AND replace_key = ? AND status = ?", reminder.SpaceID, *reminder.ReplaceKey, domainreminder.StatusPending).
+			Order("scheduled_at DESC").
+			Find(&existing).Error; err != nil {
+			return err
+		}
+		if len(existing) > 0 && existing[0].ScheduledAt.After(reminder.ScheduledAt) {
+			kept := existing[0]
+			result = domainreminder.ReplaceResult{Outcome: domainreminder.ReplaceOutcomeKeptExisting, Reminder: &kept}
+			return nil
+		}
+		if len(existing) > 0 {
+			ids := make([]string, 0, len(existing))
+			for i := range existing {
+				ids = append(ids, existing[i].ID)
+			}
+			if err := tx.Model(&domainreminder.Reminder{}).
+				Where("id IN ?", ids).
+				Updates(map[string]any{"status": domainreminder.StatusCancelled, "deleted_at": now, "updated_at": now}).Error; err != nil {
+				return err
+			}
+		}
+		if err := insertReminder(tx, reminder); err != nil {
+			return err
+		}
+		result = domainreminder.ReplaceResult{Outcome: domainreminder.ReplaceOutcomeCreated, Reminder: reminder}
+		if len(existing) > 0 {
+			result.Outcome = domainreminder.ReplaceOutcomeReplaced
+			result.Replaced = existing
+		}
+		return nil
+	})
+	if err != nil {
+		return domainreminder.ReplaceResult{}, err
+	}
+	return result, nil
 }
 
 func (r *Repository) ClaimDueForNotification(ctx context.Context, now, staleBefore time.Time, limit int) ([]domainreminder.Reminder, error) {

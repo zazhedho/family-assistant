@@ -70,6 +70,13 @@ func (s *reminderIndexWriterStub) Remove(_ context.Context, id string) error {
 	return s.err
 }
 
+func (s *reminderRepositoryStub) CreateReplacing(ctx context.Context, reminder *domainreminder.Reminder, _ time.Time) (domainreminder.ReplaceResult, error) {
+	if err := s.Create(ctx, reminder); err != nil {
+		return domainreminder.ReplaceResult{}, err
+	}
+	return domainreminder.ReplaceResult{Outcome: domainreminder.ReplaceOutcomeNone, Reminder: reminder}, nil
+}
+
 func (s *reminderRepositoryStub) Create(_ context.Context, reminder *domainreminder.Reminder) error {
 	if reminder.ID == "" {
 		reminder.ID = reminderID

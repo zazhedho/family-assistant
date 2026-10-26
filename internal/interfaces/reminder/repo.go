@@ -9,6 +9,7 @@ import (
 
 type RepoReminderInterface interface {
 	Create(context.Context, *domainreminder.Reminder) error
+	CreateReplacing(context.Context, *domainreminder.Reminder, time.Time) (domainreminder.ReplaceResult, error)
 	FindByIDInSpace(context.Context, string, string) (*domainreminder.Reminder, error)
 	List(context.Context, domainreminder.ListFilter) ([]domainreminder.Reminder, error)
 	CompleteUnfinished(context.Context, string, string, time.Time) error
