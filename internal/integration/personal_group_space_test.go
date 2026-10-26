@@ -270,7 +270,7 @@ func assertReminderAndActivityFlow(t *testing.T, db *gorm.DB, httpURL, mcpURL, k
 	personalReminder := decodeReminder(t, callMCPTool(t, mcpURL, adult.profile, key, "reminder_create", map[string]any{
 		"title": "Personal note", "scheduled_at": "2026-09-21T08:00:00Z",
 	}))
-	personalList := callMCPTool(t, mcpURL, adult.profile, key, "reminder_list", map[string]any{})
+	personalList := callMCPTool(t, mcpURL, adult.profile, key, "reminder_list", map[string]any{"from": "2026-09-01T00:00:00Z"})
 	var personalReminderOutput mcpReminderListOutput
 	decodeStructured(t, personalList.StructuredOutput, &personalReminderOutput)
 	if personalList.IsError || !hasReminder(personalReminderOutput.Reminders, personalReminder.ID) {
@@ -286,7 +286,7 @@ func assertReminderAndActivityFlow(t *testing.T, db *gorm.DB, httpURL, mcpURL, k
 	sharedReminder := decodeReminder(t, callMCPTool(t, mcpURL, adult.profile, key, "reminder_create", map[string]any{
 		"space": adult.sharedOne.ID, "title": "Shared task", "scheduled_at": "2026-09-22T08:00:00Z",
 	}))
-	sharedList := callMCPTool(t, mcpURL, adult.profile, key, "reminder_list", map[string]any{"space": adult.sharedOne.ID})
+	sharedList := callMCPTool(t, mcpURL, adult.profile, key, "reminder_list", map[string]any{"space": adult.sharedOne.ID, "from": "2026-09-01T00:00:00Z"})
 	var sharedReminderOutput mcpReminderListOutput
 	decodeStructured(t, sharedList.StructuredOutput, &sharedReminderOutput)
 	if sharedList.IsError || !hasReminder(sharedReminderOutput.Reminders, sharedReminder.ID) {
