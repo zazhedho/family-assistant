@@ -150,7 +150,14 @@ func (s *service) CreateReplacing(ctx context.Context, actor domainidentity.Acto
 		s.writeAudit(ctx, auditEvent(actor, domainaudit.ActionCreate, resource.SpaceID, resource.ID, resource.CreatedByMemberID, domainaudit.StatusSuccess, nil))
 	}
 	for _, replaced := range result.Replaced {
-		s.writeAudit(ctx, auditEvent(actor, domainaudit.ActionDelete, replaced.SpaceID, replaced.ID, replaced.CreatedByMemberID, domainaudit.StatusSuccess, nil))
+		metadata := map[string]any{"reason": "replaced"}
+		if result.Reminder != nil {
+			metadata["replaced_by_reminder_id"] = result.Reminder.ID
+		}
+		if replaceKey != nil {
+			metadata["replace_key"] = *replaceKey
+		}
+		s.writeAudit(ctx, auditEvent(actor, domainaudit.ActionDelete, replaced.SpaceID, replaced.ID, replaced.CreatedByMemberID, domainaudit.StatusSuccess, metadata))
 	}
 	return result, nil
 }

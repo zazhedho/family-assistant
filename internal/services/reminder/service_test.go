@@ -855,6 +855,10 @@ func TestCreateReplacingRemovesReplacedFromIndexAndAudits(t *testing.T) {
 	if e := audit.events[1]; e.Action != domainaudit.ActionDelete || e.ResourceID != "old-1" || e.ResourceOwnerMemberID != "member-other" || e.Status != domainaudit.StatusSuccess {
 		t.Fatalf("delete audit = %+v", e)
 	}
+	meta := audit.events[1].Metadata
+	if meta["reason"] != "replaced" || meta["replace_key"] != "diaper" || result.Reminder == nil || meta["replaced_by_reminder_id"] != result.Reminder.ID {
+		t.Fatalf("delete audit metadata = %+v, new reminder %+v", meta, result.Reminder)
+	}
 }
 
 func TestCreateReplacingKeptExistingDoesNotIndex(t *testing.T) {

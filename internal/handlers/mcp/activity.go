@@ -154,7 +154,7 @@ func ActivityDelete(ctx context.Context, resolver interfaceidentity.Resolver, se
 
 func registerActivityTools(server *mcpsdk.Server, resolver interfaceidentity.Resolver, service interfaceactivity.ServiceActivityInterface, reminderService interfacereminder.ServiceReminderInterface) {
 	addTool(server, &mcpsdk.Tool{
-		Name: "activity_create_with_reminder", Description: "Create an activity and a reminder together in an authorized Space. Use this when both are requested; use activity_create for activity only. Set reminder.replace_previous for interval-based reminders so older pending reminders of the same activity kind are replaced.",
+		Name: "activity_create_with_reminder", Description: "Create an activity and a reminder together in an authorized Space. Use this when both are requested; use activity_create for activity only. Set reminder.replace_previous for interval-based reminders so older pending reminders of the same activity kind are replaced. If replace_outcome is kept_existing, no new reminder was created; the returned reminder is the later one already pending.",
 	}, func(ctx context.Context, input ActivityCreateWithReminderInput) (ActivityCreateWithReminderOutput, error) {
 		return ActivityCreateWithReminder(ctx, resolver, service, reminderService, input)
 	})

@@ -246,7 +246,7 @@ func reminderOutput(reminder *domainreminder.Reminder) ReminderOutput {
 
 func registerReminderTools(server *mcpsdk.Server, service interfacereminder.ServiceReminderInterface, resolver interfaceidentity.Resolver) {
 	addTool(server, &mcpsdk.Tool{
-		Name: "reminder_create", Description: "Create a reminder in an authorized Space. For interval-based reminders such as diaper changes, pass replace_key so the newest event replaces older pending reminders with the same key.",
+		Name: "reminder_create", Description: "Create a reminder in an authorized Space. For interval-based reminders such as diaper changes, pass replace_key so the newest event replaces older pending reminders with the same key. If replace_outcome is kept_existing, no new reminder was created; the returned reminder is the later one already pending.",
 	}, func(ctx context.Context, input ReminderCreateInput) (ReminderOutput, error) {
 		return ReminderCreate(ctx, resolver, service, input)
 	})

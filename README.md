@@ -1336,6 +1336,32 @@ files, and requires a per-user group session configuration:
 Rollback is a normal image rollback; backfilled `phone_verified_at` values are
 harmless to older code.
 
+#### Release notes: reminder replace key
+
+`reminder_create` accepts `replace_key`, and `activity_create_with_reminder`
+accepts `reminder.replace_previous`. A new reminder cancels older pending
+reminders with the same key in the same Space; the latest event by
+`scheduled_at` wins. Plain reminders and milk-leftover reminders are
+unaffected.
+
+There is no new migration file. Fresh installs get the column and index from
+migration 000009. An existing database (production is past version 12) must run
+this idempotent SQL manually before deploying, because the new code always
+writes the column:
+
+```sql
+ALTER TABLE reminders ADD COLUMN IF NOT EXISTS replace_key VARCHAR(128);
+CREATE UNIQUE INDEX IF NOT EXISTS ux_reminders_pending_replace_key
+    ON reminders (space_id, replace_key)
+    WHERE status = 'PENDING' AND deleted_at IS NULL AND replace_key IS NOT NULL;
+```
+
+Before deploying, run `\d reminders` and confirm both the `replace_key` column
+and the `ux_reminders_pending_replace_key` index exist.
+
+Rollback is a normal image rollback; older code ignores the nullable column, so
+the column and index can stay.
+
 Default health check:
 
 ```text
