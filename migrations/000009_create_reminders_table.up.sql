@@ -15,6 +15,7 @@ CREATE TABLE IF NOT EXISTS reminders (
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     deleted_at TIMESTAMPTZ,
+    replace_key VARCHAR(128),
     CONSTRAINT ck_reminders_status CHECK (status IN ('PENDING','SENT','COMPLETED','CANCELLED')),
     CONSTRAINT fk_reminders_creator_space FOREIGN KEY (space_id, created_by_member_id)
         REFERENCES space_members(space_id, id),
@@ -29,3 +30,6 @@ CREATE INDEX IF NOT EXISTS ix_reminders_assignee_status_schedule
 CREATE INDEX IF NOT EXISTS ix_reminders_notification_due
     ON reminders (status, scheduled_at, notification_claimed_at)
     WHERE notified_at IS NULL AND deleted_at IS NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS ux_reminders_pending_replace_key
+    ON reminders (space_id, replace_key)
+    WHERE status = 'PENDING' AND deleted_at IS NULL AND replace_key IS NOT NULL;

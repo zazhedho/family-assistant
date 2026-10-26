@@ -43,3 +43,5 @@ temp/
 .worktrees/
 
 .gocache
+docs/superpowers/
+.superpowers/

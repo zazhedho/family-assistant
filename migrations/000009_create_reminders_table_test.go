@@ -75,6 +75,20 @@ func TestReminderMigrationIsSpaceScoped(t *testing.T) {
 	}
 }
 
+func TestReminderMigrationAddsReplaceKey(t *testing.T) {
+	up := readMigration(t, "000009_create_reminders_table.up.sql")
+	for _, required := range []string{
+		"replace_key VARCHAR(128)",
+		"CREATE UNIQUE INDEX IF NOT EXISTS ux_reminders_pending_replace_key",
+		"ON reminders (space_id, replace_key)",
+		"WHERE status = 'PENDING' AND deleted_at IS NULL AND replace_key IS NOT NULL;",
+	} {
+		if !strings.Contains(up, required) {
+			t.Errorf("missing %q", required)
+		}
+	}
+}
+
 func TestExternalOnlyUserMigration(t *testing.T) {
 	up := readMigration(t, "000010_allow_external_only_users.up.sql")
 	for _, required := range []string{

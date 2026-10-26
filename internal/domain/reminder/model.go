@@ -4,6 +4,7 @@ import (
 	"errors"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"gorm.io/gorm"
 )
@@ -15,6 +16,8 @@ var (
 	ErrReminderUpdateRequired = errors.New("reminder update is required")
 	ErrStatusConflict         = errors.New("reminder status conflict")
 	ErrInvalidStatus          = errors.New("status is invalid")
+	ErrInvalidReplaceKey      = errors.New("replace_key is invalid")
+	ErrReplaceKeyConflict     = errors.New("replace_key conflict")
 )
 
 type Status string
@@ -43,6 +46,40 @@ func ParseStatus(value string) (*Status, error) {
 	default:
 		return nil, ErrInvalidStatus
 	}
+}
+
+// MaxReplaceKeyLength is the maximum rune length of a normalized replace key.
+const MaxReplaceKeyLength = 128
+
+type ReplaceOutcome string
+
+const (
+	ReplaceOutcomeNone         ReplaceOutcome = "none"
+	ReplaceOutcomeCreated      ReplaceOutcome = "created"
+	ReplaceOutcomeReplaced     ReplaceOutcome = "replaced"
+	ReplaceOutcomeKeptExisting ReplaceOutcome = "kept_existing"
+)
+
+// ReplaceResult describes the outcome of creating a reminder that may replace
+// older pending reminders sharing its replace key.
+type ReplaceResult struct {
+	Outcome ReplaceOutcome
+	// Reminder is the newly created reminder, or the kept later one.
+	Reminder *Reminder
+	Replaced []Reminder
+}
+
+// NormalizeReplaceKey trims and lower-cases a replace key. Blank input yields
+// nil; keys longer than MaxReplaceKeyLength runes are rejected, never truncated.
+func NormalizeReplaceKey(raw string) (*string, error) {
+	key := strings.ToLower(strings.TrimSpace(raw))
+	if key == "" {
+		return nil, nil
+	}
+	if utf8.RuneCountInString(key) > MaxReplaceKeyLength {
+		return nil, ErrInvalidReplaceKey
+	}
+	return &key, nil
 }
 
 type ListFilter struct {
@@ -81,4 +118,5 @@ type Reminder struct {
 	CreatedAt             time.Time      `json:"created_at" gorm:"column:created_at"`
 	UpdatedAt             time.Time      `json:"updated_at" gorm:"column:updated_at"`
 	DeletedAt             gorm.DeletedAt `json:"deleted_at,omitempty" gorm:"column:deleted_at"`
+	ReplaceKey            *string        `json:"replace_key,omitempty" gorm:"column:replace_key"`
 }
