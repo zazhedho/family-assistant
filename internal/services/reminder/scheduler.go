@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"unicode"
 
 	domainidentity "family-assistant/internal/domain/identity"
 	domainreminder "family-assistant/internal/domain/reminder"
@@ -30,6 +31,12 @@ type ReminderSchedulerOptions struct {
 	DatabaseFallbackInterval time.Duration
 	IndexReconcileInterval   time.Duration
 	DueIndex                 interfacereminder.DueReminderIndex
+	// Activities, when set, adds today's activity counts to keyed reminders.
+	Activities reminderActivityCounter
+}
+
+type reminderActivityCounter interface {
+	CountByKind(ctx context.Context, spaceID string, kinds []string, from, to time.Time) (map[string]int64, error)
 }
 
 type reminderIdentityResolver interface {
@@ -51,6 +58,7 @@ type ReminderScheduler struct {
 	batchSize                int
 	databaseFallbackInterval time.Duration
 	indexReconcileInterval   time.Duration
+	activities               reminderActivityCounter
 	lastDatabaseFallback     time.Time
 	indexDegraded            bool
 }
@@ -81,6 +89,7 @@ func NewReminderScheduler(
 		reminders: reminders, identities: identities, members: members, senders: senders,
 		index: options.DueIndex, interval: options.Interval, lease: options.Lease, batchSize: options.BatchSize,
 		databaseFallbackInterval: options.DatabaseFallbackInterval, indexReconcileInterval: options.IndexReconcileInterval,
+		activities: options.Activities,
 	}
 }
 
@@ -249,7 +258,7 @@ func (s *ReminderScheduler) deliver(ctx context.Context, reminder *domainreminde
 	if sender == nil {
 		return true, fmt.Errorf("notification sender %q is not configured", target.Provider)
 	}
-	if err := sender.Send(ctx, target, reminderMessage(reminder, s.assigneeName(ctx, reminder), sentAt)); err != nil {
+	if err := sender.Send(ctx, target, reminderMessage(reminder, s.assigneeName(ctx, reminder), s.todaySummary(ctx, reminder, sentAt), sentAt)); err != nil {
 		return true, err
 	}
 	if reminder.NotificationClaimedAt == nil {
@@ -353,23 +362,100 @@ func (s *ReminderScheduler) assigneeName(ctx context.Context, reminder *domainre
 	return strings.TrimSpace(member.UserName)
 }
 
-func reminderMessage(reminder *domainreminder.Reminder, assigneeName string, sentAt time.Time) string {
-	lines := []string{"🔔 *!!! REMINDER !!!*", "", "*" + strings.TrimSpace(reminder.Title) + "*"}
-	if description := strings.TrimSpace(reminder.Description); description != "" {
-		lines = append(lines, description)
+// lateDeliveryThreshold is how late a reminder may be sent before the message
+// shows its scheduled time.
+const lateDeliveryThreshold = 10 * time.Minute
+
+const defaultReplyFooter = "↩️ Reply pesan ini: *selesai*"
+
+// summaryKinds lists the activity kinds counted for a reminder key; other keys
+// count only their own kind.
+var summaryKinds = map[string][]string{"diaper": {"diaper", "bowel_movement"}}
+
+// summaryLabels are display names for activity kinds; unknown kinds show as is.
+var summaryLabels = map[string]string{"diaper": "ganti popok", "bowel_movement": "poop", "feeding": "menyusu", "bath": "mandi"}
+
+// todaySummary counts today's activities (since local midnight) of the kinds
+// tied to a keyed reminder. It returns "" when there is nothing to show or the
+// count fails, so a summary never blocks delivery.
+func (s *ReminderScheduler) todaySummary(ctx context.Context, reminder *domainreminder.Reminder, sentAt time.Time) string {
+	if s.activities == nil || reminder.ReplaceKey == nil || strings.TrimSpace(*reminder.ReplaceKey) == "" {
+		return ""
 	}
-	if !reminder.ScheduledAt.IsZero() {
-		scheduledAt := reminder.ScheduledAt.In(time.Local)
-		scheduleLabel := scheduledAt.Format("02/01/2006 · 15.04 MST")
-		deliveredAt := sentAt.In(time.Local)
-		if scheduledAt.Year() == deliveredAt.Year() && scheduledAt.YearDay() == deliveredAt.YearDay() {
-			scheduleLabel = "Hari ini · " + scheduledAt.Format("15.04 MST")
+	key := strings.TrimSpace(*reminder.ReplaceKey)
+	kinds := summaryKinds[key]
+	if kinds == nil {
+		kinds = []string{key}
+	}
+	local := sentAt.In(time.Local)
+	midnight := time.Date(local.Year(), local.Month(), local.Day(), 0, 0, 0, 0, time.Local)
+	counts, err := s.activities.CountByKind(ctx, reminder.SpaceID, kinds, midnight, sentAt)
+	if err != nil {
+		logger.WriteLog(logger.LogLevelWarn, fmt.Sprintf("reminder summary skipped: reminder %s: %v", reminder.ID, err))
+		return ""
+	}
+	parts := make([]string, 0, len(kinds))
+	for _, kind := range kinds {
+		label := summaryLabels[kind]
+		if label == "" {
+			label = kind
 		}
-		lines = append(lines, "", "🕒 "+scheduleLabel)
+		parts = append(parts, fmt.Sprintf("%d× %s", counts[kind], label))
+	}
+	return "📊 Hari ini: " + strings.Join(parts, " · ")
+}
+
+func reminderMessage(reminder *domainreminder.Reminder, assigneeName, summary string, sentAt time.Time) string {
+	lines := []string{reminderHeading(reminder.Title), ""}
+	footer := defaultReplyFooter
+	body := 0
+	for _, line := range strings.Split(strings.TrimSpace(reminder.Description), "\n") {
+		line = strings.TrimSpace(line)
+		switch {
+		case line == "":
+		case strings.HasPrefix(line, "↩️"):
+			footer = line
+		default:
+			lines = append(lines, line)
+			body++
+		}
+	}
+	if summary = strings.TrimSpace(summary); summary != "" {
+		lines = append(lines, summary)
+		body++
 	}
 	if assigneeName := strings.TrimSpace(assigneeName); assigneeName != "" {
 		lines = append(lines, "👤 Untuk: "+assigneeName)
+		body++
 	}
-	lines = append(lines, "", "Balas *selesai* jika sudah dilakukan.")
+	if !reminder.ScheduledAt.IsZero() && sentAt.Sub(reminder.ScheduledAt) > lateDeliveryThreshold {
+		scheduledAt := reminder.ScheduledAt.In(time.Local)
+		deliveredAt := sentAt.In(time.Local)
+		label := scheduledAt.Format("02/01 15.04 MST")
+		if scheduledAt.Year() == deliveredAt.Year() && scheduledAt.YearDay() == deliveredAt.YearDay() {
+			label = scheduledAt.Format("15.04 MST")
+		}
+		lines = append(lines, "⏱️ Terjadwal "+label+" · terkirim terlambat")
+		body++
+	}
+	if body > 0 {
+		lines = append(lines, "")
+	}
+	lines = append(lines, footer)
 	return strings.Join(lines, "\n")
+}
+
+// reminderHeading bolds the title and keeps a leading emoji outside the bold
+// span; a title without one gets a bell.
+func reminderHeading(title string) string {
+	title = strings.TrimSpace(title)
+	first := []rune(title)
+	if len(first) == 0 || unicode.IsLetter(first[0]) || unicode.IsDigit(first[0]) {
+		return "🔔 *" + title + "*"
+	}
+	emoji, rest, found := strings.Cut(title, " ")
+	if !found || strings.TrimSpace(rest) == "" {
+		return "🔔 *" + title + "*"
+	}
+	return emoji + " *" + strings.TrimSpace(rest) + "*"
 }

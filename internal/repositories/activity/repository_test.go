@@ -170,3 +170,37 @@ func TestSoftDeleteScopesBySpaceAndActivityID(t *testing.T) {
 }
 
 var _ interfaceactivity.RepoActivityInterface = (*Repository)(nil)
+
+func TestCountByKindGroupsActivitiesInWindow(t *testing.T) {
+	db, mock := newActivityMockDB(t)
+	repo := NewRepository(db).(*Repository)
+	from := time.Date(2026, 10, 25, 17, 0, 0, 0, time.UTC)
+	to := from.Add(20 * time.Hour)
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT kind, COUNT(*) AS total FROM "space_activities" WHERE (space_id = $1 AND kind IN ($2,$3) AND occurred_at >= $4 AND occurred_at <= $5) AND "space_activities"."deleted_at" IS NULL GROUP BY "kind"`)).
+		WithArgs(spaceID, "diaper", "bowel_movement", from, to).
+		WillReturnRows(sqlmock.NewRows([]string{"kind", "total"}).AddRow("diaper", 6).AddRow("bowel_movement", 2))
+
+	counts, err := repo.CountByKind(context.Background(), spaceID, []string{"diaper", "bowel_movement"}, from, to)
+	if err != nil {
+		t.Fatalf("count by kind: %v", err)
+	}
+	if counts["diaper"] != 6 || counts["bowel_movement"] != 2 || len(counts) != 2 {
+		t.Fatalf("counts = %v", counts)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("sql expectations: %v", err)
+	}
+}
+
+func TestCountByKindRequiresSpaceAndKinds(t *testing.T) {
+	db, _ := newActivityMockDB(t)
+	repo := NewRepository(db).(*Repository)
+	now := time.Now()
+	if _, err := repo.CountByKind(context.Background(), " ", []string{"diaper"}, now, now); !errors.Is(err, domainactivity.ErrActivitySpaceID) {
+		t.Fatalf("blank space error = %v", err)
+	}
+	counts, err := repo.CountByKind(context.Background(), spaceID, nil, now, now)
+	if err != nil || len(counts) != 0 {
+		t.Fatalf("no kinds = %v, %v; want empty without a query", counts, err)
+	}
+}

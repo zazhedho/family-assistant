@@ -139,8 +139,9 @@ func run() error {
 	reminderRepository := reminderRepo.NewRepository(routes.DB)
 	reminderSchedulerRepository := reminderRepo.NewSchedulerRepository(routes.DB)
 	reminders := reminderService.NewReminderService(reminderRepository, spaceRepository, authorizationService.NewAuthorizer(), audit, reminderDueIndex)
+	activityRepository := &activityRepo.Repository{DB: routes.DB}
 	activities := activityService.NewService(
-		activityRepo.NewRepository(routes.DB), spaceRepository, authorizationService.NewAuthorizer(), audit,
+		activityRepository, spaceRepository, authorizationService.NewAuthorizer(), audit,
 	)
 	routes.SpaceRoutesWithDependencies(spaces, invitations, userRepo.NewUserRepo(routes.DB), identityLink)
 	routes.ReminderRoutes(reminders, identityResolver, permissions)
@@ -154,7 +155,7 @@ func run() error {
 
 	serverContext, stopSignals := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stopSignals()
-	if _, err := startReminderScheduler(serverContext, reminderSchedulerConfig, reminderSchedulerRepository, identityRepository, spaceRepository, reminderDueIndex); err != nil {
+	if _, err := startReminderScheduler(serverContext, reminderSchedulerConfig, reminderSchedulerRepository, identityRepository, spaceRepository, reminderDueIndex, activityRepository); err != nil {
 		return fmt.Errorf("start reminder scheduler: %w", err)
 	}
 	scheduledMessages, err := startScheduledMessageLane(serverContext, scheduledMessageConfig, scheduledMessageLaneDependencies{
@@ -199,6 +200,10 @@ type schedulerMembershipLookup interface {
 	ListActiveMembers(context.Context, string) ([]domainspace.ResolvedMembership, error)
 }
 
+type schedulerActivityCounter interface {
+	CountByKind(ctx context.Context, spaceID string, kinds []string, from, to time.Time) (map[string]int64, error)
+}
+
 func startReminderScheduler(
 	ctx context.Context,
 	cfg config.ReminderSchedulerConfig,
@@ -206,6 +211,7 @@ func startReminderScheduler(
 	identities schedulerIdentityLookup,
 	members schedulerMembershipLookup,
 	dueIndex interfacereminder.DueReminderIndex,
+	activities schedulerActivityCounter,
 ) (*reminderService.ReminderScheduler, error) {
 	if !cfg.Enabled {
 		return nil, nil
@@ -220,7 +226,7 @@ func startReminderScheduler(
 		reminderService.ReminderSchedulerOptions{
 			Interval: cfg.Interval, Lease: cfg.Lease, BatchSize: cfg.BatchSize,
 			DatabaseFallbackInterval: cfg.DatabaseFallbackInterval, IndexReconcileInterval: cfg.IndexReconcileInterval,
-			DueIndex: dueIndex,
+			DueIndex: dueIndex, Activities: activities,
 		},
 	)
 	go scheduler.Run(ctx)

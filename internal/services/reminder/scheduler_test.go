@@ -3,6 +3,8 @@ package servicereminder
 import (
 	"context"
 	"errors"
+	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -274,8 +276,7 @@ func TestReminderSchedulerFormatsNotificationAndMarksSent(t *testing.T) {
 	if err := scheduler.RunOnce(context.Background(), runAt); err != nil {
 		t.Fatalf("run once: %v", err)
 	}
-	localScheduledAt := reminders.due[0].ScheduledAt.In(time.Local)
-	wantMessage := "🔔 *!!! REMINDER !!!*\n\n*Susu bayi*\nHabiskan 120 ml\n\n🕒 Hari ini · " + localScheduledAt.Format("15.04 MST") + "\n👤 Untuk: Mommy Zeia\n\nBalas *selesai* jika sudah dilakukan."
+	wantMessage := "🔔 *Susu bayi*\n\nHabiskan 120 ml\n👤 Untuk: Mommy Zeia\n\n↩️ Reply pesan ini: *selesai*"
 	if len(sender.messages) != 1 || sender.messages[0].target.Target != "120363@g.us" || sender.messages[0].message != wantMessage {
 		t.Fatalf("sent messages = %+v", sender.messages)
 	}
@@ -390,5 +391,136 @@ func TestReleaseIgnoresStatusConflict(t *testing.T) {
 	}
 	if reminders.claimCalls != 1 {
 		t.Fatalf("claim calls = %d, want 1", reminders.claimCalls)
+	}
+}
+
+type activityCounterStub struct {
+	counts   map[string]int64
+	err      error
+	calls    int
+	spaceID  string
+	kinds    []string
+	from, to time.Time
+}
+
+func (s *activityCounterStub) CountByKind(_ context.Context, spaceID string, kinds []string, from, to time.Time) (map[string]int64, error) {
+	s.calls++
+	s.spaceID, s.kinds, s.from, s.to = spaceID, kinds, from, to
+	return s.counts, s.err
+}
+
+func TestReminderMessageLayout(t *testing.T) {
+	scheduled := time.Date(2026, 10, 26, 21, 4, 0, 0, time.Local)
+	tests := []struct {
+		name     string
+		reminder domainreminder.Reminder
+		assignee string
+		summary  string
+		sentAt   time.Time
+		want     string
+	}{
+		{
+			name: "emoji title keeps its emoji and moves the reply hint to the footer",
+			reminder: domainreminder.Reminder{
+				Title:       "🧷 Waktunya cek popok Baby Zeia",
+				Description: "Terakhir diganti *17.04* oleh Mommy Zeia · 4 jam lalu.\n↩️ Reply pesan ini: *selesai* (atau \"selesai, poop\")",
+				ScheduledAt: scheduled,
+			},
+			summary: "📊 Hari ini: 6× ganti popok · 2× poop",
+			sentAt:  scheduled,
+			want:    "🧷 *Waktunya cek popok Baby Zeia*\n\nTerakhir diganti *17.04* oleh Mommy Zeia · 4 jam lalu.\n📊 Hari ini: 6× ganti popok · 2× poop\n\n↩️ Reply pesan ini: *selesai* (atau \"selesai, poop\")",
+		},
+		{
+			name:     "plain title gets a bell and the default footer",
+			reminder: domainreminder.Reminder{Title: "Bayar listrik", ScheduledAt: scheduled},
+			sentAt:   scheduled.Add(9 * time.Minute),
+			want:     "🔔 *Bayar listrik*\n\n↩️ Reply pesan ini: *selesai*",
+		},
+		{
+			name:     "late delivery on the same day shows the scheduled time",
+			reminder: domainreminder.Reminder{Title: "Bayar listrik", ScheduledAt: scheduled},
+			assignee: "Daddy Zeia",
+			sentAt:   scheduled.Add(25 * time.Minute),
+			want:     "🔔 *Bayar listrik*\n\n👤 Untuk: Daddy Zeia\n⏱️ Terjadwal " + scheduled.Format("15.04 MST") + " · terkirim terlambat\n\n↩️ Reply pesan ini: *selesai*",
+		},
+		{
+			name:     "late delivery on a later day shows the date",
+			reminder: domainreminder.Reminder{Title: "Bayar listrik", ScheduledAt: scheduled},
+			sentAt:   scheduled.Add(5 * time.Hour),
+			want:     "🔔 *Bayar listrik*\n\n⏱️ Terjadwal " + scheduled.Format("02/01 15.04 MST") + " · terkirim terlambat\n\n↩️ Reply pesan ini: *selesai*",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := reminderMessage(&tt.reminder, tt.assignee, tt.summary, tt.sentAt); got != tt.want {
+				t.Fatalf("message mismatch\n got: %q\nwant: %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestReminderSchedulerAddsTodaySummaryForKeyedReminder(t *testing.T) {
+	key := "diaper"
+	runAt := time.Date(2026, 10, 26, 14, 4, 0, 0, time.UTC)
+	reminders := &schedulerRepositoryStub{due: []domainreminder.Reminder{{
+		ID: "reminder-1", SpaceID: "space-1", Title: "🧷 Waktunya cek popok Baby Zeia", ScheduledAt: runAt,
+		ReplaceKey: &key, DeliveryProvider: "whatsapp", DeliveryTarget: "120363@g.us",
+	}}}
+	sender := &schedulerSenderStub{}
+	counter := &activityCounterStub{counts: map[string]int64{"diaper": 6}}
+	scheduler := NewReminderScheduler(reminders, &identityResolverStub{}, &membershipResolverStub{}, map[string]interfacenotification.NotificationSender{"whatsapp": sender},
+		ReminderSchedulerOptions{Interval: time.Minute, Lease: time.Minute, BatchSize: 10, Activities: counter})
+
+	if err := scheduler.RunOnce(context.Background(), runAt); err != nil {
+		t.Fatalf("run once: %v", err)
+	}
+	local := runAt.In(time.Local)
+	midnight := time.Date(local.Year(), local.Month(), local.Day(), 0, 0, 0, 0, time.Local)
+	if counter.spaceID != "space-1" || !reflect.DeepEqual(counter.kinds, []string{"diaper", "bowel_movement"}) || !counter.from.Equal(midnight) || !counter.to.Equal(runAt) {
+		t.Fatalf("count call = space %q kinds %v from %v to %v", counter.spaceID, counter.kinds, counter.from, counter.to)
+	}
+	if len(sender.messages) != 1 || !strings.Contains(sender.messages[0].message, "\n📊 Hari ini: 6× ganti popok · 0× poop\n") {
+		t.Fatalf("sent messages = %+v", sender.messages)
+	}
+}
+
+func TestReminderSchedulerSendsWithoutSummaryWhenCountFails(t *testing.T) {
+	key := "bath"
+	runAt := time.Date(2026, 10, 26, 14, 4, 0, 0, time.UTC)
+	reminders := &schedulerRepositoryStub{due: []domainreminder.Reminder{{
+		ID: "reminder-1", SpaceID: "space-1", Title: "Mandi", ScheduledAt: runAt, ReplaceKey: &key,
+		DeliveryProvider: "whatsapp", DeliveryTarget: "120363@g.us",
+	}}}
+	sender := &schedulerSenderStub{}
+	counter := &activityCounterStub{err: errors.New("db down")}
+	scheduler := NewReminderScheduler(reminders, &identityResolverStub{}, &membershipResolverStub{}, map[string]interfacenotification.NotificationSender{"whatsapp": sender},
+		ReminderSchedulerOptions{Interval: time.Minute, Lease: time.Minute, BatchSize: 10, Activities: counter})
+
+	if err := scheduler.RunOnce(context.Background(), runAt); err != nil {
+		t.Fatalf("run once: %v", err)
+	}
+	if !reflect.DeepEqual(counter.kinds, []string{"bath"}) {
+		t.Fatalf("kinds = %v, want the key itself", counter.kinds)
+	}
+	if len(sender.messages) != 1 || strings.Contains(sender.messages[0].message, "📊") || len(reminders.sent) != 1 {
+		t.Fatalf("sent messages = %+v, marked sent = %v", sender.messages, reminders.sent)
+	}
+}
+
+func TestReminderSchedulerSkipsSummaryWithoutKey(t *testing.T) {
+	runAt := time.Date(2026, 10, 26, 14, 4, 0, 0, time.UTC)
+	reminders := &schedulerRepositoryStub{due: []domainreminder.Reminder{{
+		ID: "reminder-1", SpaceID: "space-1", Title: "Sisa susu", ScheduledAt: runAt, DeliveryProvider: "whatsapp", DeliveryTarget: "120363@g.us",
+	}}}
+	sender := &schedulerSenderStub{}
+	counter := &activityCounterStub{}
+	scheduler := NewReminderScheduler(reminders, &identityResolverStub{}, &membershipResolverStub{}, map[string]interfacenotification.NotificationSender{"whatsapp": sender},
+		ReminderSchedulerOptions{Interval: time.Minute, Lease: time.Minute, BatchSize: 10, Activities: counter})
+
+	if err := scheduler.RunOnce(context.Background(), runAt); err != nil {
+		t.Fatalf("run once: %v", err)
+	}
+	if counter.calls != 0 || len(sender.messages) != 1 || strings.Contains(sender.messages[0].message, "📊") {
+		t.Fatalf("calls = %d, messages = %+v", counter.calls, sender.messages)
 	}
 }

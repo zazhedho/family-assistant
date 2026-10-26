@@ -65,6 +65,33 @@ func (r *Repository) List(ctx context.Context, filter domainactivity.ListFilter)
 	return activities, nil
 }
 
+// CountByKind counts a Space's activities of the given kinds that occurred
+// within [from, to], keyed by kind. Kinds without activities are absent.
+func (r *Repository) CountByKind(ctx context.Context, spaceID string, kinds []string, from, to time.Time) (map[string]int64, error) {
+	if strings.TrimSpace(spaceID) == "" {
+		return nil, domainactivity.ErrActivitySpaceID
+	}
+	counts := map[string]int64{}
+	if len(kinds) == 0 {
+		return counts, nil
+	}
+	var rows []struct {
+		Kind  string
+		Total int64
+	}
+	if err := r.DB.WithContext(ctx).Model(&domainactivity.Activity{}).
+		Select("kind, COUNT(*) AS total").
+		Where("space_id = ? AND kind IN ? AND occurred_at >= ? AND occurred_at <= ?", strings.TrimSpace(spaceID), kinds, from, to).
+		Group("kind").
+		Scan(&rows).Error; err != nil {
+		return nil, err
+	}
+	for _, row := range rows {
+		counts[row.Kind] = row.Total
+	}
+	return counts, nil
+}
+
 func (r *Repository) FindByIDInSpace(ctx context.Context, spaceID, activityID string) (*domainactivity.Activity, error) {
 	if strings.TrimSpace(spaceID) == "" {
 		return nil, domainactivity.ErrActivitySpaceID
