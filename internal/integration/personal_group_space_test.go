@@ -254,9 +254,10 @@ func setupAdultArchitecture(t *testing.T, httpURL, mcpURL, key string) adultArch
 	memberResult := callMCPTool(t, mcpURL, profile, key, "space_get_members", map[string]any{"space": sharedOne.ID})
 	var memberOutput mcpSpaceMembersOutput
 	decodeStructured(t, memberResult.StructuredOutput, &memberOutput)
-	if memberResult.IsError || len(memberOutput.Members) != 2 || !hasUser(memberOutput.Members, adultOne.UserID) || !hasUser(memberOutput.Members, adultTwo.UserID) {
+	if memberResult.IsError || len(memberOutput.Members) != 2 || !hasUserName(memberOutput.Members, "Adult One") || !hasUserName(memberOutput.Members, "Adult Two") {
 		t.Fatalf("space_get_members = %+v", memberResult)
 	}
+	assertMembersOmitPrivateFields(t, memberResult)
 
 	return adultArchitectureState{
 		adultOne: adultOne, adultTwo: adultTwo, adultTwoSpaces: adultTwoSpaces,
@@ -791,13 +792,32 @@ func hasSpace(memberships []domainspace.ResolvedMembership, id string) bool {
 	return false
 }
 
-func hasUser(memberships []domainspace.ResolvedMembership, id string) bool {
+func hasUserName(memberships []domainspace.ResolvedMembership, name string) bool {
 	for _, membership := range memberships {
-		if membership.UserID == id {
+		if membership.UserName == name {
 			return true
 		}
 	}
 	return false
+}
+
+// assertMembersOmitPrivateFields checks the raw space_get_members JSON never exposes identifiers or contact data.
+func assertMembersOmitPrivateFields(t *testing.T, result mcpWireResult) {
+	t.Helper()
+	var raw struct {
+		Members []map[string]json.RawMessage `json:"members"`
+	}
+	decodeStructured(t, result.StructuredOutput, &raw)
+	if len(raw.Members) == 0 {
+		t.Fatalf("space_get_members returned no members: %+v", result)
+	}
+	for _, member := range raw.Members {
+		for _, key := range []string{"user_id", "user_email", "role_id"} {
+			if _, found := member[key]; found {
+				t.Fatalf("space_get_members member exposes %q: %s", key, result.StructuredOutput)
+			}
+		}
+	}
 }
 
 func hasReminder(reminders []mcpReminderOutput, id string) bool {
