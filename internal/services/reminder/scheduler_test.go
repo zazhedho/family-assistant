@@ -535,6 +535,7 @@ func TestReminderHeadingEdgeCases(t *testing.T) {
 		"*Penting* bayar":         "🔔 *Penting bayar*",
 		"🧷":                       "🔔 *🧷*",
 		"Bayar listrik":           "🔔 *Bayar listrik*",
+		"***":                     "🔔 *Pengingat*",
 	}
 	for title, want := range tests {
 		if got := reminderHeading(title); got != want {

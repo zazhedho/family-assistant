@@ -450,6 +450,9 @@ func reminderMessage(reminder *domainreminder.Reminder, assigneeName, summary st
 // break WhatsApp's bold markers.
 func reminderHeading(title string) string {
 	title = strings.Join(strings.Fields(strings.ReplaceAll(title, "*", "")), " ")
+	if title == "" {
+		title = "Pengingat"
+	}
 	end := len(title)
 	for i, r := range title {
 		if !isEmojiRune(r) {
