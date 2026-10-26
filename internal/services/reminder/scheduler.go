@@ -164,6 +164,10 @@ func (s *ReminderScheduler) RunOnce(ctx context.Context, now time.Time) error {
 				continue
 			}
 			if releaseErr := s.reminders.ReleaseNotificationClaim(ctx, due[i].ID, *due[i].NotificationClaimedAt); releaseErr != nil {
+				if errors.Is(releaseErr, domainreminder.ErrStatusConflict) {
+					logger.WriteLog(logger.LogLevelWarn, fmt.Sprintf("reminder changed before claim release: reminder %s", due[i].ID))
+					continue
+				}
 				failures = append(failures, fmt.Errorf("release reminder %s: %w", due[i].ID, releaseErr))
 			}
 		}
@@ -252,6 +256,10 @@ func (s *ReminderScheduler) deliver(ctx context.Context, reminder *domainreminde
 		return true, errors.New("reminder claim timestamp is missing")
 	}
 	if err := s.reminders.MarkNotificationSent(ctx, reminder.ID, *reminder.NotificationClaimedAt, sentAt); err != nil {
+		if errors.Is(err, domainreminder.ErrStatusConflict) {
+			logger.WriteLog(logger.LogLevelWarn, fmt.Sprintf("reminder changed before delivery completed: reminder %s", reminder.ID))
+			return false, nil
+		}
 		// Keep the claim until its lease expires: the message may already be delivered.
 		return false, fmt.Errorf("mark notification sent: %w", err)
 	}

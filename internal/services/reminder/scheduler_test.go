@@ -22,6 +22,8 @@ type schedulerRepositoryStub struct {
 	sentClaims       []time.Time
 	released         []string
 	releasedClaims   []time.Time
+	markSentErr      error
+	releaseErr       error
 }
 
 func (s *schedulerRepositoryStub) ListPendingForNotification(context.Context) ([]domainreminder.Reminder, error) {
@@ -85,13 +87,13 @@ func (s *dueReminderIndexStub) RemoveMany(_ context.Context, ids []string) error
 func (s *schedulerRepositoryStub) MarkNotificationSent(_ context.Context, reminderID string, claimedAt, _ time.Time) error {
 	s.sent = append(s.sent, reminderID)
 	s.sentClaims = append(s.sentClaims, claimedAt)
-	return nil
+	return s.markSentErr
 }
 
 func (s *schedulerRepositoryStub) ReleaseNotificationClaim(_ context.Context, reminderID string, claimedAt time.Time) error {
 	s.released = append(s.released, reminderID)
 	s.releasedClaims = append(s.releasedClaims, claimedAt)
-	return nil
+	return s.releaseErr
 }
 
 type schedulerSenderStub struct {
@@ -346,5 +348,47 @@ func TestReminderSchedulerFallsBackToCreatorIdentity(t *testing.T) {
 	}
 	if len(sender.messages) != 1 || sender.messages[0].target.Target != "creator@s.whatsapp.net" {
 		t.Fatalf("fallback target = %+v", sender.messages)
+	}
+}
+
+func TestDeliverIgnoresStatusConflictAfterSend(t *testing.T) {
+	reminders := &schedulerRepositoryStub{
+		due:         []domainreminder.Reminder{{ID: "reminder-1", Title: "Replaced", DeliveryProvider: "whatsapp", DeliveryTarget: "chat-1"}},
+		markSentErr: domainreminder.ErrStatusConflict,
+	}
+	sender := &schedulerSenderStub{}
+	scheduler := newScheduler(reminders, sender, &membershipResolverStub{}, &identityResolverStub{})
+
+	if err := scheduler.RunOnce(context.Background(), time.Now().UTC()); err != nil {
+		t.Fatalf("run once: %v", err)
+	}
+	if len(reminders.sent) != 1 || len(sender.messages) != 1 {
+		t.Fatalf("sent = %v, messages = %+v", reminders.sent, sender.messages)
+	}
+	if len(reminders.released) != 0 {
+		t.Fatalf("released = %v, want none", reminders.released)
+	}
+	if reminders.claimCalls != 1 {
+		t.Fatalf("claim calls = %d, want 1", reminders.claimCalls)
+	}
+}
+
+func TestReleaseIgnoresStatusConflict(t *testing.T) {
+	reminders := &schedulerRepositoryStub{
+		due:        []domainreminder.Reminder{{ID: "reminder-1", Title: "Replaced", DeliveryProvider: "whatsapp", DeliveryTarget: "chat-1"}},
+		releaseErr: domainreminder.ErrStatusConflict,
+	}
+	sender := &schedulerSenderStub{failFor: map[string]error{"chat-1": errors.New("bridge down")}}
+	scheduler := newScheduler(reminders, sender, &membershipResolverStub{}, &identityResolverStub{})
+
+	err := scheduler.RunOnce(context.Background(), time.Now().UTC())
+	if err == nil || errors.Is(err, domainreminder.ErrStatusConflict) {
+		t.Fatalf("err = %v, want delivery error without status conflict", err)
+	}
+	if len(reminders.released) != 1 {
+		t.Fatalf("released = %v, want exactly one attempt", reminders.released)
+	}
+	if reminders.claimCalls != 1 {
+		t.Fatalf("claim calls = %d, want 1", reminders.claimCalls)
 	}
 }
