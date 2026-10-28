@@ -890,6 +890,13 @@ Before step 1:
    server {
        listen 172.24.0.1:3011;
        server_name _;
+       # AI scheduled-message generator (Hermes API server); see the generator setup.
+       location /p/scheduled-messages/ {
+           proxy_http_version 1.1;
+           proxy_set_header Host 127.0.0.1:8643;
+           proxy_pass http://127.0.0.1:8643;
+           proxy_read_timeout 45s;
+       }
        location / {
            proxy_http_version 1.1;
            proxy_set_header Host 127.0.0.1:3010;

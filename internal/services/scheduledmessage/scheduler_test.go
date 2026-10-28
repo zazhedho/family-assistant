@@ -1504,6 +1504,8 @@ func TestGenerationFailureReason(t *testing.T) {
 		{name: "generator error", generated: "", err: errors.New("hermes returned HTTP 404"), want: "hermes returned HTTP 404"},
 		{name: "empty output", generated: "", want: "generator returned empty content"},
 		{name: "oversized output", generated: strings.Repeat("a", 11), want: "generator output is 11 bytes, limit 10"},
+		{name: "output at the limit", generated: strings.Repeat("a", 10), want: ""},
+		{name: "error wins over usable output", generated: "Halo", err: errors.New("hermes returned HTTP 500"), want: "hermes returned HTTP 500"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
