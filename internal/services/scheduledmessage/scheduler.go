@@ -3,6 +3,7 @@ package servicescheduledmessage
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"time"
@@ -300,10 +301,26 @@ func (s *ScheduledMessageScheduler) generateContent(
 		return "", schedule, delivery, err
 	}
 	generated = strings.TrimSpace(generated)
-	if generationErr != nil || generated == "" || len(generated) > s.config.MaxOutputBytes {
+	if reason := generationFailureReason(generated, generationErr, s.config.MaxOutputBytes); reason != "" {
+		logger.WriteLog(logger.LogLevelWarn, fmt.Sprintf("scheduled message generation failed: schedule %s delivery %s attempt %d: %s",
+			schedule.ID, delivery.ID, delivery.GenerationAttempts, reason))
 		return "", schedule, delivery, s.retryOrFinish(ctx, schedule, delivery, true)
 	}
 	return s.persistGeneratedContent(ctx, schedule, delivery, generated)
+}
+
+// generationFailureReason says why generated content was rejected, or "" when it
+// is usable. It is for logs, so it never includes the generated text itself.
+func generationFailureReason(generated string, err error, maxBytes int) string {
+	switch {
+	case err != nil:
+		return err.Error()
+	case generated == "":
+		return "generator returned empty content"
+	case len(generated) > maxBytes:
+		return fmt.Sprintf("generator output is %d bytes, limit %d", len(generated), maxBytes)
+	}
+	return ""
 }
 
 func (s *ScheduledMessageScheduler) prepareGeneration(

@@ -378,12 +378,12 @@ The request's `model` value does not select or isolate a profile.
    ```
 
    Merge these settings into the new profile's `config.yaml`. Configure a model
-   available to your provider; this VPS uses `openai-codex` with `gpt-6-luna`:
+   available to your provider; the OCI VPS uses `openai-codex` with `gpt-6.1-sol`:
 
    ```yaml
    model:
      provider: openai-codex
-     default: gpt-6-luna
+     default: gpt-6.1-sol
    platform_toolsets:
      api_server: []
    agent:
@@ -435,8 +435,13 @@ The request's `model` value does not select or isolate a profile.
    key is shared with the backend. Keep the listener key separate from the
    generator key, `MCP_SERVER_KEY`, and the identity HMAC secret.
 
-3. Add this location inside the existing host-only Nginx server on
-   `172.24.0.1:3011`, before its WhatsApp bridge `location /`:
+3. Add this location inside the existing host-only Nginx server that fronts the
+   WhatsApp bridge, before its `location /`. That server listens on the Docker
+   gateway address and bridge proxy port of each target: `172.24.0.1:3011` on
+   `vps-amd64` and `172.17.0.1:2000` on `oci-arm64` (see the Hermes bridge proxy
+   step under the production setup). Without this location, the bridge answers
+   `/p/scheduled-messages/...` with `404 Cannot POST` and every AI schedule fails
+   generation:
 
    ```nginx
    location /p/scheduled-messages/ {
@@ -447,9 +452,9 @@ The request's `model` value does not select or isolate a profile.
    }
    ```
 
-   Preserve the existing `/` proxy to port `3010`. Use the actual Compose gateway
-   address if it differs from `172.24.0.1`. Validate/reload Nginx and restart the
-   multiplexed gateway:
+   Preserve the existing `/` proxy to the bridge (`3010` on `vps-amd64`, `2000` on
+   `oci-arm64`). Use the actual Compose gateway address if it differs. Validate and
+   reload Nginx, then restart the multiplexed gateway:
 
    ```sh
    nginx -t
@@ -500,7 +505,8 @@ The request's `model` value does not select or isolate a profile.
 
    ```dotenv
    SCHEDULED_MESSAGES_ENABLED=false
-   SCHEDULED_MESSAGES_GENERATOR_URL=http://host.docker.internal:3011/p/scheduled-messages/v1/chat/completions
+   # <bridge-proxy-port>: 3011 on vps-amd64, 2000 on oci-arm64
+   SCHEDULED_MESSAGES_GENERATOR_URL=http://host.docker.internal:<bridge-proxy-port>/p/scheduled-messages/v1/chat/completions
    SCHEDULED_MESSAGES_GENERATOR_KEY=<generator-profile-key>
    SCHEDULED_MESSAGES_GENERATOR_MODEL=scheduled-messages
    ```
@@ -514,17 +520,18 @@ The request's `model` value does not select or isolate a profile.
    read -r -s -p 'Generator API key: ' FA_GENERATOR_KEY
    printf '\n'
    export FA_GENERATOR_KEY
-   docker compose exec -T -e FA_GENERATOR_KEY backend sh -c \
+   export FA_BRIDGE_PROXY=http://host.docker.internal:2000  # :3011 on vps-amd64
+   docker compose exec -T -e FA_GENERATOR_KEY -e FA_BRIDGE_PROXY backend sh -c \
      'wget -qO- -T 30 --header "Authorization: Bearer $FA_GENERATOR_KEY" \
-       http://host.docker.internal:3011/p/scheduled-messages/v1/toolsets' \
+       "$FA_BRIDGE_PROXY/p/scheduled-messages/v1/toolsets"' \
      | jq -e '(.data // .) | type == "array" and all(.[]; .enabled != true or (.tools | length) == 0)'
-   time docker compose exec -T -e FA_GENERATOR_KEY backend sh -c \
+   time docker compose exec -T -e FA_GENERATOR_KEY -e FA_BRIDGE_PROXY backend sh -c \
      'wget -qO- -T 30 --header "Authorization: Bearer $FA_GENERATOR_KEY" \
        --header "Content-Type: application/json" \
        --post-data '\''{"model":"scheduled-messages","messages":[{"role":"user","content":"Write one short, friendly greeting. Return only the greeting."}],"stream":false}'\'' \
-       http://host.docker.internal:3011/p/scheduled-messages/v1/chat/completions' \
+       "$FA_BRIDGE_PROXY/p/scheduled-messages/v1/chat/completions"' \
      | jq -e '.choices[0] | .finish_reason == "stop" and (.message.content | type == "string" and length > 0) and ((.message.tool_calls // []) | length == 0)'
-   unset FA_GENERATOR_KEY
+   unset FA_GENERATOR_KEY FA_BRIDGE_PROXY
    ```
 
    Both checks must return `true`. The generation request must finish within
@@ -550,6 +557,26 @@ The request's `model` value does not select or isolate a profile.
    the connection test.
    To disable the lane, set the flag back to `false` and recreate the backend;
    retain migration 12 and its history tables.
+
+**Troubleshooting AI scheduled messages.** An AI schedule whose deliveries end
+`SKIPPED` with `failure_category = generation_failed` (generation attempts at the
+retry limit, zero delivery attempts) never got content from the generator; fixed
+text schedules are unaffected. The backend logs the cause on each attempt as
+`scheduled message generation failed: schedule <id> delivery <id> attempt <n>: <reason>`:
+
+- `hermes returned HTTP 404`: the Nginx bridge proxy has no
+  `/p/scheduled-messages/` location, so the WhatsApp bridge answers
+  `Cannot POST`, or the Hermes API server is not running
+  (`ss -ltn 'sport = :8643'` must show `127.0.0.1:8643`).
+- `hermes returned HTTP 401`: the scheduled-messages profile's `API_SERVER_KEY`
+  differs from `SCHEDULED_MESSAGES_GENERATOR_KEY`.
+- `hermes request failed`: the proxy is unreachable from the container or the
+  request exceeded `SCHEDULED_MESSAGES_GENERATOR_TIMEOUT`.
+
+The API server keys, the default profile's `api_server: []` toolset entry, and
+the Nginx location live on the host and are never created or copied by a
+deployment. When moving to a new server, repeat generator setup steps 1–5 and
+their verification before enabling AI schedules.
 
 The standalone `family_assistant_identity` plugin is updated separately from the
 backend image. Follow the plugin update flow below when its files change, then
@@ -890,6 +917,13 @@ Before step 1:
    server {
        listen 172.17.0.1:2000;
        server_name _;
+       # AI scheduled-message generator (Hermes API server); see the generator setup.
+       location /p/scheduled-messages/ {
+           proxy_http_version 1.1;
+           proxy_set_header Host 127.0.0.1:8643;
+           proxy_pass http://127.0.0.1:8643;
+           proxy_read_timeout 45s;
+       }
        location / {
            proxy_http_version 1.1;
            proxy_set_header Host 127.0.0.1:2000;

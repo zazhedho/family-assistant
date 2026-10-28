@@ -1492,3 +1492,24 @@ var _ interfacescheduledmessage.SchedulerRepository = (*memoryScheduledRepositor
 var _ interfacescheduledmessage.DueIndex = (*testDueIndex)(nil)
 var _ interfacescheduledmessage.Generator = (*testGenerator)(nil)
 var _ interfacenotification.NotificationSender = (*testSender)(nil)
+
+func TestGenerationFailureReason(t *testing.T) {
+	tests := []struct {
+		name      string
+		generated string
+		err       error
+		want      string
+	}{
+		{name: "accepted output", generated: "Halo", want: ""},
+		{name: "generator error", generated: "", err: errors.New("hermes returned HTTP 404"), want: "hermes returned HTTP 404"},
+		{name: "empty output", generated: "", want: "generator returned empty content"},
+		{name: "oversized output", generated: strings.Repeat("a", 11), want: "generator output is 11 bytes, limit 10"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := generationFailureReason(tt.generated, tt.err, 10); got != tt.want {
+				t.Fatalf("reason = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
