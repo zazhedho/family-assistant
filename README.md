@@ -436,12 +436,10 @@ The request's `model` value does not select or isolate a profile.
    generator key, `MCP_SERVER_KEY`, and the identity HMAC secret.
 
 3. Add this location inside the existing host-only Nginx server that fronts the
-   WhatsApp bridge, before its `location /`. That server listens on the Docker
-   gateway address and bridge proxy port of each target: `172.24.0.1:3011` on
-   `vps-amd64` and `172.17.0.1:2000` on `oci-arm64` (see the Hermes bridge proxy
-   step under the production setup). Without this location, the bridge answers
-   `/p/scheduled-messages/...` with `404 Cannot POST` and every AI schedule fails
-   generation:
+   WhatsApp bridge (for example `172.17.0.1:2000`; see the Hermes bridge proxy
+   step under the production setup), before its `location /`. Without this
+   location, the bridge answers `/p/scheduled-messages/...` with
+   `404 Cannot POST` and every AI schedule fails generation:
 
    ```nginx
    location /p/scheduled-messages/ {
@@ -452,9 +450,9 @@ The request's `model` value does not select or isolate a profile.
    }
    ```
 
-   Preserve the existing `/` proxy to the bridge (`3010` on `vps-amd64`, `2000` on
-   `oci-arm64`). Use the actual Compose gateway address if it differs. Validate and
-   reload Nginx, then restart the multiplexed gateway:
+   Preserve the existing `/` proxy to the bridge. Use your actual Docker gateway
+   address and port if they differ. Validate and reload Nginx, then restart the
+   multiplexed gateway:
 
    ```sh
    nginx -t
@@ -505,8 +503,7 @@ The request's `model` value does not select or isolate a profile.
 
    ```dotenv
    SCHEDULED_MESSAGES_ENABLED=false
-   # <bridge-proxy-port>: 3011 on vps-amd64, 2000 on oci-arm64
-   SCHEDULED_MESSAGES_GENERATOR_URL=http://host.docker.internal:<bridge-proxy-port>/p/scheduled-messages/v1/chat/completions
+   SCHEDULED_MESSAGES_GENERATOR_URL=http://host.docker.internal:2000/p/scheduled-messages/v1/chat/completions
    SCHEDULED_MESSAGES_GENERATOR_KEY=<generator-profile-key>
    SCHEDULED_MESSAGES_GENERATOR_MODEL=scheduled-messages
    ```
@@ -520,7 +517,7 @@ The request's `model` value does not select or isolate a profile.
    read -r -s -p 'Generator API key: ' FA_GENERATOR_KEY
    printf '\n'
    export FA_GENERATOR_KEY
-   export FA_BRIDGE_PROXY=http://host.docker.internal:2000  # :3011 on vps-amd64
+   export FA_BRIDGE_PROXY=http://host.docker.internal:2000
    docker compose exec -T -e FA_GENERATOR_KEY -e FA_BRIDGE_PROXY backend sh -c \
      'wget -qO- -T 30 --header "Authorization: Bearer $FA_GENERATOR_KEY" \
        "$FA_BRIDGE_PROXY/p/scheduled-messages/v1/toolsets"' \
