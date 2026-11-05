@@ -12,6 +12,7 @@ CREATE TABLE IF NOT EXISTS space_activities (
     subject VARCHAR(128),
     CONSTRAINT ck_space_activities_details_object CHECK (jsonb_typeof(details) = 'object'),
     CONSTRAINT ck_space_activities_details_size CHECK (octet_length(details::text) <= 4096),
+    -- volume_ml must be positive; leftover_ml and expired_ml may be 0.
     CONSTRAINT ck_space_activities_feeding_details CHECK (
         CASE WHEN kind <> 'feeding' THEN TRUE ELSE (
             CASE
