@@ -26,6 +26,12 @@ type activityRepositoryStub struct {
 	update   domainactivity.UpdateFields
 	updateID string
 	deleteID string
+
+	reportCalls  int
+	reportReq    domainactivity.FeedingReportRequest
+	reportTarget *domainactivity.Activity
+	reportResult *domainactivity.FeedingReportResult
+	reportErr    error
 }
 
 func (s *activityRepositoryStub) Create(_ context.Context, activity *domainactivity.Activity) error {
@@ -57,8 +63,19 @@ func (s *activityRepositoryStub) SoftDelete(_ context.Context, _, activityID str
 	return nil
 }
 
-func (s *activityRepositoryStub) ReportFeeding(context.Context, domainactivity.FeedingReportRequest) (*domainactivity.FeedingReportResult, error) {
-	return nil, errors.New("activity repository stub: ReportFeeding not configured")
+func (s *activityRepositoryStub) ReportFeeding(_ context.Context, req domainactivity.FeedingReportRequest) (*domainactivity.FeedingReportResult, error) {
+	s.reportCalls++
+	s.reportReq = req
+	if s.reportErr != nil {
+		return nil, s.reportErr
+	}
+	if s.reportTarget != nil && req.CanMutate != nil && !req.CanMutate(s.reportTarget) {
+		return nil, domainactivity.ErrFeedingForbidden
+	}
+	if s.reportResult == nil {
+		return nil, errors.New("activity repository stub: ReportFeeding not configured")
+	}
+	return s.reportResult, nil
 }
 
 type activitySpaceRepositoryStub struct {

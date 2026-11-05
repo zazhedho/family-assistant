@@ -37,6 +37,17 @@ type mcpActivityServiceStub struct {
 	deleteID    string
 	deleteCalls int
 	deleteErr   error
+	reportActor domainidentity.ActorContext
+	reportInput dto.FeedingLeftoverInput
+	reportCalls int
+	reported    *domainactivity.FeedingReportResult
+	reportErr   error
+}
+
+func (s *mcpActivityServiceStub) ReportFeedingLeftover(_ context.Context, actor domainidentity.ActorContext, input dto.FeedingLeftoverInput) (*domainactivity.FeedingReportResult, error) {
+	s.reportCalls++
+	s.reportActor, s.reportInput = actor, input
+	return s.reported, s.reportErr
 }
 
 func (s *mcpActivityServiceStub) Create(_ context.Context, actor domainidentity.ActorContext, input dto.ActivityCreateInput) (*domainactivity.Activity, error) {

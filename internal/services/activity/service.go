@@ -58,14 +58,20 @@ func (s *service) Create(ctx context.Context, actor domainidentity.ActorContext,
 		}
 	}()
 
-	if strings.TrimSpace(input.Kind) == "" {
+	kind := domainactivity.NormalizeKind(input.Kind)
+	if kind == "" {
 		return nil, &serviceauthorization.ValidationError{Field: "kind", Reason: requiredReason}
 	}
-	if strings.TrimSpace(input.Note) == "" {
-		return nil, &serviceauthorization.ValidationError{Field: "note", Reason: requiredReason}
+	subject, err := normalizeSubject(input.Subject)
+	if err != nil {
+		return nil, err
 	}
 	if input.OccurredAt.IsZero() {
 		return nil, &serviceauthorization.ValidationError{Field: "occurred_at", Reason: requiredReason}
+	}
+	details, note, err := createDetails(kind, subject, input.Details, input.Note, input.OccurredAt.UTC())
+	if err != nil {
+		return nil, err
 	}
 	if s.authorize == nil || s.spaces == nil || s.activities == nil {
 		return nil, errors.New("activity service is not configured")
@@ -82,8 +88,10 @@ func (s *service) Create(ctx context.Context, actor domainidentity.ActorContext,
 		ID:                utils.CreateUUID(),
 		SpaceID:           spaceID,
 		CreatedByMemberID: strings.TrimSpace(actor.MemberID),
-		Kind:              strings.TrimSpace(input.Kind),
-		Note:              strings.TrimSpace(input.Note),
+		Kind:              kind,
+		Subject:           subject,
+		Note:              note,
+		Details:           details,
 		OccurredAt:        input.OccurredAt.UTC(),
 		CreatedAt:         now,
 		UpdatedAt:         now,
@@ -128,7 +136,7 @@ func (s *service) List(ctx context.Context, actor domainidentity.ActorContext, i
 		return nil, serviceauthorization.ErrNotFound
 	}
 	activities, err = s.activities.List(ctx, domainactivity.ListFilter{
-		SpaceID: spaceID, Kind: strings.TrimSpace(input.Kind), Search: strings.TrimSpace(input.Search), From: input.From, To: input.To, Limit: limit,
+		SpaceID: spaceID, Kind: domainactivity.NormalizeKind(input.Kind), Search: strings.TrimSpace(input.Search), From: input.From, To: input.To, Limit: limit,
 	})
 	if err != nil {
 		return nil, err
@@ -182,6 +190,10 @@ func (s *service) Update(ctx context.Context, actor domainidentity.ActorContext,
 	if err != nil {
 		return nil, err
 	}
+	merged, err := prepareDetailsUpdate(activity, &fields)
+	if err != nil {
+		return nil, err
+	}
 	now := time.Now().UTC()
 	if err := s.activities.Update(ctx, spaceID, activityID, fields, now); err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -190,6 +202,7 @@ func (s *service) Update(ctx context.Context, actor domainidentity.ActorContext,
 		return nil, err
 	}
 	applyActivityUpdate(activity, fields, now)
+	activity.Details = merged
 	result = activity
 	s.writeAudit(ctx, activityAuditEvent(actor, domainaudit.ActionUpdate, spaceID, activity.ID, domainaudit.StatusSuccess))
 	return result, nil
@@ -253,11 +266,24 @@ func (s *service) Delete(ctx context.Context, actor domainidentity.ActorContext,
 func activityUpdateFields(input dto.ActivityUpdateInput) (domainactivity.UpdateFields, error) {
 	fields := domainactivity.UpdateFields{}
 	if input.Kind != nil {
-		kind := strings.TrimSpace(*input.Kind)
+		kind := domainactivity.NormalizeKind(*input.Kind)
 		if kind == "" {
 			return fields, &serviceauthorization.ValidationError{Field: "kind", Reason: requiredReason}
 		}
 		fields.Kind = &kind
+	}
+	if input.Subject != nil {
+		subject, err := normalizeSubject(*input.Subject)
+		if err != nil {
+			return fields, err
+		}
+		fields.Subject = &subject
+	}
+	if len(input.Details) > 0 {
+		fields.DetailsPatch = make(domainactivity.Details, len(input.Details))
+		for key, value := range input.Details {
+			fields.DetailsPatch[key] = value
+		}
 	}
 	if input.Note != nil {
 		note := strings.TrimSpace(*input.Note)
@@ -273,7 +299,7 @@ func activityUpdateFields(input dto.ActivityUpdateInput) (domainactivity.UpdateF
 		occurredAt := input.OccurredAt.UTC()
 		fields.OccurredAt = &occurredAt
 	}
-	if fields.Kind == nil && fields.Note == nil && fields.OccurredAt == nil {
+	if fields.Kind == nil && fields.Subject == nil && fields.Note == nil && fields.OccurredAt == nil && len(fields.DetailsPatch) == 0 {
 		return fields, &serviceauthorization.ValidationError{Field: "update", Reason: "at least one field is required"}
 	}
 	return fields, nil
@@ -282,6 +308,9 @@ func activityUpdateFields(input dto.ActivityUpdateInput) (domainactivity.UpdateF
 func applyActivityUpdate(activity *domainactivity.Activity, fields domainactivity.UpdateFields, updatedAt time.Time) {
 	if fields.Kind != nil {
 		activity.Kind = *fields.Kind
+	}
+	if fields.Subject != nil {
+		activity.Subject = *fields.Subject
 	}
 	if fields.Note != nil {
 		activity.Note = *fields.Note
@@ -373,8 +402,11 @@ func auditSource(source string) string {
 
 func failureCategory(err error) string {
 	var validationErr *serviceauthorization.ValidationError
+	var targetErr *domainactivity.FeedingTargetError
+	var detailsErr *domainactivity.DetailsError
 	switch {
-	case errors.As(err, &validationErr), errors.Is(err, serviceauthorization.ErrInvalidResource):
+	case errors.As(err, &validationErr), errors.Is(err, serviceauthorization.ErrInvalidResource),
+		errors.As(err, &targetErr), errors.As(err, &detailsErr):
 		return "validation"
 	case errors.Is(err, serviceauthorization.ErrForbidden):
 		return "forbidden"

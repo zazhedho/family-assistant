@@ -13,4 +13,5 @@ type ServiceActivityInterface interface {
 	List(context.Context, domainidentity.ActorContext, dto.ActivityListInput) ([]domainactivity.Activity, error)
 	Update(context.Context, domainidentity.ActorContext, string, string, dto.ActivityUpdateInput) (*domainactivity.Activity, error)
 	Delete(context.Context, domainidentity.ActorContext, string, string) (*domainactivity.Activity, error)
+	ReportFeedingLeftover(context.Context, domainidentity.ActorContext, dto.FeedingLeftoverInput) (*domainactivity.FeedingReportResult, error)
 }
