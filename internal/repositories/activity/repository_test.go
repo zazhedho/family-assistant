@@ -52,8 +52,8 @@ func TestCreatePersistsActivity(t *testing.T) {
 	repo := NewRepository(db)
 	activity := activityFixture()
 
-	mock.ExpectExec(regexp.QuoteMeta(insertActivitySQL)).
-		WithArgs(activity.ID, activity.SpaceID, activity.CreatedByMemberID, activity.Kind, "", activity.Note, "{}", activity.OccurredAt, activity.CreatedAt, activity.UpdatedAt).
+	mock.ExpectExec(regexp.QuoteMeta(insertActivityNullSubjectSQL)).
+		WithArgs(activity.ID, activity.SpaceID, activity.CreatedByMemberID, activity.Kind, activity.Note, "{}", activity.OccurredAt, activity.CreatedAt, activity.UpdatedAt).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 
 	if err := repo.Create(context.Background(), activity); err != nil {
@@ -65,6 +65,10 @@ func TestCreatePersistsActivity(t *testing.T) {
 }
 
 const insertActivitySQL = `INSERT INTO "space_activities" ("id","space_id","created_by_member_id","kind","subject","note","details","occurred_at","created_at","updated_at") VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`
+
+// An empty subject is left out of the insert so it is stored as NULL, like
+// rows written before subjects existed.
+const insertActivityNullSubjectSQL = `INSERT INTO "space_activities" ("id","space_id","created_by_member_id","kind","note","details","occurred_at","created_at","updated_at") VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`
 
 func TestCreatePersistsDetailsAndSubject(t *testing.T) {
 	db, mock := newActivityMockDB(t)
@@ -88,8 +92,8 @@ func TestCreatePersistsDetailsAndSubject(t *testing.T) {
 func TestCreateDefaultsNilDetailsToEmptyObject(t *testing.T) {
 	db, mock := newActivityMockDB(t)
 	activity := activityFixture()
-	mock.ExpectExec(regexp.QuoteMeta(insertActivitySQL)).
-		WithArgs(activity.ID, activity.SpaceID, activity.CreatedByMemberID, activity.Kind, "", activity.Note, "{}", activity.OccurredAt, activity.CreatedAt, activity.UpdatedAt).
+	mock.ExpectExec(regexp.QuoteMeta(insertActivityNullSubjectSQL)).
+		WithArgs(activity.ID, activity.SpaceID, activity.CreatedByMemberID, activity.Kind, activity.Note, "{}", activity.OccurredAt, activity.CreatedAt, activity.UpdatedAt).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	if err := NewRepository(db).Create(context.Background(), activity); err != nil {
 		t.Fatalf("create activity: %v", err)
@@ -203,6 +207,21 @@ func TestUpdateMergesDetailsPatchAtomically(t *testing.T) {
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	err := NewRepository(db).Update(context.Background(), spaceID, activityID, domainactivity.UpdateFields{Subject: &subject, DetailsPatch: patch}, now)
 	if err != nil {
+		t.Fatalf("update activity: %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("sql expectations: %v", err)
+	}
+}
+
+func TestUpdateBlankSubjectStoresNull(t *testing.T) {
+	db, mock := newActivityMockDB(t)
+	now := time.Date(2026, 11, 5, 9, 0, 0, 0, time.UTC)
+	blank := "  "
+	mock.ExpectExec(regexp.QuoteMeta(`UPDATE "space_activities" SET "subject"=NULL,"updated_at"=$1 WHERE (id = $2 AND space_id = $3)`)).
+		WithArgs(now, activityID, spaceID).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	if err := NewRepository(db).Update(context.Background(), spaceID, activityID, domainactivity.UpdateFields{Subject: &blank}, now); err != nil {
 		t.Fatalf("update activity: %v", err)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {

@@ -67,8 +67,12 @@ func ActivityCreate(ctx context.Context, resolver interfaceidentity.Resolver, se
 	if service == nil {
 		return nil, MapToolError(errors.New("activity service is not configured"))
 	}
+	var messageAt time.Time
+	if request, ok := ExternalRequestFromContext(ctx); ok {
+		messageAt = request.MessageAt
+	}
 	created, err := service.Create(ctx, actor, dto.ActivityCreateInput{
-		Space: actor.SpaceID, Kind: input.Kind, Subject: input.Subject, Note: input.Note, Details: input.Details, OccurredAt: *occurredAt,
+		Space: actor.SpaceID, Kind: input.Kind, Subject: input.Subject, Note: input.Note, Details: input.Details, OccurredAt: *occurredAt, MessageAt: messageAt,
 	})
 	if err != nil {
 		return nil, MapToolError(err)
@@ -142,7 +146,7 @@ type FeedingLeftoverReportInput struct {
 	Space       string `json:"space,omitempty" jsonschema:"Space UUID or exact user-facing name; blank selects Personal Space in a private chat or the bound Space in a group or other shared chat"`
 	FeedingID   string `json:"feeding_id,omitempty" jsonschema:"feeding activity UUID; use after an ambiguous_feeding or no_feeding_match error once the user has said which feeding"`
 	FeedingTime string `json:"feeding_time,omitempty" jsonschema:"RFC3339 time of the feeding being reported. Pass whenever the user or the quoted message gives a time. Omit only to target the open feedings of the last 3 hours"`
-	LeftoverML  *int   `json:"leftover_ml,omitempty" jsonschema:"milliliters remaining. Records the amount only; the feeding stays open. Give leftover_ml or outcome, at least one"`
+	LeftoverML  *int   `json:"leftover_ml,omitempty" jsonschema:"milliliters remaining. Without outcome it (re)opens the feeding: an earlier finished/expired outcome and expired_ml are cleared. Give leftover_ml or outcome, at least one"`
 	ExpiredML   *int   `json:"expired_ml,omitempty" jsonschema:"milliliters thrown away as expired. Required with outcome expired unless already stored; only valid with outcome expired (with finished it must be 0 or omitted)"`
 	Outcome     string `json:"outcome,omitempty" jsonschema:"finished = everything was drunk (expired_ml becomes 0). expired = milk was thrown away; needs expired_ml"`
 }
@@ -255,7 +259,7 @@ func registerActivityTools(server *mcpsdk.Server, resolver interfaceidentity.Res
 		return ActivityUpdate(ctx, resolver, service, input)
 	})
 	addTool(server, &mcpsdk.Tool{
-		Name: "feeding_leftover_report", Description: "The ONLY way to record leftover, finished or expired milk for an existing feeding; activity_update cannot. Pass feeding_time whenever the user or the quoted message gives a time. Give leftover_ml or outcome (at least one). leftover_ml records the remaining amount and keeps the feeding open; outcome=finished means everything was drunk; outcome=expired needs expired_ml. A repeat report overwrites earlier values. Without feeding_id or feeding_time the open feedings of the last 3 hours are targeted. On ambiguous_feeding or no_feeding_match, ask the user which feeding they mean, then call again with feeding_id. corrected=true means a value from an earlier report was changed or removed (not a first value or a follow-up such as finished after a leftover).",
+		Name: "feeding_leftover_report", Description: "The ONLY way to record leftover, finished or expired milk for an existing feeding; activity_update cannot. Pass feeding_time whenever the user or the quoted message gives a time. Give leftover_ml or outcome (at least one). leftover_ml without outcome records the remaining amount and leaves the feeding open (clearing an earlier finished/expired outcome); outcome=finished means everything was drunk; outcome=expired needs expired_ml. A repeat report overwrites earlier values. Without feeding_id or feeding_time the open feedings of the last 3 hours are targeted. On ambiguous_feeding or no_feeding_match, ask the user which feeding they mean, then call again with feeding_id. corrected=true means a value from an earlier report was changed or removed (not a first value or a follow-up such as finished after a leftover).",
 	}, func(ctx context.Context, input FeedingLeftoverReportInput) (FeedingLeftoverReportOutput, error) {
 		return FeedingLeftoverReport(ctx, resolver, service, input)
 	})

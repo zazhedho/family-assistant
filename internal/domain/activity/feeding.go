@@ -125,8 +125,10 @@ func SelectFeeding(feedings []Activity, sel FeedingSelector) (*Activity, error) 
 	return pick(matches, feedings)
 }
 
-// ApplyFeedingReport merges a report into feeding details. It returns changed=false
-// (and the unchanged details) when the report matches the stored state.
+// ApplyFeedingReport merges a report into feeding details. A leftover-only
+// report reopens the feeding (removes outcome and expired_ml). It returns
+// changed=false (and the unchanged details) when the report matches the
+// stored state.
 func ApplyFeedingReport(current Details, report FeedingReport, reportedAt time.Time) (Details, bool, error) {
 	if report.LeftoverML == nil && report.Outcome == "" {
 		return nil, false, detailsErr("report", "leftover_ml or outcome is required")
@@ -140,24 +142,26 @@ func ApplyFeedingReport(current Details, report FeedingReport, reportedAt time.T
 		}
 	}
 	next := ApplyDetailsPatch(current, nil)
-
-	outcome := report.Outcome
-	if outcome == "" {
-		outcome, _ = current["outcome"].(string)
-	}
 	if report.LeftoverML != nil {
 		next["leftover_ml"] = *report.LeftoverML
 	}
-	if report.Outcome != "" {
-		next["outcome"] = report.Outcome
-	}
-	switch {
-	case outcome == OutcomeFinished:
+	switch report.Outcome {
+	case "":
+		// A leftover-only report reopens the feeding: corrections overwrite,
+		// so an earlier outcome and its expired amount are cleared.
+		if report.ExpiredML != nil {
+			return nil, false, detailsErr("expired_ml", "requires outcome expired")
+		}
+		delete(next, "outcome")
+		delete(next, "expired_ml")
+	case OutcomeFinished:
 		if report.ExpiredML != nil && *report.ExpiredML != 0 {
 			return nil, false, detailsErr("expired_ml", "must be 0 when outcome is finished")
 		}
+		next["outcome"] = OutcomeFinished
 		next["expired_ml"] = 0
-	case outcome == OutcomeExpired:
+	case OutcomeExpired:
+		next["outcome"] = OutcomeExpired
 		if report.ExpiredML != nil {
 			next["expired_ml"] = *report.ExpiredML
 		} else {
@@ -168,8 +172,6 @@ func ApplyFeedingReport(current Details, report FeedingReport, reportedAt time.T
 			}
 			next["expired_ml"] = stored
 		}
-	case report.ExpiredML != nil:
-		return nil, false, detailsErr("expired_ml", "requires outcome expired")
 	}
 
 	if err := validateFeeding(next); err != nil {

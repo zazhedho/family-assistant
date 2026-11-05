@@ -622,3 +622,21 @@ func TestUpdateFeedingRegeneratesOnlyGeneratedNotes(t *testing.T) {
 		}
 	})
 }
+
+func TestCreateFeedingStampsReportWithMessageTime(t *testing.T) {
+	messageAt := time.Date(2026, 11, 5, 10, 0, 0, 0, time.UTC)
+	occurredAt := messageAt.Add(-2 * time.Hour)
+	repo, spaces, audit := ownerSetup(nil)
+	service := activityService(repo, spaces, audit)
+	if _, err := service.Create(context.Background(), ownerActor("activities:create"), dto.ActivityCreateInput{
+		Kind: "feeding", OccurredAt: occurredAt, MessageAt: messageAt, Details: map[string]any{"volume_ml": 60, "leftover_ml": 20},
+	}); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if got := repo.created.Details["leftover_reported_at"]; got != messageAt.Format(time.RFC3339) {
+		t.Fatalf("leftover_reported_at = %v, want message time %s", got, messageAt.Format(time.RFC3339))
+	}
+	if !repo.created.OccurredAt.Equal(occurredAt) {
+		t.Fatalf("occurred_at = %v, want %v", repo.created.OccurredAt, occurredAt)
+	}
+}

@@ -137,6 +137,10 @@ func TestActivityCreateUsesMessageTimeOnlyWhenEventTimeOmitted(t *testing.T) {
 			if err != nil || service.createCalls != 1 || !service.createInput.OccurredAt.Equal(scenario.want) {
 				t.Fatalf("occurred_at = %s, want %s; error = %v", service.createInput.OccurredAt, scenario.want, err)
 			}
+			// The trusted message time is passed on even when the event time is explicit.
+			if !service.createInput.MessageAt.Equal(scenario.messageAt) {
+				t.Fatalf("message_at = %s, want %s", service.createInput.MessageAt, scenario.messageAt)
+			}
 		})
 	}
 }

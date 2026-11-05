@@ -9,6 +9,9 @@ type ActivityCreateInput struct {
 	Note       string
 	Details    map[string]any
 	OccurredAt time.Time
+	// MessageAt is the trusted time of the request message. It stamps a
+	// feeding report sent with the create; zero falls back to OccurredAt.
+	MessageAt time.Time
 }
 
 type ActivityListInput struct {

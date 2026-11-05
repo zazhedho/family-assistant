@@ -39,9 +39,13 @@ func (r *Repository) Create(ctx context.Context, activity *domainactivity.Activi
 	if activity.Details == nil {
 		activity.Details = domainactivity.Details{}
 	}
-	return r.DB.WithContext(ctx).
-		Select("id", "space_id", "created_by_member_id", "kind", "subject", "note", "details", "occurred_at", "created_at", "updated_at").
-		Create(activity).Error
+	columns := []string{"id", "space_id", "created_by_member_id", "kind", "subject", "note", "details", "occurred_at", "created_at", "updated_at"}
+	if strings.TrimSpace(activity.Subject) == "" {
+		// No subject is stored as NULL, like rows written before subjects existed.
+		activity.Subject = ""
+		columns = append(columns[:4], columns[5:]...)
+	}
+	return r.DB.WithContext(ctx).Select(columns).Create(activity).Error
 }
 
 func (r *Repository) List(ctx context.Context, filter domainactivity.ListFilter) ([]domainactivity.Activity, error) {
@@ -126,7 +130,11 @@ func (r *Repository) Update(ctx context.Context, spaceID, activityID string, fie
 		updates["kind"] = strings.TrimSpace(*fields.Kind)
 	}
 	if fields.Subject != nil {
-		updates["subject"] = strings.TrimSpace(*fields.Subject)
+		if subject := strings.TrimSpace(*fields.Subject); subject != "" {
+			updates["subject"] = subject
+		} else {
+			updates["subject"] = gorm.Expr("NULL")
+		}
 	}
 	if fields.Note != nil {
 		updates["note"] = strings.TrimSpace(*fields.Note)

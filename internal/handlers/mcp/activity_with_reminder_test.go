@@ -107,6 +107,9 @@ func TestActivityCreateWithReminderUsesSignedMessageTimeAcrossMidnight(t *testin
 	if !activityService.createInput.OccurredAt.Equal(messageAt) || !reminderService.createInput.ScheduledAt.Equal(messageAt.Add(4*time.Hour)) {
 		t.Fatalf("activity = %s, reminder = %s, message = %s", activityService.createInput.OccurredAt, reminderService.createInput.ScheduledAt, messageAt)
 	}
+	if !activityService.createInput.MessageAt.Equal(messageAt) {
+		t.Fatalf("activity message_at = %s, want %s", activityService.createInput.MessageAt, messageAt)
+	}
 }
 
 func TestActivityCreateWithReminderRejectsInvalidSchedulingBeforeWrites(t *testing.T) {

@@ -23,8 +23,8 @@ func init() { registerKindHooks("feeding", feedingCreate, feedingUpdate) }
 
 // feedingCreate: a feeding with volume_ml gets a generated note; its
 // leftover_ml/outcome/expired_ml go through the feeding report rules and are
-// stamped with the message time.
-func feedingCreate(subject string, details domainactivity.Details, messageAt time.Time, validate func() error) (domainactivity.Details, string, error) {
+// stamped with reportedAt (the trusted message time).
+func feedingCreate(subject string, details domainactivity.Details, reportedAt time.Time, validate func() error) (domainactivity.Details, string, error) {
 	if _, ok := details["leftover_reported_at"]; ok {
 		return nil, "", &serviceauthorization.ValidationError{Field: "details.leftover_reported_at", Reason: "is set by the server"}
 	}
@@ -35,7 +35,7 @@ func feedingCreate(subject string, details domainactivity.Details, messageAt tim
 	_, hasVolume := details["volume_ml"]
 	switch {
 	case hasVolume && hasReport:
-		next, _, err := domainactivity.ApplyFeedingReport(base, report, messageAt)
+		next, _, err := domainactivity.ApplyFeedingReport(base, report, reportedAt)
 		if err != nil {
 			return nil, "", detailsValidationError(err, "details.")
 		}

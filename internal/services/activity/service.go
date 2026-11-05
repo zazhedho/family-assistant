@@ -69,7 +69,13 @@ func (s *service) Create(ctx context.Context, actor domainidentity.ActorContext,
 	if input.OccurredAt.IsZero() {
 		return nil, &serviceauthorization.ValidationError{Field: "occurred_at", Reason: requiredReason}
 	}
-	details, note, err := createDetails(kind, subject, input.Details, input.Note, input.OccurredAt.UTC())
+	// A report sent with the create is stamped with the trusted message time,
+	// not the (possibly earlier) event time the client chose.
+	reportedAt := input.MessageAt
+	if reportedAt.IsZero() {
+		reportedAt = input.OccurredAt
+	}
+	details, note, err := createDetails(kind, subject, input.Details, input.Note, reportedAt.UTC())
 	if err != nil {
 		return nil, err
 	}

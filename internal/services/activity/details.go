@@ -42,7 +42,7 @@ func detailsValidationError(err error, prefix string) error {
 // createHook adjusts the details of a new activity of one kind. It must call
 // validate at the point the generic validation should run, and returns the
 // details to store plus a generated note ("" keeps the caller's note).
-type createHook func(subject string, details domainactivity.Details, messageAt time.Time, validate func() error) (domainactivity.Details, string, error)
+type createHook func(subject string, details domainactivity.Details, reportedAt time.Time, validate func() error) (domainactivity.Details, string, error)
 
 // updateHook guards an update of one kind. stored is the normalized kind of
 // the stored activity. It must call validate at the point the generic
@@ -78,7 +78,7 @@ func registerKindHooks(kind string, create createHook, update updateHook) {
 
 // createDetails validates the details of a new activity and returns them with
 // the note to store. A kind hook may generate the note and rewrite details.
-func createDetails(kind, subject string, raw map[string]any, note string, messageAt time.Time) (domainactivity.Details, string, error) {
+func createDetails(kind, subject string, raw map[string]any, note string, reportedAt time.Time) (domainactivity.Details, string, error) {
 	details := domainactivity.ApplyDetailsPatch(nil, domainactivity.Details(raw))
 	validate := func() error {
 		if err := domainactivity.ValidateDetails(kind, details); err != nil {
@@ -87,7 +87,7 @@ func createDetails(kind, subject string, raw map[string]any, note string, messag
 		return nil
 	}
 	if hook := createHooks[kind]; hook != nil {
-		next, generated, err := hook(subject, details, messageAt, validate)
+		next, generated, err := hook(subject, details, reportedAt, validate)
 		if err != nil {
 			return nil, "", err
 		}

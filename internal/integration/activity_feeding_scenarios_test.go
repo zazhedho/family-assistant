@@ -171,7 +171,7 @@ func TestFeedingLeftoverScenarios(t *testing.T) {
 		}
 		assertSame(t, early.ID, beforeEarly)
 
-		// A named feeding time resolves to 21:30 as well (a repeat of the same report changes nothing).
+		// A named feeding time resolves to 21:30 as well; this later report corrects the leftover from 20 to 15.
 		res, err = svc.ReportFeedingLeftover(ctx, s.owner.actor, dto.FeedingLeftoverInput{Space: s.id, FeedingTime: tp(at(1, 21, 30)), MessageAt: at(1, 21, 41), LeftoverML: ip(15)})
 		if err != nil || res.Activity.ID != late.ID {
 			t.Fatalf("report by time = %+v, %v", res, err)
@@ -327,6 +327,19 @@ func TestFeedingLeftoverScenarios(t *testing.T) {
 		if err := report(s.member, own.ID); err != nil {
 			t.Fatalf("member on own feeding: %v", err)
 		}
+
+		// An owner may report on and update a feeding a member created.
+		memberFeed := createFeeding(t, s, s.member, at(4, 9, 15), 100)
+		if err := report(s.owner, memberFeed.ID); err != nil {
+			t.Fatalf("owner on member's feeding: %v", err)
+		}
+		if _, err := svc.Update(ctx, s.owner.actor, s.id, memberFeed.ID, dto.ActivityUpdateInput{Details: map[string]any{"volume_ml": 110}}); err != nil {
+			t.Fatalf("owner update on member's feeding: %v", err)
+		}
+		got := load(t, memberFeed.ID)
+		if got.Details["leftover_ml"] != float64(10) || got.Details["volume_ml"] != float64(110) || got.CreatedByMemberID != s.member.memberID {
+			t.Fatalf("member's feeding after owner changes = %+v", got)
+		}
 	})
 
 	seedLegacyFeeding := func(t *testing.T, s scenarioSpace, when time.Time, note string) string {
@@ -404,6 +417,40 @@ func TestFeedingLeftoverScenarios(t *testing.T) {
 		got = load(t, feed.ID)
 		if want := domainactivity.FeedingNote("Zeia", got.Details); got.Note != want || strings.Contains(got.Note, "volume") {
 			t.Fatalf("note after volume removal = %q, want %q", got.Note, want)
+		}
+	})
+
+	t.Run("j: a leftover-only report reopens a finished feeding", func(t *testing.T) {
+		s := newSpace(t, "scn-j")
+		feed := createFeeding(t, s, s.owner, at(5, 14, 0), 90)
+		if _, err := svc.ReportFeedingLeftover(ctx, s.owner.actor, dto.FeedingLeftoverInput{Space: s.id, FeedingID: feed.ID, MessageAt: at(5, 15, 0), Outcome: "finished"}); err != nil {
+			t.Fatal(err)
+		}
+		res, err := svc.ReportFeedingLeftover(ctx, s.owner.actor, dto.FeedingLeftoverInput{Space: s.id, FeedingID: feed.ID, MessageAt: at(5, 15, 10), LeftoverML: ip(30)})
+		if err != nil || !res.Changed {
+			t.Fatalf("reopen = %+v, %v", res, err)
+		}
+		got := load(t, feed.ID)
+		if _, ok := got.Details["outcome"]; ok {
+			t.Fatalf("outcome kept: %v", got.Details)
+		}
+		if _, ok := got.Details["expired_ml"]; ok {
+			t.Fatalf("expired_ml kept: %v", got.Details)
+		}
+		if want := "Feeding Zeia — volume 90 ml; sisa 30 ml"; got.Note != want {
+			t.Fatalf("note = %q, want %q", got.Note, want)
+		}
+	})
+
+	t.Run("k: create without subject stores NULL", func(t *testing.T) {
+		s := newSpace(t, "scn-k")
+		a, err := svc.Create(ctx, s.owner.actor, dto.ActivityCreateInput{Space: s.id, Kind: "feeding", Details: map[string]any{"volume_ml": 60}, OccurredAt: at(5, 16, 0)})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var isNull bool
+		if err := db.Raw(`SELECT subject IS NULL FROM space_activities WHERE id = ?`, a.ID).Row().Scan(&isNull); err != nil || !isNull {
+			t.Fatalf("subject IS NULL = %v, %v", isNull, err)
 		}
 	})
 

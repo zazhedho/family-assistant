@@ -205,6 +205,32 @@ func TestApplyFeedingReport(t *testing.T) {
 			t.Fatalf("%v %v %v", got, changed, err)
 		}
 	})
+	t.Run("leftover only reopens a finished feeding", func(t *testing.T) {
+		cur := Details{"volume_ml": 100, "leftover_ml": float64(0), "outcome": "finished", "expired_ml": float64(0), "leftover_reported_at": "2026-11-05T08:00:00Z"}
+		got, changed, err := ApplyFeedingReport(cur, FeedingReport{LeftoverML: ip(30)}, rep)
+		if err != nil || !changed {
+			t.Fatalf("%v %v %v", got, changed, err)
+		}
+		if _, ok := got["outcome"]; ok {
+			t.Fatalf("outcome kept: %v", got)
+		}
+		if _, ok := got["expired_ml"]; ok {
+			t.Fatalf("expired_ml kept: %v", got)
+		}
+		if got["leftover_ml"] != 30 || got["leftover_reported_at"] != stamp {
+			t.Fatalf("%v", got)
+		}
+		if note := FeedingNote("Zeia", got); strings.Contains(note, "habis") {
+			t.Fatalf("note = %q", note)
+		}
+	})
+	t.Run("same leftover reopens an expired feeding", func(t *testing.T) {
+		cur := Details{"volume_ml": 100, "leftover_ml": float64(30), "outcome": "expired", "expired_ml": float64(30)}
+		got, changed, err := ApplyFeedingReport(cur, FeedingReport{LeftoverML: ip(30)}, rep)
+		if err != nil || !changed || got["outcome"] != nil || got["expired_ml"] != nil || got["leftover_reported_at"] != stamp {
+			t.Fatalf("%v %v %v", got, changed, err)
+		}
+	})
 	t.Run("nothing reported", func(t *testing.T) {
 		if _, _, err := ApplyFeedingReport(Details{}, FeedingReport{}, rep); err == nil {
 			t.Fatal("want error")
