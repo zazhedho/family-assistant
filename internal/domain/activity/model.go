@@ -21,7 +21,9 @@ type Activity struct {
 	SpaceID           string         `json:"space_id" gorm:"column:space_id"`
 	CreatedByMemberID string         `json:"created_by_member_id" gorm:"column:created_by_member_id"`
 	Kind              string         `json:"kind" gorm:"column:kind"`
+	Subject           string         `json:"subject,omitempty" gorm:"column:subject"`
 	Note              string         `json:"note" gorm:"column:note"`
+	Details           Details        `json:"details,omitempty" gorm:"column:details"`
 	OccurredAt        time.Time      `json:"occurred_at" gorm:"column:occurred_at"`
 	CreatedAt         time.Time      `json:"created_at" gorm:"column:created_at"`
 	UpdatedAt         time.Time      `json:"updated_at" gorm:"column:updated_at"`
@@ -38,7 +40,9 @@ type ListFilter struct {
 }
 
 type UpdateFields struct {
-	Kind       *string
-	Note       *string
-	OccurredAt *time.Time
+	Kind         *string
+	Subject      *string
+	Note         *string
+	OccurredAt   *time.Time
+	DetailsPatch Details
 }
