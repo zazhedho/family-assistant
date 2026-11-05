@@ -179,7 +179,20 @@ func (s *service) Update(ctx context.Context, actor domainidentity.ActorContext,
 	if actorMember == nil {
 		return nil, serviceauthorization.ErrNotFound
 	}
-	activity, err := s.activities.FindByIDInSpace(ctx, spaceID, activityID)
+	// Read, check and write against one row locked FOR UPDATE, so concurrent
+	// updates and feeding reports never validate a stale copy.
+	prepare := func(current *domainactivity.Activity) (domainactivity.UpdateFields, error) {
+		if !canMutateActivity(actorMember.RoleName, actorMember.ID, current) {
+			return domainactivity.UpdateFields{}, serviceauthorization.ErrForbidden
+		}
+		fields, err := activityUpdateFields(input)
+		if err != nil {
+			return fields, err
+		}
+		err = prepareDetailsUpdate(current, &fields)
+		return fields, err
+	}
+	activity, err := s.activities.UpdateLocked(ctx, spaceID, activityID, prepare, time.Now().UTC())
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, serviceauthorization.ErrNotFound
 	}
@@ -189,26 +202,6 @@ func (s *service) Update(ctx context.Context, actor domainidentity.ActorContext,
 	if activity == nil {
 		return nil, serviceauthorization.ErrNotFound
 	}
-	if !canMutateActivity(actorMember.RoleName, actorMember.ID, activity) {
-		return nil, serviceauthorization.ErrForbidden
-	}
-	fields, err := activityUpdateFields(input)
-	if err != nil {
-		return nil, err
-	}
-	merged, err := prepareDetailsUpdate(activity, &fields)
-	if err != nil {
-		return nil, err
-	}
-	now := time.Now().UTC()
-	if err := s.activities.Update(ctx, spaceID, activityID, fields, now); err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, serviceauthorization.ErrNotFound
-		}
-		return nil, err
-	}
-	applyActivityUpdate(activity, fields, now)
-	activity.Details = merged
 	result = activity
 	s.writeAudit(ctx, activityAuditEvent(actor, domainaudit.ActionUpdate, spaceID, activity.ID, domainaudit.StatusSuccess))
 	return result, nil
@@ -309,22 +302,6 @@ func activityUpdateFields(input dto.ActivityUpdateInput) (domainactivity.UpdateF
 		return fields, &serviceauthorization.ValidationError{Field: "update", Reason: "at least one field is required"}
 	}
 	return fields, nil
-}
-
-func applyActivityUpdate(activity *domainactivity.Activity, fields domainactivity.UpdateFields, updatedAt time.Time) {
-	if fields.Kind != nil {
-		activity.Kind = *fields.Kind
-	}
-	if fields.Subject != nil {
-		activity.Subject = *fields.Subject
-	}
-	if fields.Note != nil {
-		activity.Note = *fields.Note
-	}
-	if fields.OccurredAt != nil {
-		activity.OccurredAt = *fields.OccurredAt
-	}
-	activity.UpdatedAt = updatedAt
 }
 
 func activityMember(members []domainspace.ResolvedMembership, memberID, userID string) *domainspace.ResolvedMembership {

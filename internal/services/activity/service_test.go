@@ -27,6 +27,9 @@ type activityRepositoryStub struct {
 	updateID string
 	deleteID string
 
+	lockedCalls int
+	findCalls   int
+
 	reportCalls  int
 	reportReq    domainactivity.FeedingReportRequest
 	reportTarget *domainactivity.Activity
@@ -46,6 +49,7 @@ func (s *activityRepositoryStub) List(_ context.Context, filter domainactivity.L
 }
 
 func (s *activityRepositoryStub) FindByIDInSpace(_ context.Context, _, _ string) (*domainactivity.Activity, error) {
+	s.findCalls++
 	if s.found == nil {
 		return nil, gorm.ErrRecordNotFound
 	}
@@ -56,6 +60,37 @@ func (s *activityRepositoryStub) FindByIDInSpace(_ context.Context, _, _ string)
 func (s *activityRepositoryStub) Update(_ context.Context, _, activityID string, fields domainactivity.UpdateFields, _ time.Time) error {
 	s.updated, s.updateID, s.update = true, activityID, fields
 	return nil
+}
+
+// UpdateLocked hands prepare a copy of found (the "locked" row) and returns
+// it with the fields applied, as the database would.
+func (s *activityRepositoryStub) UpdateLocked(_ context.Context, _, activityID string, prepare func(*domainactivity.Activity) (domainactivity.UpdateFields, error), now time.Time) (*domainactivity.Activity, error) {
+	s.lockedCalls++
+	if s.found == nil {
+		return nil, gorm.ErrRecordNotFound
+	}
+	current := *s.found
+	current.Details = domainactivity.ApplyDetailsPatch(s.found.Details, nil)
+	fields, err := prepare(&current)
+	if err != nil {
+		return nil, err
+	}
+	s.updated, s.updateID, s.update = true, activityID, fields
+	if fields.Kind != nil {
+		current.Kind = *fields.Kind
+	}
+	if fields.Subject != nil {
+		current.Subject = *fields.Subject
+	}
+	if fields.Note != nil {
+		current.Note = *fields.Note
+	}
+	if fields.OccurredAt != nil {
+		current.OccurredAt = *fields.OccurredAt
+	}
+	current.Details = domainactivity.ApplyDetailsPatch(current.Details, fields.DetailsPatch)
+	current.UpdatedAt = now
+	return &current, nil
 }
 
 func (s *activityRepositoryStub) SoftDelete(_ context.Context, _, activityID string, _ time.Time) error {

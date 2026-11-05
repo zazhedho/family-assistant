@@ -640,3 +640,28 @@ func TestCreateFeedingStampsReportWithMessageTime(t *testing.T) {
 		t.Fatalf("occurred_at = %v, want %v", repo.created.OccurredAt, occurredAt)
 	}
 }
+
+func TestUpdateChecksAndWritesTheLockedRow(t *testing.T) {
+	repo, spaces, audit := ownerSetup(&domainactivity.Activity{ID: "activity-1", SpaceID: testSpace, CreatedByMemberID: "member-1", Kind: "note", Note: "x"})
+	service := activityService(repo, spaces, audit)
+	note := "y"
+	if _, err := service.Update(context.Background(), ownerActor("activities:update"), testSpace, "activity-1", dto.ActivityUpdateInput{Note: &note}); err != nil {
+		t.Fatalf("update: %v", err)
+	}
+	if repo.lockedCalls != 1 || repo.findCalls != 0 {
+		t.Fatalf("locked calls = %d, unlocked reads = %d; want one locked read-check-write", repo.lockedCalls, repo.findCalls)
+	}
+
+	// Forbidden and not found keep their mapping through the locked path.
+	repo, spaces, audit = ownerSetup(&domainactivity.Activity{ID: "activity-1", SpaceID: testSpace, CreatedByMemberID: "member-2", Kind: "note", Note: "x"})
+	spaces.members[0].RoleName = "space_member"
+	_, err := activityService(repo, spaces, audit).Update(context.Background(), activityActor(testSpace, "member-1", "activities:update"), testSpace, "activity-1", dto.ActivityUpdateInput{Note: &note})
+	if !errors.Is(err, authorization.ErrForbidden) || repo.updated {
+		t.Fatalf("error = %v updated = %v, want forbidden", err, repo.updated)
+	}
+	repo, spaces, audit = ownerSetup(nil)
+	_, err = activityService(repo, spaces, audit).Update(context.Background(), ownerActor("activities:update"), testSpace, "activity-1", dto.ActivityUpdateInput{Note: &note})
+	if !errors.Is(err, authorization.ErrNotFound) {
+		t.Fatalf("error = %v, want not found", err)
+	}
+}

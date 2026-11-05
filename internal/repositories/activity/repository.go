@@ -125,6 +125,44 @@ func (r *Repository) Update(ctx context.Context, spaceID, activityID string, fie
 	if strings.TrimSpace(activityID) == "" {
 		return domainactivity.ErrActivityIDRequired
 	}
+	return applyUpdate(r.DB.WithContext(ctx), spaceID, activityID, fields, updatedAt)
+}
+
+// UpdateLocked reads the activity with SELECT ... FOR UPDATE, lets prepare
+// check and build the update from that locked row, writes it and returns the
+// stored result, all in one transaction. Concurrent updates and feeding
+// reports on the row therefore serialize and never validate a stale copy.
+// An error from prepare is returned unchanged and nothing is written.
+func (r *Repository) UpdateLocked(ctx context.Context, spaceID, activityID string, prepare func(current *domainactivity.Activity) (domainactivity.UpdateFields, error), updatedAt time.Time) (*domainactivity.Activity, error) {
+	if strings.TrimSpace(spaceID) == "" {
+		return nil, domainactivity.ErrActivitySpaceID
+	}
+	if strings.TrimSpace(activityID) == "" {
+		return nil, domainactivity.ErrActivityIDRequired
+	}
+	var updated domainactivity.Activity
+	err := r.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var current domainactivity.Activity
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("id = ? AND space_id = ?", activityID, spaceID).First(&current).Error; err != nil {
+			return err
+		}
+		fields, err := prepare(&current)
+		if err != nil {
+			return err
+		}
+		if err := applyUpdate(tx, spaceID, activityID, fields, updatedAt); err != nil {
+			return err
+		}
+		return tx.Where("id = ? AND space_id = ?", activityID, spaceID).First(&updated).Error
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &updated, nil
+}
+
+func applyUpdate(db *gorm.DB, spaceID, activityID string, fields domainactivity.UpdateFields, updatedAt time.Time) error {
 	updates := map[string]any{"updated_at": updatedAt}
 	if fields.Kind != nil {
 		updates["kind"] = strings.TrimSpace(*fields.Kind)
@@ -152,7 +190,7 @@ func (r *Repository) Update(ctx context.Context, spaceID, activityID string, fie
 	if len(updates) == 1 {
 		return domainactivity.ErrActivityUpdateRequired
 	}
-	result := r.DB.WithContext(ctx).Model(&domainactivity.Activity{}).
+	result := db.Model(&domainactivity.Activity{}).
 		Where("id = ? AND space_id = ?", activityID, spaceID).Updates(updates)
 	if result.Error != nil {
 		return result.Error

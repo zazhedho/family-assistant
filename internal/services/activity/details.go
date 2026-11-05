@@ -106,9 +106,9 @@ func createDetails(kind, subject string, raw map[string]any, note string, report
 }
 
 // prepareDetailsUpdate validates an update against the merged details and the
-// resulting kind, running that kind's update hook if it has one. It returns
-// the merged details.
-func prepareDetailsUpdate(activity *domainactivity.Activity, fields *domainactivity.UpdateFields) (domainactivity.Details, error) {
+// resulting kind, running that kind's update hook if it has one. activity is
+// the stored row (locked by the caller), so the checks never see a stale copy.
+func prepareDetailsUpdate(activity *domainactivity.Activity, fields *domainactivity.UpdateFields) error {
 	stored := domainactivity.NormalizeKind(activity.Kind)
 	kind := stored
 	if fields.Kind != nil {
@@ -124,13 +124,7 @@ func prepareDetailsUpdate(activity *domainactivity.Activity, fields *domainactiv
 		return nil
 	}
 	if hook := updateHooks[kind]; hook != nil {
-		if err := hook(stored, activity, fields, merged, validate); err != nil {
-			return nil, err
-		}
-		return merged, nil
+		return hook(stored, activity, fields, merged, validate)
 	}
-	if err := validate(); err != nil {
-		return nil, err
-	}
-	return merged, nil
+	return validate()
 }

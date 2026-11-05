@@ -315,3 +315,76 @@ func TestCountByKindRequiresSpaceAndKinds(t *testing.T) {
 		t.Fatalf("no kinds = %v, %v; want empty without a query", counts, err)
 	}
 }
+
+func TestUpdateLockedLocksReadsAndWritesInOneTransaction(t *testing.T) {
+	db, mock := newActivityMockDB(t)
+	now := time.Date(2026, 11, 5, 9, 0, 0, 0, time.UTC)
+	cols := []string{"id", "space_id", "created_by_member_id", "kind", "subject", "note", "details", "occurred_at", "created_at", "updated_at", "deleted_at"}
+	mock.ExpectBegin()
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM "space_activities" WHERE (id = $1 AND space_id = $2) AND "space_activities"."deleted_at" IS NULL ORDER BY "space_activities"."id" LIMIT $3 FOR UPDATE`)).
+		WithArgs(activityID, spaceID, 1).
+		WillReturnRows(sqlmock.NewRows(cols).AddRow(activityID, spaceID, memberID, "note", nil, "n", `{"volume_ml":60}`, now, now, now, nil))
+	mock.ExpectExec(regexp.QuoteMeta(`UPDATE "space_activities" SET "kind"=$1,"updated_at"=$2 WHERE (id = $3 AND space_id = $4) AND "space_activities"."deleted_at" IS NULL`)).
+		WithArgs("feeding", now, activityID, spaceID).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM "space_activities" WHERE (id = $1 AND space_id = $2) AND "space_activities"."deleted_at" IS NULL ORDER BY "space_activities"."id" LIMIT $3`)).
+		WithArgs(activityID, spaceID, 1).
+		WillReturnRows(sqlmock.NewRows(cols).AddRow(activityID, spaceID, memberID, "feeding", nil, "n", `{"volume_ml":60}`, now, now, now, nil))
+	mock.ExpectCommit()
+
+	var seen domainactivity.Activity
+	got, err := (&Repository{DB: db}).UpdateLocked(context.Background(), spaceID, activityID, func(current *domainactivity.Activity) (domainactivity.UpdateFields, error) {
+		seen = *current
+		kind := "feeding"
+		return domainactivity.UpdateFields{Kind: &kind}, nil
+	}, now)
+	if err != nil {
+		t.Fatalf("update locked: %v", err)
+	}
+	if seen.Kind != "note" || seen.Details["volume_ml"] != float64(60) {
+		t.Fatalf("prepare saw %+v, want the locked row", seen)
+	}
+	if got.Kind != "feeding" {
+		t.Fatalf("result = %+v", got)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("sql expectations: %v", err)
+	}
+}
+
+func TestUpdateLockedRollsBackWhenPrepareFails(t *testing.T) {
+	db, mock := newActivityMockDB(t)
+	now := time.Date(2026, 11, 5, 9, 0, 0, 0, time.UTC)
+	refused := errors.New("refused")
+	mock.ExpectBegin()
+	mock.ExpectQuery(`SELECT \* FROM "space_activities" .* FOR UPDATE`).
+		WillReturnRows(sqlmock.NewRows(activityColumns()).AddRow(activityID, spaceID, memberID, "note", "n", now, now, now, nil))
+	mock.ExpectRollback()
+	_, err := (&Repository{DB: db}).UpdateLocked(context.Background(), spaceID, activityID, func(*domainactivity.Activity) (domainactivity.UpdateFields, error) {
+		return domainactivity.UpdateFields{}, refused
+	}, now)
+	if !errors.Is(err, refused) {
+		t.Fatalf("error = %v, want the prepare error", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("sql expectations: %v", err)
+	}
+}
+
+func TestUpdateLockedMissingRowIsNotFound(t *testing.T) {
+	db, mock := newActivityMockDB(t)
+	mock.ExpectBegin()
+	mock.ExpectQuery(`SELECT \* FROM "space_activities" .* FOR UPDATE`).WillReturnRows(sqlmock.NewRows(activityColumns()))
+	mock.ExpectRollback()
+	called := false
+	_, err := (&Repository{DB: db}).UpdateLocked(context.Background(), spaceID, activityID, func(*domainactivity.Activity) (domainactivity.UpdateFields, error) {
+		called = true
+		return domainactivity.UpdateFields{}, nil
+	}, time.Now())
+	if !errors.Is(err, gorm.ErrRecordNotFound) || called {
+		t.Fatalf("error = %v called = %v, want not found before prepare", err, called)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("sql expectations: %v", err)
+	}
+}

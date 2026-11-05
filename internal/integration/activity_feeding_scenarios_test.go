@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -451,6 +452,50 @@ func TestFeedingLeftoverScenarios(t *testing.T) {
 		var isNull bool
 		if err := db.Raw(`SELECT subject IS NULL FROM space_activities WHERE id = ?`, a.ID).Row().Scan(&isNull); err != nil || !isNull {
 			t.Fatalf("subject IS NULL = %v, %v", isNull, err)
+		}
+	})
+
+	t.Run("l: racing updates never forge a feeding report", func(t *testing.T) {
+		s := newSpace(t, "scn-l")
+		row := &domainactivity.Activity{
+			SpaceID: s.id, CreatedByMemberID: s.owner.memberID, Kind: "note", Subject: "Zeia",
+			Details: domainactivity.Details{"volume_ml": 60}, Note: "catatan susu",
+			OccurredAt: at(5, 9, 0), CreatedAt: at(5, 9, 0), UpdatedAt: at(5, 9, 0),
+		}
+		if err := repo.Create(ctx, row); err != nil {
+			t.Fatal(err)
+		}
+		for round := range 40 {
+			if err := db.Exec(`UPDATE space_activities SET kind = 'note', details = '{"volume_ml":60}' WHERE id = ?`, row.ID).Error; err != nil {
+				t.Fatal(err)
+			}
+			var wg sync.WaitGroup
+			errs := make([]error, 2)
+			wg.Add(2)
+			go func() {
+				defer wg.Done()
+				_, errs[0] = svc.Update(ctx, s.owner.actor, s.id, row.ID, dto.ActivityUpdateInput{Kind: sp("feeding")})
+			}()
+			go func() {
+				defer wg.Done()
+				_, errs[1] = svc.Update(ctx, s.owner.actor, s.id, row.ID, dto.ActivityUpdateInput{Details: map[string]any{"leftover_ml": 10}})
+			}()
+			wg.Wait()
+			for _, err := range errs {
+				if err != nil && !isValidation(err) {
+					t.Fatalf("round %d: unexpected error %v", round, err)
+				}
+			}
+			var forged bool
+			if err := db.Raw(`SELECT kind = 'feeding' AND jsonb_exists(details, 'leftover_ml') FROM space_activities WHERE id = ?`, row.ID).Row().Scan(&forged); err != nil {
+				t.Fatal(err)
+			}
+			if forged {
+				t.Fatalf("round %d: a feeding holds leftover_ml that never went through the report (errors %v)", round, errs)
+			}
+			if (errs[0] == nil) == (errs[1] == nil) {
+				t.Fatalf("round %d: errors = %v, want exactly one update refused", round, errs)
+			}
 		}
 	})
 
