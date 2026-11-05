@@ -113,8 +113,8 @@ func (s *scheduledMessageServiceStub) BindCurrentGroup(_ context.Context, actor 
 func TestScheduledMessageToolsExposeSixOnlyWhenServiceConfigured(t *testing.T) {
 	disabled := newScheduledMessageMCPServer(t, nil, scheduledResolver(scheduledTestSpaceID), "")
 	disabledTools := scheduledToolNames(t, disabled.URL)
-	if len(disabledTools) != 26 || !containsString(disabledTools, "space_channel_bind") {
-		t.Fatalf("disabled tools/list = %v, want 26 tools including space_channel_bind", disabledTools)
+	if len(disabledTools) != 27 || !containsString(disabledTools, "space_channel_bind") {
+		t.Fatalf("disabled tools/list = %v, want 27 tools including space_channel_bind", disabledTools)
 	}
 	for _, name := range disabledTools {
 		if strings.HasPrefix(name, "scheduled_message_") {
@@ -126,13 +126,13 @@ func TestScheduledMessageToolsExposeSixOnlyWhenServiceConfigured(t *testing.T) {
 	enabled := newScheduledMessageMCPServer(t, enabledService, scheduledResolver(scheduledTestSpaceID), scheduledTestSecret)
 	got := scheduledToolNames(t, enabled.URL)
 	want := []string{
-		"account_link", "account_register", "activity_create", "activity_create_with_reminder", "activity_delete", "activity_list", "activity_update",
+		"account_link", "account_register", "activity_create", "activity_create_with_reminder", "activity_delete", "activity_list", "activity_update", "feeding_leftover_report",
 		"identity_link", "identity_revoke", "invitation_accept", "invitation_create", "invitation_list", "invitation_revoke",
 		"member_remove", "member_update_role", "reminder_complete", "reminder_create", "reminder_delete", "reminder_list", "reminder_update",
 		"scheduled_message_cancel", "scheduled_message_create", "scheduled_message_list", "scheduled_message_targets", "scheduled_message_unsubscribe", "scheduled_message_update",
 		"space_archive", "space_channel_bind", "space_create", "space_get_members", "space_list", "space_update",
 	}
-	if len(got) != 32 || strings.Join(got, ",") != strings.Join(want, ",") {
+	if len(got) != 33 || strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Fatalf("enabled tools/list = %v, want exactly %v", got, want)
 	}
 }
@@ -155,8 +155,8 @@ func TestSpaceChannelBindWorksWithoutScheduledMessageService(t *testing.T) {
 	initializeMCPServer(t, server.URL)
 
 	names := scheduledToolNames(t, server.URL)
-	if len(names) != 26 || !containsString(names, "space_channel_bind") || containsString(names, "scheduled_message_create") {
-		t.Fatalf("tools/list = %v, want 26 tools with space_channel_bind and no scheduled_message tools", names)
+	if len(names) != 27 || !containsString(names, "space_channel_bind") || containsString(names, "scheduled_message_create") {
+		t.Fatalf("tools/list = %v, want 27 tools with space_channel_bind and no scheduled_message tools", names)
 	}
 	identity := scheduledIdentity("nonce-bind-no-lane")
 	response := callScheduledTool(t, server.URL, "space_channel_bind", map[string]any{"space": scheduledTestSpaceID}, &identity)

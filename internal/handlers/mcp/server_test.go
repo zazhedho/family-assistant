@@ -240,7 +240,7 @@ func TestHTTPHandlerExposesOnlyCurrentMCPToolsWhenRemindersAreAbsent(t *testing.
 		got = append(got, tool.Name)
 	}
 	sort.Strings(got)
-	want := []string{"account_link", "account_register", "activity_create", "activity_create_with_reminder", "activity_delete", "activity_list", "activity_update", "identity_link", "identity_revoke", "invitation_accept", "invitation_create", "invitation_list", "invitation_revoke", "member_remove", "member_update_role", "reminder_complete", "reminder_create", "reminder_delete", "reminder_list", "reminder_update", "space_archive", "space_channel_bind", "space_create", "space_get_members", "space_list", "space_update"}
+	want := []string{"account_link", "account_register", "activity_create", "activity_create_with_reminder", "activity_delete", "activity_list", "activity_update", "feeding_leftover_report", "identity_link", "identity_revoke", "invitation_accept", "invitation_create", "invitation_list", "invitation_revoke", "member_remove", "member_update_role", "reminder_complete", "reminder_create", "reminder_delete", "reminder_list", "reminder_update", "space_archive", "space_channel_bind", "space_create", "space_get_members", "space_list", "space_update"}
 	if strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Fatalf("tools = %v, want %v", got, want)
 	}
@@ -266,6 +266,31 @@ func TestHTTPHandlerDescribesActivityToolSelection(t *testing.T) {
 	if !strings.Contains(descriptions["activity_create_with_reminder"], "both are requested") || !strings.Contains(descriptions["activity_create_with_reminder"], "activity_create for activity only") {
 		t.Errorf("activity_create_with_reminder description does not direct paired requests: %q", descriptions["activity_create_with_reminder"])
 	}
+}
+
+func TestHTTPHandlerDescribesFeedingLeftoverReport(t *testing.T) {
+	handler := NewHTTPHandler(config.MCPConfig{ServerKey: "secret"}, &resolverStub{}, nil, nil, nil, nil, ToolServices{})
+	server := httptest.NewServer(handler)
+	t.Cleanup(server.Close)
+
+	initializeMCPServer(t, server.URL)
+	response := callMCPServer(t, server.URL, "new-profile", "secret", "tools/list", map[string]any{})
+	if response.Error != nil || response.Result == nil {
+		t.Fatalf("tools/list failed: %+v", response)
+	}
+	for _, tool := range response.Result.Tools {
+		if tool.Name != "feeding_leftover_report" {
+			continue
+		}
+		description := strings.ToLower(tool.Description)
+		for _, want := range []string{"feeding_id", "ask the user", "only way", "feeding_time"} {
+			if !strings.Contains(description, want) {
+				t.Errorf("description %q lacks %q", tool.Description, want)
+			}
+		}
+		return
+	}
+	t.Fatal("feeding_leftover_report not listed")
 }
 
 func TestHTTPHandlerDescribesActivityReminderSchedulingSchema(t *testing.T) {

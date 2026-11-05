@@ -333,3 +333,21 @@ func TestActivityCreateWithReminderWithoutReplaceKeepsBehavior(t *testing.T) {
 		}
 	}
 }
+
+func TestActivityCreateWithReminderPassesDetailsAndSubject(t *testing.T) {
+	activityService := &mcpActivityServiceStub{created: &domainactivity.Activity{ID: "activity-1", SpaceID: mcpSpaceID}}
+	server := activityReminderHTTPServer(t, activityReminderResolver(), activityService, &reminderToolServiceStub{}, "identity-secret")
+	identity := newSignedIdentityEnvelope("identity-secret", time.Now())
+	arguments := activityReminderArguments(map[string]any{"title": "Follow up", "after_minutes": 15})
+	activity := arguments["activity"].(map[string]any)
+	activity["subject"] = "Aisha"
+	activity["details"] = map[string]any{"volume_ml": 120}
+	arguments[identityArgumentName] = identity
+	response := callActivityReminderTool(t, server.URL, arguments)
+	if response.Error != nil || response.Result == nil || response.Result.IsError {
+		t.Fatalf("response = %+v", response)
+	}
+	if activityService.createInput.Subject != "Aisha" || activityService.createInput.Details["volume_ml"] != float64(120) {
+		t.Fatalf("create input = %+v", activityService.createInput)
+	}
+}

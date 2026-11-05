@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -237,3 +238,117 @@ func TestActivityDeletePassesSelectedSpaceAndID(t *testing.T) {
 }
 
 var _ interfaceactivity.ServiceActivityInterface = (*mcpActivityServiceStub)(nil)
+
+func feedingReportResolver(spaceID string) *mcpExternalResolverStub {
+	return &mcpExternalResolverStub{
+		actor: domainidentity.ActorContext{UserID: "user-1", Memberships: []domainspace.ResolvedMembership{
+			mcpMembership("member-shared", spaceID, "Baby", domainspace.TypeShared, "role-member"),
+		}},
+		permissions: []domainpermission.Permission{{Resource: "activities", Action: "update"}},
+	}
+}
+
+func feedingReportContext(messageAt time.Time) context.Context {
+	return WithExternalRequest(context.Background(), ExternalRequest{Provider: "hermes", ExternalID: "profile-1", Channel: "whatsapp", MessageAt: messageAt})
+}
+
+func TestFeedingLeftoverReportHandler(t *testing.T) {
+	spaceID := "00000000-0000-0000-0000-000000000501"
+	messageAt := time.Date(2026, 11, 5, 3, 0, 0, 0, time.UTC)
+	ten := 10
+	t.Run("success and corrected flag", func(t *testing.T) {
+		for _, tt := range []struct {
+			name     string
+			previous domainactivity.Details
+			changed  bool
+			want     bool
+		}{
+			{"first report", domainactivity.Details{"volume_ml": 100}, true, false},
+			{"overwrite", domainactivity.Details{"volume_ml": 100, "leftover_ml": 5}, true, true},
+			{"overwrite outcome", domainactivity.Details{"outcome": "finished"}, true, true},
+			{"identical repeat", domainactivity.Details{"leftover_ml": 10}, false, false},
+		} {
+			t.Run(tt.name, func(t *testing.T) {
+				service := &mcpActivityServiceStub{reported: &domainactivity.FeedingReportResult{
+					Activity: domainactivity.Activity{ID: "feeding-1", SpaceID: spaceID, Kind: "feeding"}, Previous: tt.previous, Changed: tt.changed,
+				}}
+				got, err := FeedingLeftoverReport(feedingReportContext(messageAt), feedingReportResolver(spaceID), service, FeedingLeftoverReportInput{
+					Space: "Baby", FeedingID: "feeding-1", FeedingTime: "2026-11-05T08:00:00+07:00", LeftoverML: &ten,
+				})
+				if err != nil {
+					t.Fatalf("report: %v", err)
+				}
+				if got.Activity.ID != "feeding-1" || got.Corrected != tt.want {
+					t.Fatalf("output = %+v, want corrected %v", got, tt.want)
+				}
+				in := service.reportInput
+				if in.Space != spaceID || in.FeedingID != "feeding-1" || !in.MessageAt.Equal(messageAt) || in.LeftoverML == nil || *in.LeftoverML != 10 ||
+					in.FeedingTime == nil || !in.FeedingTime.Equal(time.Date(2026, 11, 5, 1, 0, 0, 0, time.UTC)) {
+					t.Fatalf("service input = %+v", in)
+				}
+			})
+		}
+	})
+	t.Run("target errors", func(t *testing.T) {
+		wib := time.FixedZone("WIB", 7*3600)
+		vol := 120
+		for _, tt := range []struct{ reason, code string }{{"ambiguous", "ambiguous_feeding"}, {"none", "no_feeding_match"}} {
+			service := &mcpActivityServiceStub{reportErr: &domainactivity.FeedingTargetError{Reason: tt.reason, Candidates: []domainactivity.FeedingCandidate{
+				{ID: "feed-aaa", OccurredAt: time.Date(2026, 11, 5, 8, 5, 0, 0, wib), VolumeML: &vol, Open: true},
+				{ID: "feed-bbb", OccurredAt: time.Date(2026, 11, 5, 9, 30, 0, 0, wib)},
+			}}}
+			_, err := FeedingLeftoverReport(feedingReportContext(messageAt), feedingReportResolver(spaceID), service, FeedingLeftoverReportInput{Space: "Baby", LeftoverML: &ten})
+			var mapped *MCPError
+			if !errors.As(err, &mapped) || mapped.Code != tt.code {
+				t.Fatalf("%s: error = %v", tt.reason, err)
+			}
+			for _, want := range []string{"feed-aaa, 08:05, 5 Nov, 120 ml, open", "feed-bbb, 09:30, 5 Nov, volume unknown, closed", "feeding_id", "ask the user"} {
+				if !strings.Contains(strings.ToLower(mapped.Message), strings.ToLower(want)) {
+					t.Fatalf("%s: message %q lacks %q", tt.reason, mapped.Message, want)
+				}
+			}
+		}
+	})
+	t.Run("missing message time", func(t *testing.T) {
+		service := &mcpActivityServiceStub{}
+		_, err := FeedingLeftoverReport(mcpExternalContext(), feedingReportResolver(spaceID), service, FeedingLeftoverReportInput{Space: "Baby", LeftoverML: &ten})
+		var mapped *MCPError
+		if !errors.As(err, &mapped) || mapped.Code != "invalid_input" || service.reportCalls != 0 {
+			t.Fatalf("error = %v calls = %d", err, service.reportCalls)
+		}
+	})
+	t.Run("other errors mapped", func(t *testing.T) {
+		service := &mcpActivityServiceStub{reportErr: errors.New("boom")}
+		_, err := FeedingLeftoverReport(feedingReportContext(messageAt), feedingReportResolver(spaceID), service, FeedingLeftoverReportInput{Space: "Baby", LeftoverML: &ten})
+		var mapped *MCPError
+		if !errors.As(err, &mapped) || mapped.Code != "internal" {
+			t.Fatalf("error = %v", err)
+		}
+	})
+}
+
+func TestActivityCreatePassesDetailsAndSubject(t *testing.T) {
+	resolver := activityReminderResolver()
+	service := &mcpActivityServiceStub{created: &domainactivity.Activity{ID: "activity-1", SpaceID: mcpSpaceID}}
+	_, err := ActivityCreate(feedingReportContext(time.Date(2026, 11, 5, 3, 0, 0, 0, time.UTC)), resolver, service, ActivityCreateInput{
+		Kind: "medication", Subject: "Aisha", Details: map[string]any{"name": "paracetamol"},
+	})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if service.createInput.Subject != "Aisha" || service.createInput.Details["name"] != "paracetamol" {
+		t.Fatalf("input = %+v", service.createInput)
+	}
+}
+
+func TestActivityUpdatePassesDetailsAndSubject(t *testing.T) {
+	spaceID := "00000000-0000-0000-0000-000000000501"
+	service := &mcpActivityServiceStub{}
+	subject := "Aisha"
+	_, err := ActivityUpdate(mcpExternalContext(), feedingReportResolver(spaceID), service, ActivityUpdateInput{
+		Space: "Baby", ActivityID: "00000000-0000-0000-0000-000000000601", Subject: &subject, Details: map[string]any{"celsius": 38.5},
+	})
+	if err != nil || service.updateInput.Subject == nil || *service.updateInput.Subject != "Aisha" || service.updateInput.Details["celsius"] != 38.5 {
+		t.Fatalf("err = %v input = %+v", err, service.updateInput)
+	}
+}
