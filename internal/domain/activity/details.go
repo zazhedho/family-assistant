@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"math"
 	"strings"
-	"time"
 )
 
 // MaxDetailsJSONBytes is the Go-side cap on compact JSON size. The database
@@ -116,82 +115,36 @@ func ValidateDetails(kind string, details Details) error {
 	if len(b) > MaxDetailsJSONBytes {
 		return detailsErr("details", fmt.Sprintf("too large (max %d bytes)", MaxDetailsJSONBytes))
 	}
-	switch NormalizeKind(kind) {
-	case "feeding":
-		return validateFeeding(details)
-	case "medication":
-		return requireString(details, "name")
-	case "vaccination":
-		return requireString(details, "vaccine")
-	case "temperature":
-		v, ok := details["celsius"]
-		if !ok {
-			return detailsErr("details.celsius", "is required")
-		}
-		f, ok := toFloat(v)
-		if !ok || f < 30 || f > 45 {
-			return detailsErr("details.celsius", "must be a number between 30 and 45")
-		}
-	case "growth_measurement":
-		for _, key := range []string{"weight_kg", "height_cm", "head_cm"} {
-			v, ok := details[key]
-			if !ok {
-				continue
-			}
-			if f, ok := toFloat(v); !ok || f <= 0 {
-				return detailsErr("details."+key, "must be a positive number")
-			}
-		}
+	if v, ok := kindValidators[NormalizeKind(kind)]; ok {
+		return v(details)
 	}
 	return nil
+}
+
+// KindValidator checks the details of one activity kind. It returns
+// *DetailsError on failure.
+type KindValidator func(Details) error
+
+// kindValidators holds the per-kind rules; kinds without an entry accept any
+// object. Each kind_*.go file registers itself from init().
+var kindValidators = map[string]KindValidator{}
+
+// registerKind adds the validator for a canonical kind. It panics on an empty
+// or duplicate kind, since both are programming errors.
+func registerKind(kind string, v KindValidator) {
+	if kind == "" {
+		panic("domainactivity: registerKind with empty kind")
+	}
+	if _, dup := kindValidators[kind]; dup {
+		panic("domainactivity: duplicate kind registration: " + kind)
+	}
+	kindValidators[kind] = v
 }
 
 func requireString(details Details, key string) error {
 	s, ok := details[key].(string)
 	if !ok || strings.TrimSpace(s) == "" {
 		return detailsErr("details."+key, "is required")
-	}
-	return nil
-}
-
-func validateFeeding(d Details) error {
-	volume, hasVolume, err := optInt(d, "volume_ml", 1)
-	if err != nil {
-		return err
-	}
-	leftover, hasLeftover, err := optInt(d, "leftover_ml", 0)
-	if err != nil {
-		return err
-	}
-	expired, hasExpired, err := optInt(d, "expired_ml", 0)
-	if err != nil {
-		return err
-	}
-	if v, ok := d["leftover_reported_at"]; ok {
-		s, isStr := v.(string)
-		if !isStr {
-			return detailsErr("details.leftover_reported_at", "must be an RFC3339 timestamp")
-		}
-		if _, perr := time.Parse(time.RFC3339, s); perr != nil {
-			return detailsErr("details.leftover_reported_at", "must be an RFC3339 timestamp")
-		}
-	}
-	outcome := ""
-	if v, ok := d["outcome"]; ok {
-		s, isStr := v.(string)
-		if !isStr || (s != OutcomeFinished && s != OutcomeExpired) {
-			return detailsErr("details.outcome", "must be finished or expired")
-		}
-		outcome = s
-	}
-	if hasVolume && hasLeftover && leftover > volume {
-		return detailsErr("details.leftover_ml", "must not exceed volume_ml")
-	}
-	if hasVolume && hasExpired && expired > volume {
-		return detailsErr("details.expired_ml", "must not exceed volume_ml")
-	}
-	if outcome == OutcomeExpired && !hasExpired {
-		return detailsErr("details.expired_ml", "is required when outcome is expired")
 	}
 	return nil
 }
