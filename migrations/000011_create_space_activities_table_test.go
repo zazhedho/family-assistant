@@ -42,3 +42,22 @@ func TestSpaceActivitiesMigrationIsScopedAndPermissionSeeded(t *testing.T) {
 		t.Error("down migration does not drop space_activities")
 	}
 }
+
+func TestSpaceActivitiesMigrationHasDetailsAndSubject(t *testing.T) {
+	upBytes, err := os.ReadFile("000011_create_space_activities_table.up.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	up := string(upBytes)
+	for _, required := range []string{
+		"details JSONB NOT NULL DEFAULT '{}'",
+		"subject VARCHAR(128)",
+		"ck_space_activities_details_object",
+		"ck_space_activities_details_size",
+		"ck_space_activities_feeding_details",
+	} {
+		if !strings.Contains(up, required) {
+			t.Errorf("missing %q", required)
+		}
+	}
+}

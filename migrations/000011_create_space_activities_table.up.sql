@@ -8,6 +8,60 @@ CREATE TABLE IF NOT EXISTS space_activities (
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     deleted_at TIMESTAMPTZ,
+    details JSONB NOT NULL DEFAULT '{}',
+    subject VARCHAR(128),
+    CONSTRAINT ck_space_activities_details_object CHECK (jsonb_typeof(details) = 'object'),
+    CONSTRAINT ck_space_activities_details_size CHECK (octet_length(details::text) <= 4096),
+    CONSTRAINT ck_space_activities_feeding_details CHECK (
+        CASE WHEN kind <> 'feeding' THEN TRUE ELSE (
+            CASE
+                WHEN details->'volume_ml' IS NULL THEN TRUE
+                WHEN jsonb_typeof(details->'volume_ml') <> 'number' THEN FALSE
+                ELSE (details->>'volume_ml')::numeric > 0
+            END
+            AND
+            CASE
+                WHEN details->'leftover_ml' IS NULL THEN TRUE
+                WHEN jsonb_typeof(details->'leftover_ml') <> 'number' THEN FALSE
+                ELSE (details->>'leftover_ml')::numeric >= 0
+            END
+            AND
+            CASE
+                WHEN details->'leftover_reported_at' IS NULL THEN TRUE
+                WHEN jsonb_typeof(details->'leftover_reported_at') <> 'number' THEN FALSE
+                ELSE (details->>'leftover_reported_at')::numeric >= 0
+            END
+            AND
+            CASE
+                WHEN details->'expired_ml' IS NULL THEN TRUE
+                WHEN jsonb_typeof(details->'expired_ml') <> 'number' THEN FALSE
+                ELSE (details->>'expired_ml')::numeric >= 0
+            END
+            AND
+            CASE
+                WHEN details->'outcome' IS NULL THEN TRUE
+                WHEN jsonb_typeof(details->'outcome') <> 'string' THEN FALSE
+                ELSE details->>'outcome' IN ('finished', 'expired')
+            END
+            AND
+            CASE
+                WHEN details->'leftover_ml' IS NULL OR details->'volume_ml' IS NULL THEN TRUE
+                WHEN jsonb_typeof(details->'leftover_ml') <> 'number' OR jsonb_typeof(details->'volume_ml') <> 'number' THEN TRUE
+                ELSE (details->>'leftover_ml')::numeric <= (details->>'volume_ml')::numeric
+            END
+            AND
+            CASE
+                WHEN details->'expired_ml' IS NULL OR details->'volume_ml' IS NULL THEN TRUE
+                WHEN jsonb_typeof(details->'expired_ml') <> 'number' OR jsonb_typeof(details->'volume_ml') <> 'number' THEN TRUE
+                ELSE (details->>'expired_ml')::numeric <= (details->>'volume_ml')::numeric
+            END
+            AND
+            CASE
+                WHEN details->>'outcome' = 'expired' THEN details->'expired_ml' IS NOT NULL
+                ELSE TRUE
+            END
+        ) END
+    ),
     CONSTRAINT fk_space_activities_creator_space FOREIGN KEY (space_id, created_by_member_id)
         REFERENCES space_members(space_id, id)
 );
