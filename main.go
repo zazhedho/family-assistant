@@ -46,6 +46,7 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"log/slog"
 	"net"
 	"net/http"
 	"os"
@@ -109,6 +110,9 @@ func run() error {
 	routes.DB, sqlDb, err = database.ConnDb()
 	FailOnError(err, "Failed to open db")
 	defer closeDatabase(sqlDb)
+	schemaCtx, cancelSchemaCheck := context.WithTimeout(context.Background(), 5*time.Second)
+	checkActivityColumns(schemaCtx, sqlDb, slog.Default())
+	cancelSchemaCheck()
 
 	routes.UserRoutes()
 	routes.RoleRoutes()
