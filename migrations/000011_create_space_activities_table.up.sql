@@ -28,8 +28,7 @@ CREATE TABLE IF NOT EXISTS space_activities (
             AND
             CASE
                 WHEN details->'leftover_reported_at' IS NULL THEN TRUE
-                WHEN jsonb_typeof(details->'leftover_reported_at') <> 'number' THEN FALSE
-                ELSE (details->>'leftover_reported_at')::numeric >= 0
+                ELSE jsonb_typeof(details->'leftover_reported_at') = 'string'
             END
             AND
             CASE
