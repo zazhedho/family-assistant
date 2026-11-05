@@ -52,12 +52,50 @@ func TestCreatePersistsActivity(t *testing.T) {
 	repo := NewRepository(db)
 	activity := activityFixture()
 
-	mock.ExpectExec(regexp.QuoteMeta(`INSERT INTO "space_activities" ("id","space_id","created_by_member_id","kind","note","occurred_at","created_at","updated_at") VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`)).
-		WithArgs(activity.ID, activity.SpaceID, activity.CreatedByMemberID, activity.Kind, activity.Note, activity.OccurredAt, activity.CreatedAt, activity.UpdatedAt).
+	mock.ExpectExec(regexp.QuoteMeta(insertActivitySQL)).
+		WithArgs(activity.ID, activity.SpaceID, activity.CreatedByMemberID, activity.Kind, "", activity.Note, "{}", activity.OccurredAt, activity.CreatedAt, activity.UpdatedAt).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 
 	if err := repo.Create(context.Background(), activity); err != nil {
 		t.Fatalf("create activity: %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("sql expectations: %v", err)
+	}
+}
+
+const insertActivitySQL = `INSERT INTO "space_activities" ("id","space_id","created_by_member_id","kind","subject","note","details","occurred_at","created_at","updated_at") VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`
+
+func TestCreatePersistsDetailsAndSubject(t *testing.T) {
+	db, mock := newActivityMockDB(t)
+	repo := NewRepository(db)
+	activity := activityFixture()
+	activity.Kind, activity.Subject, activity.Note = "feeding", "Zeia", "Feeding Zeia — volume 90 ml"
+	activity.Details = domainactivity.Details{"volume_ml": 90}
+
+	mock.ExpectExec(regexp.QuoteMeta(insertActivitySQL)).
+		WithArgs(activity.ID, activity.SpaceID, activity.CreatedByMemberID, "feeding", "Zeia", activity.Note, `{"volume_ml":90}`, activity.OccurredAt, activity.CreatedAt, activity.UpdatedAt).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+
+	if err := repo.Create(context.Background(), activity); err != nil {
+		t.Fatalf("create activity: %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("sql expectations: %v", err)
+	}
+}
+
+func TestCreateDefaultsNilDetailsToEmptyObject(t *testing.T) {
+	db, mock := newActivityMockDB(t)
+	activity := activityFixture()
+	mock.ExpectExec(regexp.QuoteMeta(insertActivitySQL)).
+		WithArgs(activity.ID, activity.SpaceID, activity.CreatedByMemberID, activity.Kind, "", activity.Note, "{}", activity.OccurredAt, activity.CreatedAt, activity.UpdatedAt).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	if err := NewRepository(db).Create(context.Background(), activity); err != nil {
+		t.Fatalf("create activity: %v", err)
+	}
+	if activity.Details == nil {
+		t.Fatal("details should default to an empty map, got nil")
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("sql expectations: %v", err)
@@ -151,6 +189,60 @@ func TestUpdateScopesBySpaceAndActivityID(t *testing.T) {
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("sql expectations: %v", err)
+	}
+}
+
+func TestUpdateMergesDetailsPatchAtomically(t *testing.T) {
+	db, mock := newActivityMockDB(t)
+	now := time.Date(2026, 11, 5, 9, 0, 0, 0, time.UTC)
+	subject := "  Zeia "
+	patch := domainactivity.Details{"volume_ml": 90, "leftover_ml": nil, "outcome": nil}
+
+	mock.ExpectExec(regexp.QuoteMeta(`UPDATE "space_activities" SET "details"=(details || $1::jsonb) - $2::text[],"subject"=$3,"updated_at"=$4 WHERE (id = $5 AND space_id = $6) AND "space_activities"."deleted_at" IS NULL`)).
+		WithArgs(`{"volume_ml":90}`, `{"leftover_ml","outcome"}`, "Zeia", now, activityID, spaceID).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	err := NewRepository(db).Update(context.Background(), spaceID, activityID, domainactivity.UpdateFields{Subject: &subject, DetailsPatch: patch}, now)
+	if err != nil {
+		t.Fatalf("update activity: %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("sql expectations: %v", err)
+	}
+}
+
+func TestUpdateDetailsPatchAloneIsAnUpdate(t *testing.T) {
+	db, mock := newActivityMockDB(t)
+	now := time.Date(2026, 11, 5, 9, 0, 0, 0, time.UTC)
+	mock.ExpectExec(regexp.QuoteMeta(`UPDATE "space_activities" SET "details"=(details || $1::jsonb) - $2::text[],"updated_at"=$3 WHERE`)).
+		WithArgs(`{}`, `{"leftover_ml"}`, now, activityID, spaceID).
+		WillReturnResult(sqlmock.NewResult(0, 0))
+	err := NewRepository(db).Update(context.Background(), spaceID, activityID, domainactivity.UpdateFields{DetailsPatch: domainactivity.Details{"leftover_ml": nil}}, now)
+	if !errors.Is(err, gorm.ErrRecordNotFound) {
+		t.Fatalf("error = %v, want record not found when no row matched", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("sql expectations: %v", err)
+	}
+}
+
+func TestUpdateRejectsEmptyUpdate(t *testing.T) {
+	db, mock := newActivityMockDB(t)
+	err := NewRepository(db).Update(context.Background(), spaceID, activityID, domainactivity.UpdateFields{DetailsPatch: domainactivity.Details{}}, time.Now())
+	if !errors.Is(err, domainactivity.ErrActivityUpdateRequired) {
+		t.Fatalf("error = %v, want update required", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unexpected database query: %v", err)
+	}
+}
+
+func TestPgTextArrayQuotesElements(t *testing.T) {
+	v, err := pgTextArray{`a"b`, `c\d`, "e,f", "{g}"}.Value()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := `{"a\"b","c\\d","e,f","{g}"}`; v != want {
+		t.Fatalf("value = %v, want %v", v, want)
 	}
 }
 

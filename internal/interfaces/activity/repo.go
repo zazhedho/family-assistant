@@ -13,4 +13,5 @@ type RepoActivityInterface interface {
 	FindByIDInSpace(context.Context, string, string) (*domainactivity.Activity, error)
 	Update(context.Context, string, string, domainactivity.UpdateFields, time.Time) error
 	SoftDelete(context.Context, string, string, time.Time) error
+	ReportFeeding(context.Context, domainactivity.FeedingReportRequest) (*domainactivity.FeedingReportResult, error)
 }

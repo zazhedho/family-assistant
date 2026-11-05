@@ -57,6 +57,10 @@ func (s *activityRepositoryStub) SoftDelete(_ context.Context, _, activityID str
 	return nil
 }
 
+func (s *activityRepositoryStub) ReportFeeding(context.Context, domainactivity.FeedingReportRequest) (*domainactivity.FeedingReportResult, error) {
+	return nil, errors.New("activity repository stub: ReportFeeding not configured")
+}
+
 type activitySpaceRepositoryStub struct {
 	members []domainspace.ResolvedMembership
 }
