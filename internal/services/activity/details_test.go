@@ -248,8 +248,9 @@ func TestUpdateRejectsReportedKeysOnFeeding(t *testing.T) {
 func TestUpdateMergesDetails(t *testing.T) {
 	existing := &domainactivity.Activity{
 		ID: "activity-1", SpaceID: testSpace, CreatedByMemberID: "member-1", Kind: "feeding", Subject: "Aisha",
-		Note: "old", Details: domainactivity.Details{"volume_ml": float64(60), "leftover_ml": float64(20), "leftover_reported_at": "2026-11-05T08:30:00Z"},
+		Details: domainactivity.Details{"volume_ml": float64(60), "leftover_ml": float64(20), "leftover_reported_at": "2026-11-05T08:30:00Z"},
 	}
+	existing.Note = domainactivity.FeedingNote(existing.Subject, existing.Details)
 	repo, spaces, audit := ownerSetup(existing)
 	service := activityService(repo, spaces, audit)
 
@@ -541,8 +542,9 @@ func TestUpdateKindToFeedingRejectsStoredReportedKeys(t *testing.T) {
 	if err != nil {
 		t.Fatalf("update with reported keys removed: %v", err)
 	}
-	if !repo.updated || got.Kind != "feeding" || len(got.Details) != 1 || got.Note != domainactivity.FeedingNote("", domainactivity.Details{"volume_ml": 60}) {
-		t.Fatalf("result = %+v", got)
+	// The stored note was written by the caller, so it is kept.
+	if !repo.updated || got.Kind != "feeding" || len(got.Details) != 1 || got.Note != "x" || repo.update.Note != nil {
+		t.Fatalf("result = %+v, fields = %+v", got, repo.update)
 	}
 }
 
@@ -557,4 +559,66 @@ func TestReportFeedingLeftoverAuditsOnlyValidFeedingID(t *testing.T) {
 	if last.ResourceID != "" || last.ErrorMessage != "validation" {
 		t.Fatalf("audit = %+v, want empty resource id", last)
 	}
+}
+
+func TestUpdateFeedingRegeneratesOnlyGeneratedNotes(t *testing.T) {
+	at := time.Date(2026, 11, 5, 9, 0, 0, 0, time.UTC)
+	legacy := func() *domainactivity.Activity {
+		return &domainactivity.Activity{ID: "activity-1", SpaceID: testSpace, CreatedByMemberID: "member-1", Kind: "feeding",
+			Note: "Feeding Baby Zeia — volume 60 ml, sisa 20", Details: domainactivity.Details{}}
+	}
+	update := func(t *testing.T, found *domainactivity.Activity, input dto.ActivityUpdateInput) (*domainactivity.Activity, *activityRepositoryStub) {
+		t.Helper()
+		repo, spaces, audit := ownerSetup(found)
+		got, err := activityService(repo, spaces, audit).Update(context.Background(), ownerActor("activities:update"), testSpace, "activity-1", input)
+		if err != nil {
+			t.Fatalf("update: %v", err)
+		}
+		return got, repo
+	}
+
+	t.Run("legacy prose note survives a volume patch", func(t *testing.T) {
+		got, repo := update(t, legacy(), dto.ActivityUpdateInput{Details: map[string]any{"volume_ml": 60}})
+		if repo.update.Note != nil || got.Note != legacy().Note {
+			t.Fatalf("note = %v / %q, want prose kept", repo.update.Note, got.Note)
+		}
+	})
+	t.Run("caller note survives an occurred_at-only update", func(t *testing.T) {
+		row := legacy()
+		row.Details = domainactivity.Details{"volume_ml": float64(60)}
+		got, repo := update(t, row, dto.ActivityUpdateInput{OccurredAt: &at})
+		if repo.update.Note != nil || got.Note != row.Note {
+			t.Fatalf("note = %v / %q, want prose kept", repo.update.Note, got.Note)
+		}
+	})
+	t.Run("generated note follows a volume change", func(t *testing.T) {
+		row := legacy()
+		row.Subject, row.Details = "Zeia", domainactivity.Details{"volume_ml": float64(60)}
+		row.Note = domainactivity.FeedingNote(row.Subject, row.Details)
+		got, repo := update(t, row, dto.ActivityUpdateInput{Details: map[string]any{"volume_ml": 90}})
+		want := domainactivity.FeedingNote("Zeia", domainactivity.Details{"volume_ml": 90})
+		if repo.update.Note == nil || *repo.update.Note != want || got.Note != want {
+			t.Fatalf("note = %v / %q, want %q", repo.update.Note, got.Note, want)
+		}
+	})
+	t.Run("generated note drops a removed volume", func(t *testing.T) {
+		row := legacy()
+		row.Subject, row.Details = "Zeia", domainactivity.Details{"volume_ml": float64(60)}
+		row.Note = domainactivity.FeedingNote(row.Subject, row.Details)
+		got, repo := update(t, row, dto.ActivityUpdateInput{Details: map[string]any{"volume_ml": nil}})
+		want := domainactivity.FeedingNote("Zeia", domainactivity.Details{})
+		if repo.update.Note == nil || *repo.update.Note != want || got.Note != want || strings.Contains(got.Note, "volume") {
+			t.Fatalf("note = %v / %q, want %q", repo.update.Note, got.Note, want)
+		}
+	})
+	t.Run("caller note on update is kept", func(t *testing.T) {
+		row := legacy()
+		row.Subject, row.Details = "Zeia", domainactivity.Details{"volume_ml": float64(60)}
+		row.Note = domainactivity.FeedingNote(row.Subject, row.Details)
+		note := "minum di mobil"
+		got, repo := update(t, row, dto.ActivityUpdateInput{Note: &note, Details: map[string]any{"volume_ml": 90}})
+		if repo.update.Note == nil || *repo.update.Note != note || got.Note != note {
+			t.Fatalf("note = %v / %q, want caller note", repo.update.Note, got.Note)
+		}
+	})
 }

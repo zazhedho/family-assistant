@@ -225,3 +225,10 @@ func FeedingNote(subject string, details Details) string {
 	}
 	return head + " — " + strings.Join(parts, "; ")
 }
+
+// IsGeneratedFeedingNote reports whether note is the one the backend would
+// write for subject and details, i.e. no person wrote it. Evaluate it on the
+// stored row before a change: only such notes may be regenerated.
+func IsGeneratedFeedingNote(subject string, details Details, note string) bool {
+	return note != "" && note == FeedingNote(subject, details)
+}

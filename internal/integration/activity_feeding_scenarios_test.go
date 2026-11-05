@@ -329,6 +329,84 @@ func TestFeedingLeftoverScenarios(t *testing.T) {
 		}
 	})
 
+	seedLegacyFeeding := func(t *testing.T, s scenarioSpace, when time.Time, note string) string {
+		t.Helper()
+		id := utils.CreateUUID()
+		// Rows written before structured details: NULL subject, empty details, prose note.
+		if err := db.Exec(`INSERT INTO space_activities (id, space_id, created_by_member_id, kind, note, occurred_at, created_at, updated_at)
+			VALUES (?, ?, ?, 'feeding', ?, ?, ?, ?)`, id, s.id, s.owner.memberID, note, when, when, when).Error; err != nil {
+			t.Fatalf("seed legacy feeding: %v", err)
+		}
+		return id
+	}
+
+	t.Run("h: legacy prose feeding keeps its note through report and updates", func(t *testing.T) {
+		s := newSpace(t, "scn-h")
+		const prose = "Feeding Baby Zeia — volume 60 ml"
+
+		reported := seedLegacyFeeding(t, s, at(5, 8, 0), prose)
+		res, err := svc.ReportFeedingLeftover(ctx, s.owner.actor, dto.FeedingLeftoverInput{Space: s.id, FeedingID: reported, MessageAt: at(5, 9, 0), LeftoverML: ip(20)})
+		if err != nil || !res.Changed {
+			t.Fatalf("report legacy = %+v, %v", res, err)
+		}
+		_, subject, note, details, updatedAt := rawRow(t, reported)
+		if note != prose || res.Activity.Note != prose {
+			t.Fatalf("note = %q / %q, want prose kept", note, res.Activity.Note)
+		}
+		if !strings.Contains(details, `"leftover_ml": 20`) || subject != "" || !updatedAt.After(at(5, 8, 0)) {
+			t.Fatalf("row after report: subject=%q details=%s updated_at=%v", subject, details, updatedAt)
+		}
+
+		updated := seedLegacyFeeding(t, s, at(5, 10, 0), prose)
+		got, err := svc.Update(ctx, s.owner.actor, s.id, updated, dto.ActivityUpdateInput{Details: map[string]any{"volume_ml": 60}})
+		if err != nil || got.Note != prose {
+			t.Fatalf("volume update = %+v, %v; want prose kept", got, err)
+		}
+		if _, _, note, details, _ := rawRow(t, updated); note != prose || !strings.Contains(details, `"volume_ml": 60`) {
+			t.Fatalf("after volume update: note=%q details=%s", note, details)
+		}
+		later := at(5, 10, 15)
+		if got, err = svc.Update(ctx, s.owner.actor, s.id, updated, dto.ActivityUpdateInput{OccurredAt: &later}); err != nil || got.Note != prose {
+			t.Fatalf("occurred_at update = %+v, %v; want prose kept", got, err)
+		}
+		if _, _, note, _, _ := rawRow(t, updated); note != prose {
+			t.Fatalf("after occurred_at update: note=%q", note)
+		}
+		// A later report on that row still keeps the prose note.
+		if _, err := svc.ReportFeedingLeftover(ctx, s.owner.actor, dto.FeedingLeftoverInput{Space: s.id, FeedingID: updated, MessageAt: at(5, 11, 0), Outcome: "finished"}); err != nil {
+			t.Fatal(err)
+		}
+		if _, _, note, _, _ := rawRow(t, updated); note != prose {
+			t.Fatalf("after report: note=%q", note)
+		}
+	})
+
+	t.Run("i: backend-generated feeding note follows report and update", func(t *testing.T) {
+		s := newSpace(t, "scn-i")
+		feed := createFeeding(t, s, s.owner, at(5, 12, 0), 90)
+		if _, err := svc.ReportFeedingLeftover(ctx, s.owner.actor, dto.FeedingLeftoverInput{Space: s.id, FeedingID: feed.ID, MessageAt: at(5, 13, 0), LeftoverML: ip(30)}); err != nil {
+			t.Fatal(err)
+		}
+		got := load(t, feed.ID)
+		if want := domainactivity.FeedingNote("Zeia", got.Details); got.Note != want || !strings.Contains(got.Note, "sisa 30 ml") {
+			t.Fatalf("note after report = %q, want %q", got.Note, want)
+		}
+		if _, err := svc.Update(ctx, s.owner.actor, s.id, feed.ID, dto.ActivityUpdateInput{Details: map[string]any{"volume_ml": 120}}); err != nil {
+			t.Fatal(err)
+		}
+		got = load(t, feed.ID)
+		if want := domainactivity.FeedingNote("Zeia", got.Details); got.Note != want || !strings.Contains(got.Note, "volume 120 ml") {
+			t.Fatalf("note after update = %q, want %q", got.Note, want)
+		}
+		if _, err := svc.Update(ctx, s.owner.actor, s.id, feed.ID, dto.ActivityUpdateInput{Details: map[string]any{"volume_ml": nil}}); err != nil {
+			t.Fatal(err)
+		}
+		got = load(t, feed.ID)
+		if want := domainactivity.FeedingNote("Zeia", got.Details); got.Note != want || strings.Contains(got.Note, "volume") {
+			t.Fatalf("note after volume removal = %q, want %q", got.Note, want)
+		}
+	})
+
 	t.Run("g: kind alias is stored canonically and found by filter", func(t *testing.T) {
 		s := newSpace(t, "scn-g")
 		a, err := svc.Create(ctx, s.owner.actor, dto.ActivityCreateInput{Space: s.id, Kind: "Bathing", Subject: "Zeia", Note: "mandi", OccurredAt: at(4, 17, 0)})

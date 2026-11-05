@@ -125,6 +125,31 @@ func TestReportFeedingAgainstPostgres(t *testing.T) {
 		}
 	})
 
+	t.Run("legacy feeding with a prose note keeps it after a report", func(t *testing.T) {
+		f := seedReplaceFixture(t, db, "feed-legacy")
+		id := utils.CreateUUID()
+		const prose = "Feeding Baby Zeia — volume 60 ml"
+		if err := db.Exec(`INSERT INTO space_activities (id, space_id, created_by_member_id, kind, note, occurred_at, created_at, updated_at)
+			VALUES (?, ?, ?, 'feeding', ?, ?, ?, ?)`, id, f.spaceID, f.memberID, prose, at(5, 12, 0), at(5, 12, 0), at(5, 12, 0)).Error; err != nil {
+			t.Fatal(err)
+		}
+		now := at(5, 13, 1)
+		res, err := repo.ReportFeeding(ctx, domainactivity.FeedingReportRequest{
+			SpaceID: f.spaceID, Selector: domainactivity.FeedingSelector{FeedingID: id, MessageAt: at(5, 13, 0)},
+			Report: domainactivity.FeedingReport{LeftoverML: ip(20)}, ReportedAt: at(5, 13, 0), Now: now,
+		})
+		if err != nil || !res.Changed {
+			t.Fatalf("report = %+v, %v", res, err)
+		}
+		got := load(t, id)
+		if got.Note != prose || res.Activity.Note != prose {
+			t.Fatalf("note = %q / %q, want prose kept", got.Note, res.Activity.Note)
+		}
+		if v, ok := leftover(got); !ok || v != 20 || !got.UpdatedAt.Equal(now) {
+			t.Fatalf("details = %v updated_at = %v", got.Details, got.UpdatedAt)
+		}
+	})
+
 	t.Run("1 Nov: two open feedings without a time hint are ambiguous; a time hint picks one", func(t *testing.T) {
 		f := seedReplaceFixture(t, db, "feed-1nov")
 		// With the 3h open lookback, 18:26 and 21:30 cannot both be default targets,
@@ -299,10 +324,11 @@ func TestReportFeedingAgainstPostgres(t *testing.T) {
 			})
 		}
 		for round := 0; round < 10; round++ {
-			if err := db.Exec(`UPDATE space_activities SET details = '{"volume_ml":90}' WHERE id = ?`, a.ID).Error; err != nil {
+			// Reset details and the generated note together so the row stays backend-generated.
+			if err := db.Exec(`UPDATE space_activities SET details = '{"volume_ml":90}', note = ? WHERE id = ?`, domainactivity.FeedingNote("Zeia", domainactivity.Details{"volume_ml": 90}), a.ID).Error; err != nil {
 				t.Fatal(err)
 			}
-			if err := db.Exec(`UPDATE space_activities SET details = '{"volume_ml":120}' WHERE id = ?`, b.ID).Error; err != nil {
+			if err := db.Exec(`UPDATE space_activities SET details = '{"volume_ml":120}', note = ? WHERE id = ?`, domainactivity.FeedingNote("Zeia", domainactivity.Details{"volume_ml": 120}), b.ID).Error; err != nil {
 				t.Fatal(err)
 			}
 

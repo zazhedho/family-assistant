@@ -48,8 +48,9 @@ func feedingCreate(subject string, details domainactivity.Details, messageAt tim
 	return details, "", nil
 }
 
-// feedingUpdate guards the report keys and regenerates the note when the
-// caller sent none.
+// feedingUpdate guards the report keys and, when the caller sent no note,
+// regenerates the note only if the stored one was backend-generated. A note a
+// person wrote (legacy prose feedings included) is never replaced.
 func feedingUpdate(stored string, activity *domainactivity.Activity, fields *domainactivity.UpdateFields, merged domainactivity.Details, validate func() error) error {
 	storedFeeding := stored == "feeding"
 	if storedFeeding {
@@ -71,7 +72,7 @@ func feedingUpdate(stored string, activity *domainactivity.Activity, fields *dom
 	if err := validate(); err != nil {
 		return err
 	}
-	if _, hasVolume := merged["volume_ml"]; hasVolume && fields.Note == nil {
+	if fields.Note == nil && domainactivity.IsGeneratedFeedingNote(activity.Subject, activity.Details, activity.Note) {
 		subject := activity.Subject
 		if fields.Subject != nil {
 			subject = *fields.Subject

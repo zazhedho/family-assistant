@@ -224,3 +224,28 @@ func TestFeedingReportedKeys(t *testing.T) {
 		t.Fatal("want 4 keys")
 	}
 }
+
+func TestIsGeneratedFeedingNote(t *testing.T) {
+	d := Details{"volume_ml": float64(60), "leftover_ml": float64(20)}
+	if !IsGeneratedFeedingNote("Zeia", d, FeedingNote("Zeia", d)) {
+		t.Fatal("backend note not recognised")
+	}
+	if !IsGeneratedFeedingNote("", Details{"volume_ml": 60}, FeedingNote("", Details{"volume_ml": 60})) {
+		t.Fatal("backend note without subject not recognised")
+	}
+	for name, tc := range map[string]struct {
+		subject string
+		details Details
+		note    string
+	}{
+		"legacy prose":    {"", Details{}, "Feeding Baby Zeia — volume 60 ml"},
+		"caller note":     {"Zeia", Details{"volume_ml": 60}, "Zeia minum 60 ml"},
+		"stale generated": {"Zeia", Details{"volume_ml": 90}, FeedingNote("Zeia", Details{"volume_ml": 60})},
+		"other subject":   {"Bima", Details{"volume_ml": 60}, FeedingNote("Zeia", Details{"volume_ml": 60})},
+		"empty note":      {"", Details{}, ""},
+	} {
+		if IsGeneratedFeedingNote(tc.subject, tc.details, tc.note) {
+			t.Fatalf("%s: treated as generated", name)
+		}
+	}
+}

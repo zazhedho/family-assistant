@@ -242,7 +242,12 @@ func (r *Repository) ReportFeeding(ctx context.Context, req domainactivity.Feedi
 			result = domainactivity.FeedingReportResult{Activity: *target, Previous: previous}
 			return nil
 		}
-		note := domainactivity.FeedingNote(target.Subject, next)
+		// Only a backend-generated note follows the report; a note a person
+		// wrote (including legacy prose feedings) is kept as is.
+		note := target.Note
+		if domainactivity.IsGeneratedFeedingNote(target.Subject, target.Details, target.Note) {
+			note = domainactivity.FeedingNote(target.Subject, next)
+		}
 		update := tx.Model(&domainactivity.Activity{}).
 			Where("id = ? AND space_id = ?", target.ID, spaceID).
 			Updates(map[string]any{"details": next, "note": note, "updated_at": req.Now})
