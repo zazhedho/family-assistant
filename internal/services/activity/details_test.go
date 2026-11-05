@@ -514,3 +514,47 @@ func TestReportFeedingLeftoverValidatesInput(t *testing.T) {
 		})
 	}
 }
+
+func TestUpdateKindToFeedingRejectsStoredReportedKeys(t *testing.T) {
+	forged := func() *domainactivity.Activity {
+		return &domainactivity.Activity{ID: "activity-1", SpaceID: testSpace, CreatedByMemberID: "member-1", Kind: "note", Note: "x", Details: domainactivity.Details{
+			"volume_ml": float64(60), "leftover_ml": float64(10), "outcome": "finished", "expired_ml": float64(0), "leftover_reported_at": "2020-01-01T00:00:00Z",
+		}}
+	}
+	kind := "feeding"
+
+	repo, spaces, audit := ownerSetup(forged())
+	service := activityService(repo, spaces, audit)
+	_, err := service.Update(context.Background(), ownerActor("activities:update"), testSpace, "activity-1", dto.ActivityUpdateInput{Kind: &kind})
+	requireValidation(t, err, "details")
+	if repo.updated {
+		t.Fatal("forged feeding report reached the repository")
+	}
+
+	repo, spaces, audit = ownerSetup(forged())
+	service = activityService(repo, spaces, audit)
+	removal := map[string]any{}
+	for _, key := range domainactivity.FeedingReportedKeys() {
+		removal[key] = nil
+	}
+	got, err := service.Update(context.Background(), ownerActor("activities:update"), testSpace, "activity-1", dto.ActivityUpdateInput{Kind: &kind, Details: removal})
+	if err != nil {
+		t.Fatalf("update with reported keys removed: %v", err)
+	}
+	if !repo.updated || got.Kind != "feeding" || len(got.Details) != 1 || got.Note != domainactivity.FeedingNote("", domainactivity.Details{"volume_ml": 60}) {
+		t.Fatalf("result = %+v", got)
+	}
+}
+
+func TestReportFeedingLeftoverAuditsOnlyValidFeedingID(t *testing.T) {
+	repo, spaces, audit := ownerSetup(nil)
+	service := activityService(repo, spaces, audit)
+	input := feedingInput()
+	input.FeedingID = strings.Repeat("a", 500)
+	_, err := service.ReportFeedingLeftover(context.Background(), ownerActor("activities:update"), input)
+	requireValidation(t, err, "feeding_id")
+	last := audit.events[len(audit.events)-1]
+	if last.ResourceID != "" || last.ErrorMessage != "validation" {
+		t.Fatalf("audit = %+v, want empty resource id", last)
+	}
+}

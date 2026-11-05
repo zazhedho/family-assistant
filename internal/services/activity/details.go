@@ -134,7 +134,8 @@ func prepareDetailsUpdate(activity *domainactivity.Activity, fields *domainactiv
 	if fields.Kind != nil {
 		kind = *fields.Kind
 	}
-	if kind == feedingKind {
+	storedFeeding := domainactivity.NormalizeKind(activity.Kind) == feedingKind
+	if kind == feedingKind && storedFeeding {
 		for _, key := range domainactivity.FeedingReportedKeys() {
 			if _, ok := fields.DetailsPatch[key]; ok {
 				return nil, &serviceauthorization.ValidationError{Field: "details", Reason: key + " can only be set by the feeding leftover report"}
@@ -142,6 +143,15 @@ func prepareDetailsUpdate(activity *domainactivity.Activity, fields *domainactiv
 		}
 	}
 	merged := domainactivity.ApplyDetailsPatch(activity.Details, fields.DetailsPatch)
+	// A record turned into a feeding must not carry a report it never went
+	// through the report tool for; the caller may remove those keys with null.
+	if kind == feedingKind && !storedFeeding {
+		for _, key := range domainactivity.FeedingReportedKeys() {
+			if _, ok := merged[key]; ok {
+				return nil, &serviceauthorization.ValidationError{Field: "details", Reason: key + " can only be set by the feeding leftover report; remove it when changing the kind to feeding"}
+			}
+		}
+	}
 	if fields.Kind != nil || len(fields.DetailsPatch) > 0 {
 		if err := domainactivity.ValidateDetails(kind, merged); err != nil {
 			return nil, detailsValidationError(err, "")

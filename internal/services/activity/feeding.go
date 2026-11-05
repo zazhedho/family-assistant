@@ -27,7 +27,8 @@ func (s *service) ReportFeedingLeftover(ctx context.Context, actor domainidentit
 	if spaceID == "" {
 		spaceID = strings.TrimSpace(actor.SpaceID)
 	}
-	resourceID := strings.TrimSpace(input.FeedingID)
+	// The audit resource id is set only once the feeding id is a valid UUID.
+	resourceID := ""
 	defer func() {
 		if err == nil {
 			return
@@ -44,6 +45,7 @@ func (s *service) ReportFeedingLeftover(ctx context.Context, actor domainidentit
 	if err != nil {
 		return nil, err
 	}
+	resourceID = selector.FeedingID
 	if err := s.authorize.Authorize(ctx, actor, updatePermission, domainauthorization.Resource{SpaceID: spaceID}); err != nil {
 		return nil, err
 	}
