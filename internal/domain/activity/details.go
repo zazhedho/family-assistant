@@ -77,9 +77,6 @@ func detailsErr(field, reason string) error {
 var kindAliases = map[string]string{
 	"bathing":        "bath",
 	"bottle_feeding": "feeding",
-	"bottle_feed":    "feeding",
-	"breast_feeding": "feeding",
-	"breastfeeding":  "feeding",
 }
 
 // NormalizeKind lowercases, trims and canonicalizes an activity kind.

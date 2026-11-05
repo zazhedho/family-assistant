@@ -10,10 +10,8 @@ import (
 const (
 	// FeedingTimeTolerance is how far a reported feeding time may differ from a stored one.
 	FeedingTimeTolerance = 20 * time.Minute
-	// FeedingOpenLookback is how far before the message an open feeding is still a default
-	// target. 3h30m (not 3h) so a feeding 3h14m old still counts as open and is reported as
-	// ambiguous next to a newer one.
-	FeedingOpenLookback = 3*time.Hour + 30*time.Minute
+	// FeedingOpenLookback is how far before the message an open feeding is still a default target.
+	FeedingOpenLookback = 3 * time.Hour
 
 	maxFeedingCandidates = 5
 )

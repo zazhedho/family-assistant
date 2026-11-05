@@ -101,11 +101,22 @@ func TestSelectFeeding(t *testing.T) {
 		}
 	})
 	t.Run("default two open ambiguous", func(t *testing.T) {
-		fs := []Activity{feed("a", at(18, 26), nil), feed("b", at(21, 30), nil)}
+		fs := []Activity{feed("a", at(19, 30), nil), feed("b", at(21, 30), nil)}
 		_, err := SelectFeeding(fs, FeedingSelector{MessageAt: at(21, 40)})
 		te := targetErr(t, err, "ambiguous", 2)
 		if !te.Candidates[0].Open {
 			t.Fatal("candidate should be open")
+		}
+	})
+	t.Run("open feeding beyond 3h is not auto-selected", func(t *testing.T) {
+		fs := []Activity{feed("a", at(18, 26), nil)}
+		te := targetErr(t, func() error { _, err := SelectFeeding(fs, FeedingSelector{MessageAt: at(21, 40)}); return err }(), "none", 1)
+		if te.Candidates[0].ID != "a" {
+			t.Fatal("candidate should list a")
+		}
+		got, err := SelectFeeding(fs, FeedingSelector{FeedingTime: tp(at(18, 30)), MessageAt: at(21, 40)})
+		if err != nil || got.ID != "a" {
+			t.Fatalf("%v %v", got, err)
 		}
 	})
 	t.Run("default skips closed", func(t *testing.T) {
@@ -162,6 +173,12 @@ func TestApplyFeedingReport(t *testing.T) {
 		got, _, err := ApplyFeedingReport(Details{"volume_ml": 100, "expired_ml": float64(30)}, FeedingReport{Outcome: "expired"}, rep)
 		if err != nil || got["expired_ml"] != 30 {
 			t.Fatalf("%v %v", got, err)
+		}
+	})
+	t.Run("stored zero does not satisfy expired", func(t *testing.T) {
+		cur := Details{"volume_ml": 100, "outcome": "finished", "expired_ml": 0}
+		if _, _, err := ApplyFeedingReport(cur, FeedingReport{Outcome: "expired"}, rep); err == nil {
+			t.Fatal("want error")
 		}
 	})
 	t.Run("leftover above volume", func(t *testing.T) {
