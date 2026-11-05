@@ -142,9 +142,9 @@ type FeedingLeftoverReportInput struct {
 	Space       string `json:"space,omitempty" jsonschema:"Space UUID or exact user-facing name; blank selects Personal Space in a private chat or the bound Space in a group or other shared chat"`
 	FeedingID   string `json:"feeding_id,omitempty" jsonschema:"feeding activity UUID; use after an ambiguous_feeding or no_feeding_match error once the user has said which feeding"`
 	FeedingTime string `json:"feeding_time,omitempty" jsonschema:"RFC3339 time of the feeding being reported. Pass whenever the user or the quoted message gives a time. Omit only to target the open feedings of the last 3 hours"`
-	LeftoverML  *int   `json:"leftover_ml,omitempty" jsonschema:"milliliters left over; 0 means finished"`
-	ExpiredML   *int   `json:"expired_ml,omitempty" jsonschema:"milliliters that expired and were discarded"`
-	Outcome     string `json:"outcome,omitempty" jsonschema:"finished or expired"`
+	LeftoverML  *int   `json:"leftover_ml,omitempty" jsonschema:"milliliters remaining. Records the amount only; the feeding stays open. Give leftover_ml or outcome, at least one"`
+	ExpiredML   *int   `json:"expired_ml,omitempty" jsonschema:"milliliters thrown away as expired. Required with outcome expired unless already stored; only valid with outcome expired (with finished it must be 0 or omitted)"`
+	Outcome     string `json:"outcome,omitempty" jsonschema:"finished = everything was drunk (expired_ml becomes 0). expired = milk was thrown away; needs expired_ml"`
 }
 
 type FeedingLeftoverReportOutput struct {
@@ -196,9 +196,9 @@ func feedingTargetMCPError(e *domainactivity.FeedingTargetError) error {
 		code, head = "ambiguous_feeding", "More than one feeding could match this report."
 	}
 	var b strings.Builder
-	b.WriteString(head)
+	b.WriteString(code + ": " + head)
 	if len(e.Candidates) > 0 {
-		b.WriteString(" Candidates (id, local time WIB, volume, state):")
+		b.WriteString(" Candidates (id, local time dd/mm HH:MM WIB, volume, state):")
 		for _, c := range e.Candidates {
 			volume, state := "volume unknown", "closed"
 			if c.VolumeML != nil {
@@ -207,7 +207,7 @@ func feedingTargetMCPError(e *domainactivity.FeedingTargetError) error {
 			if c.Open {
 				state = "open"
 			}
-			fmt.Fprintf(&b, "\n- %s, %s, %s, %s", c.ID, c.OccurredAt.In(loc).Format("15:04, 2 Jan"), volume, state)
+			fmt.Fprintf(&b, "\n- %s, %s, %s, %s", c.ID, c.OccurredAt.In(loc).Format("02/01 15:04 WIB"), volume, state)
 		}
 	}
 	b.WriteString("\nAsk the user which feeding they mean, then call feeding_leftover_report again with feeding_id.")
@@ -256,7 +256,7 @@ func registerActivityTools(server *mcpsdk.Server, resolver interfaceidentity.Res
 		return ActivityUpdate(ctx, resolver, service, input)
 	})
 	addTool(server, &mcpsdk.Tool{
-		Name: "feeding_leftover_report", Description: "The ONLY way to record leftover, finished or expired milk for an existing feeding; activity_update cannot. Pass feeding_time whenever the user or the quoted message gives a time. Without feeding_id or feeding_time the open feedings of the last 3 hours are targeted. On ambiguous_feeding or no_feeding_match, ask the user which feeding they mean, then call again with feeding_id. corrected=true means an earlier report was overwritten.",
+		Name: "feeding_leftover_report", Description: "The ONLY way to record leftover, finished or expired milk for an existing feeding; activity_update cannot. Pass feeding_time whenever the user or the quoted message gives a time. Give leftover_ml or outcome (at least one). leftover_ml records the remaining amount and keeps the feeding open; outcome=finished means everything was drunk; outcome=expired needs expired_ml. A repeat report overwrites earlier values. Without feeding_id or feeding_time the open feedings of the last 3 hours are targeted. On ambiguous_feeding or no_feeding_match, ask the user which feeding they mean, then call again with feeding_id. corrected=true means an earlier report was overwritten.",
 	}, func(ctx context.Context, input FeedingLeftoverReportInput) (FeedingLeftoverReportOutput, error) {
 		return FeedingLeftoverReport(ctx, resolver, service, input)
 	})

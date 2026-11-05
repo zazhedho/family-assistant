@@ -13,6 +13,7 @@ import (
 	domainspace "family-assistant/internal/domain/space"
 	"family-assistant/internal/dto"
 	interfaceactivity "family-assistant/internal/interfaces/activity"
+	serviceauthorization "family-assistant/internal/services/authorization"
 	serviceidentity "family-assistant/internal/services/identity"
 )
 
@@ -302,7 +303,7 @@ func TestFeedingLeftoverReportHandler(t *testing.T) {
 			if !errors.As(err, &mapped) || mapped.Code != tt.code {
 				t.Fatalf("%s: error = %v", tt.reason, err)
 			}
-			for _, want := range []string{"feed-aaa, 08:05, 5 Nov, 120 ml, open", "feed-bbb, 09:30, 5 Nov, volume unknown, closed", "feeding_id", "ask the user"} {
+			for _, want := range []string{"feed-aaa, 05/11 08:05 WIB, 120 ml, open", "feed-bbb, 05/11 09:30 WIB, volume unknown, closed", "feeding_id", "ask the user"} {
 				if !strings.Contains(strings.ToLower(mapped.Message), strings.ToLower(want)) {
 					t.Fatalf("%s: message %q lacks %q", tt.reason, mapped.Message, want)
 				}
@@ -315,6 +316,22 @@ func TestFeedingLeftoverReportHandler(t *testing.T) {
 		var mapped *MCPError
 		if !errors.As(err, &mapped) || mapped.Code != "invalid_input" || service.reportCalls != 0 {
 			t.Fatalf("error = %v calls = %d", err, service.reportCalls)
+		}
+	})
+	t.Run("unparseable feeding_time", func(t *testing.T) {
+		service := &mcpActivityServiceStub{}
+		_, err := FeedingLeftoverReport(feedingReportContext(messageAt), feedingReportResolver(spaceID), service, FeedingLeftoverReportInput{Space: "Baby", FeedingTime: "yesterday", LeftoverML: &ten})
+		var mapped *MCPError
+		if !errors.As(err, &mapped) || mapped.Code != "invalid_input" || service.reportCalls != 0 {
+			t.Fatalf("error = %v calls = %d", err, service.reportCalls)
+		}
+	})
+	t.Run("bad outcome reaches service validation", func(t *testing.T) {
+		service := &mcpActivityServiceStub{reportErr: &serviceauthorization.ValidationError{Field: "outcome", Reason: "must be finished or expired"}}
+		_, err := FeedingLeftoverReport(feedingReportContext(messageAt), feedingReportResolver(spaceID), service, FeedingLeftoverReportInput{Space: "Baby", Outcome: "spilled"})
+		var mapped *MCPError
+		if !errors.As(err, &mapped) || mapped.Code != "invalid_input" || service.reportCalls != 1 || service.reportInput.Outcome != "spilled" {
+			t.Fatalf("error = %v calls = %d input = %+v", err, service.reportCalls, service.reportInput)
 		}
 	})
 	t.Run("other errors mapped", func(t *testing.T) {
@@ -350,5 +367,38 @@ func TestActivityUpdatePassesDetailsAndSubject(t *testing.T) {
 	})
 	if err != nil || service.updateInput.Subject == nil || *service.updateInput.Subject != "Aisha" || service.updateInput.Details["celsius"] != 38.5 {
 		t.Fatalf("err = %v input = %+v", err, service.updateInput)
+	}
+}
+
+func TestFeedingLeftoverReportToolErrorReachesModel(t *testing.T) {
+	vol := 120
+	for _, tt := range []struct{ reason, code string }{{"ambiguous", "ambiguous_feeding"}, {"none", "no_feeding_match"}} {
+		t.Run(tt.reason, func(t *testing.T) {
+			service := &mcpActivityServiceStub{reportErr: &domainactivity.FeedingTargetError{Reason: tt.reason, Candidates: []domainactivity.FeedingCandidate{
+				{ID: "feed-aaa", OccurredAt: time.Date(2026, 11, 5, 1, 5, 0, 0, time.UTC), VolumeML: &vol, Open: true},
+				{ID: "feed-bbb", OccurredAt: time.Date(2026, 11, 5, 2, 30, 0, 0, time.UTC)},
+			}}}
+			resolver := activityReminderResolver()
+			resolver.permissions = append(resolver.permissions, domainpermission.Permission{Resource: "activities", Action: "update"})
+			server := activityReminderHTTPServer(t, resolver, service, &reminderToolServiceStub{}, "identity-secret")
+			identity := newSignedIdentityEnvelope("identity-secret", time.Now())
+			identity.Version, identity.MessageAt = "v2", time.Now().Unix()
+			identity.Signature = signIdentityEnvelope("identity-secret", identity)
+			response := callMCPServer(t, server.URL, "profile", "secret", "tools/call", map[string]any{
+				"name": "feeding_leftover_report", "arguments": map[string]any{"leftover_ml": 20, identityArgumentName: identity},
+			})
+			if response.Result == nil || !response.Result.IsError || len(response.Result.Content) == 0 {
+				t.Fatalf("response = %+v", response)
+			}
+			text := response.Result.Content[0].Text
+			for _, want := range []string{"feed-aaa, 05/11 08:05 WIB, 120 ml, open", "feed-bbb, 05/11 09:30 WIB, volume unknown, closed", "feeding_id", "Ask the user"} {
+				if !strings.Contains(text, want) {
+					t.Fatalf("tool error text %q lacks %q", text, want)
+				}
+			}
+			if !strings.HasPrefix(text, tt.code+":") {
+				t.Fatalf("tool error text %q does not start with code %q", text, tt.code)
+			}
+		})
 	}
 }
