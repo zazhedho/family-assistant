@@ -259,19 +259,20 @@ func TestFeedingLeftoverReportHandler(t *testing.T) {
 	ten := 10
 	t.Run("success and corrected flag", func(t *testing.T) {
 		for _, tt := range []struct {
-			name     string
-			previous domainactivity.Details
-			changed  bool
-			want     bool
+			name           string
+			previous, next domainactivity.Details
+			changed        bool
+			want           bool
 		}{
-			{"first report", domainactivity.Details{"volume_ml": 100}, true, false},
-			{"overwrite", domainactivity.Details{"volume_ml": 100, "leftover_ml": 5}, true, true},
-			{"overwrite outcome", domainactivity.Details{"outcome": "finished"}, true, true},
-			{"identical repeat", domainactivity.Details{"leftover_ml": 10}, false, false},
+			{"first report", domainactivity.Details{"volume_ml": 100}, domainactivity.Details{"volume_ml": 100, "leftover_ml": 10}, true, false},
+			{"overwrite", domainactivity.Details{"volume_ml": 100, "leftover_ml": 5}, domainactivity.Details{"volume_ml": 100, "leftover_ml": 10}, true, true},
+			{"follow-up finished after leftover", domainactivity.Details{"volume_ml": 100, "leftover_ml": 10}, domainactivity.Details{"volume_ml": 100, "leftover_ml": 10, "outcome": "finished", "expired_ml": 0}, true, false},
+			{"overwrite outcome", domainactivity.Details{"outcome": "finished", "expired_ml": 0}, domainactivity.Details{"outcome": "expired", "expired_ml": 20}, true, true},
+			{"identical repeat", domainactivity.Details{"leftover_ml": 10}, domainactivity.Details{"leftover_ml": 10}, false, false},
 		} {
 			t.Run(tt.name, func(t *testing.T) {
 				service := &mcpActivityServiceStub{reported: &domainactivity.FeedingReportResult{
-					Activity: domainactivity.Activity{ID: "feeding-1", SpaceID: spaceID, Kind: "feeding"}, Previous: tt.previous, Changed: tt.changed,
+					Activity: domainactivity.Activity{ID: "feeding-1", SpaceID: spaceID, Kind: "feeding", Details: tt.next}, Previous: tt.previous, Changed: tt.changed,
 				}}
 				got, err := FeedingLeftoverReport(feedingReportContext(messageAt), feedingReportResolver(spaceID), service, FeedingLeftoverReportInput{
 					Space: "Baby", FeedingID: "feeding-1", FeedingTime: "2026-11-05T08:00:00+07:00", LeftoverML: &ten,

@@ -249,3 +249,25 @@ func TestIsGeneratedFeedingNote(t *testing.T) {
 		}
 	}
 }
+
+func TestFeedingReportOverwrites(t *testing.T) {
+	stamp := "2026-11-05T10:00:00Z"
+	for _, tc := range []struct {
+		name           string
+		previous, next Details
+		want           bool
+	}{
+		{"first leftover", Details{"volume_ml": 100}, Details{"volume_ml": 100, "leftover_ml": 40, "leftover_reported_at": stamp}, false},
+		{"leftover then finished", Details{"volume_ml": 100, "leftover_ml": float64(40)}, Details{"volume_ml": 100, "leftover_ml": 40, "outcome": "finished", "expired_ml": 0}, false},
+		{"leftover 40 then 30", Details{"volume_ml": 100, "leftover_ml": float64(40)}, Details{"volume_ml": 100, "leftover_ml": 30}, true},
+		{"expired_ml only", Details{"volume_ml": 100, "outcome": "expired", "expired_ml": float64(20)}, Details{"volume_ml": 100, "outcome": "expired", "expired_ml": 30}, true},
+		{"outcome changed", Details{"volume_ml": 100, "outcome": "finished", "expired_ml": float64(0)}, Details{"volume_ml": 100, "outcome": "expired", "expired_ml": 0}, true},
+		{"reopened", Details{"volume_ml": 100, "leftover_ml": float64(0), "outcome": "finished", "expired_ml": float64(0)}, Details{"volume_ml": 100, "leftover_ml": 30}, true},
+		{"identical", Details{"volume_ml": 100, "leftover_ml": float64(40)}, Details{"volume_ml": 100, "leftover_ml": 40}, false},
+		{"only timestamp differs", Details{"leftover_ml": 40, "leftover_reported_at": "2026-11-05T08:00:00Z"}, Details{"leftover_ml": 40, "leftover_reported_at": stamp}, false},
+	} {
+		if got := FeedingReportOverwrites(tc.previous, tc.next); got != tc.want {
+			t.Errorf("%s: got %v, want %v", tc.name, got, tc.want)
+		}
+	}
+}

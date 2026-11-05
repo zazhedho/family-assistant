@@ -149,7 +149,7 @@ type FeedingLeftoverReportInput struct {
 
 type FeedingLeftoverReportOutput struct {
 	Activity  domainactivity.Activity `json:"activity"`
-	Corrected bool                    `json:"corrected" jsonschema:"true when this report overwrote an earlier leftover or outcome"`
+	Corrected bool                    `json:"corrected" jsonschema:"true only when this report changed or removed a leftover_ml, outcome or expired_ml value stored earlier; a first value or a follow-up such as finished after a leftover is not a correction"`
 }
 
 func FeedingLeftoverReport(ctx context.Context, resolver interfaceidentity.Resolver, service interfaceactivity.ServiceActivityInterface, input FeedingLeftoverReportInput) (FeedingLeftoverReportOutput, error) {
@@ -181,9 +181,8 @@ func FeedingLeftoverReport(ctx context.Context, resolver interfaceidentity.Resol
 	if result == nil {
 		return FeedingLeftoverReportOutput{}, MapToolError(errors.New("activity service returned no result"))
 	}
-	_, hadLeftover := result.Previous["leftover_ml"]
-	_, hadOutcome := result.Previous["outcome"]
-	return FeedingLeftoverReportOutput{Activity: result.Activity, Corrected: result.Changed && (hadLeftover || hadOutcome)}, nil
+	corrected := result.Changed && domainactivity.FeedingReportOverwrites(result.Previous, result.Activity.Details)
+	return FeedingLeftoverReportOutput{Activity: result.Activity, Corrected: corrected}, nil
 }
 
 func feedingTargetMCPError(e *domainactivity.FeedingTargetError) error {
@@ -256,7 +255,7 @@ func registerActivityTools(server *mcpsdk.Server, resolver interfaceidentity.Res
 		return ActivityUpdate(ctx, resolver, service, input)
 	})
 	addTool(server, &mcpsdk.Tool{
-		Name: "feeding_leftover_report", Description: "The ONLY way to record leftover, finished or expired milk for an existing feeding; activity_update cannot. Pass feeding_time whenever the user or the quoted message gives a time. Give leftover_ml or outcome (at least one). leftover_ml records the remaining amount and keeps the feeding open; outcome=finished means everything was drunk; outcome=expired needs expired_ml. A repeat report overwrites earlier values. Without feeding_id or feeding_time the open feedings of the last 3 hours are targeted. On ambiguous_feeding or no_feeding_match, ask the user which feeding they mean, then call again with feeding_id. corrected=true means an earlier report was overwritten.",
+		Name: "feeding_leftover_report", Description: "The ONLY way to record leftover, finished or expired milk for an existing feeding; activity_update cannot. Pass feeding_time whenever the user or the quoted message gives a time. Give leftover_ml or outcome (at least one). leftover_ml records the remaining amount and keeps the feeding open; outcome=finished means everything was drunk; outcome=expired needs expired_ml. A repeat report overwrites earlier values. Without feeding_id or feeding_time the open feedings of the last 3 hours are targeted. On ambiguous_feeding or no_feeding_match, ask the user which feeding they mean, then call again with feeding_id. corrected=true means a value from an earlier report was changed or removed (not a first value or a follow-up such as finished after a leftover).",
 	}, func(ctx context.Context, input FeedingLeftoverReportInput) (FeedingLeftoverReportOutput, error) {
 		return FeedingLeftoverReport(ctx, resolver, service, input)
 	})

@@ -232,3 +232,19 @@ func FeedingNote(subject string, details Details) string {
 func IsGeneratedFeedingNote(subject string, details Details, note string) bool {
 	return note != "" && note == FeedingNote(subject, details)
 }
+
+// FeedingReportOverwrites reports whether a report changed or removed a
+// reported value (leftover_ml, outcome, expired_ml) that existed before it.
+// Adding a value for the first time, e.g. "finished" after a leftover, is a
+// normal follow-up and not an overwrite.
+func FeedingReportOverwrites(previous, next Details) bool {
+	for _, key := range []string{"leftover_ml", "expired_ml"} {
+		if _, had := previous[key]; had && !sameInt(previous[key], next[key]) {
+			return true
+		}
+	}
+	if _, had := previous["outcome"]; had && stringOf(previous["outcome"]) != stringOf(next["outcome"]) {
+		return true
+	}
+	return false
+}

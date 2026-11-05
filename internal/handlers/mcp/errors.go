@@ -3,7 +3,9 @@ package mcp
 import (
 	"errors"
 	"log/slog"
+	"strings"
 
+	domainactivity "family-assistant/internal/domain/activity"
 	domainidentity "family-assistant/internal/domain/identity"
 	domaininvitation "family-assistant/internal/domain/invitation"
 	domainreminder "family-assistant/internal/domain/reminder"
@@ -13,8 +15,12 @@ import (
 	servicereminder "family-assistant/internal/services/reminder"
 	"family-assistant/utils"
 
+	"github.com/jackc/pgx/v5/pgconn"
 	"gorm.io/gorm"
 )
+
+// pgCheckViolation is the SQLSTATE of a CHECK constraint failure.
+const pgCheckViolation = "23514"
 
 var (
 	ErrMCPUnauthenticated = errors.New("authentication required")
@@ -57,6 +63,18 @@ func MapToolError(err error, logger ...*slog.Logger) error {
 		return mapped
 	}
 
+	// Validation reasons are server-written constants, so the model may see
+	// them; they never contain user text.
+	if validation, ok := errors.AsType[*serviceauthorization.ValidationError](err); ok {
+		return &MCPError{Code: "invalid_input", Message: invalidInputMessage(validation.Field, validation.Reason), cause: err}
+	}
+	if details, ok := errors.AsType[*domainactivity.DetailsError](err); ok {
+		return &MCPError{Code: "invalid_input", Message: invalidInputMessage(details.Field, details.Reason), cause: err}
+	}
+	if isCheckViolation(err) {
+		return &MCPError{Code: "invalid_input", Message: ErrMCPInvalidInput.Error() + ": details violate a constraint", cause: err}
+	}
+
 	switch {
 	case errors.Is(err, serviceidentity.ErrUnauthenticated):
 		return &MCPError{Code: "unauthenticated", Message: ErrMCPUnauthenticated.Error(), cause: err}
@@ -89,4 +107,24 @@ func MapToolError(err error, logger ...*slog.Logger) error {
 		log.Error("mcp tool failed", "error", err)
 		return &MCPError{Code: "internal", Message: ErrMCPInternal.Error(), cause: err}
 	}
+}
+
+func invalidInputMessage(field, reason string) string {
+	field, reason = strings.TrimSpace(field), strings.TrimSpace(reason)
+	switch {
+	case reason == "":
+		return ErrMCPInvalidInput.Error()
+	case field == "":
+		return ErrMCPInvalidInput.Error() + ": " + reason
+	default:
+		return ErrMCPInvalidInput.Error() + ": " + field + " " + reason
+	}
+}
+
+func isCheckViolation(err error) bool {
+	if errors.Is(err, gorm.ErrCheckConstraintViolated) {
+		return true
+	}
+	pgErr, ok := errors.AsType[*pgconn.PgError](err)
+	return ok && pgErr.Code == pgCheckViolation
 }
