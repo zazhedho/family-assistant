@@ -50,7 +50,8 @@ func detailsValidationError(err error, prefix string) error {
 
 // createHook adjusts the details of a new activity of one kind. It must call
 // validate at the point the generic validation should run, and returns the
-// details to store plus a generated note ("" keeps the caller's note).
+// details to store plus a generated note ("" keeps the caller's note). A
+// supplied note always takes precedence over a generated one.
 type createHook func(subject string, details domainactivity.Details, reportedAt time.Time, validate func() error) (domainactivity.Details, string, error)
 
 // updateHook guards an update of one kind. stored is the normalized kind of
@@ -101,7 +102,12 @@ func createDetails(kind, subject string, raw map[string]any, note string, report
 			return nil, "", err
 		}
 		details = next
+		// A note a person or agent supplied wins over the generated one, which
+		// is only the fallback for a missing note.
 		if generated != "" {
+			if supplied := strings.TrimSpace(note); supplied != "" {
+				return details, supplied, nil
+			}
 			return details, generated, nil
 		}
 	} else if err := validate(); err != nil {

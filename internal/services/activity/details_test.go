@@ -88,7 +88,7 @@ func TestCreateFeedingGeneratesNote(t *testing.T) {
 	at := time.Date(2026, 11, 5, 8, 0, 0, 0, time.UTC)
 
 	created, err := service.Create(context.Background(), ownerActor("activities:create"), dto.ActivityCreateInput{
-		Kind: "bottle feeding", Subject: " Aisha ", Note: "agent wrote this", OccurredAt: at, Details: map[string]any{"volume_ml": float64(60)},
+		Kind: "bottle feeding", Subject: " Aisha ", OccurredAt: at, Details: map[string]any{"volume_ml": float64(60)},
 	})
 	if err != nil {
 		t.Fatalf("create: %v", err)
@@ -113,6 +113,32 @@ func TestCreateFeedingGeneratesNote(t *testing.T) {
 	}
 	if repo.created == nil || repo.created.Note != domainactivity.FeedingNote("", domainactivity.Details{"volume_ml": 90}) {
 		t.Fatalf("created = %+v", repo.created)
+	}
+}
+
+func TestCreateFeedingKeepsSuppliedNote(t *testing.T) {
+	at := time.Date(2026, 11, 5, 8, 0, 0, 0, time.UTC)
+	for _, tc := range []struct {
+		name, note, want string
+	}{
+		{"person note wins", " sufor merk X, muntah sedikit ", "sufor merk X, muntah sedikit"},
+		{"blank note falls back to generated", "   ", domainactivity.FeedingNote("Aisha", domainactivity.Details{"volume_ml": 60})},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			repo, spaces, audit := ownerSetup(nil)
+			service := activityService(repo, spaces, audit)
+			if _, err := service.Create(context.Background(), ownerActor("activities:create"), dto.ActivityCreateInput{
+				Kind: "feeding", Subject: "Aisha", Note: tc.note, OccurredAt: at, Details: map[string]any{"volume_ml": 60},
+			}); err != nil {
+				t.Fatalf("create: %v", err)
+			}
+			if repo.created.Note != tc.want {
+				t.Fatalf("note = %q, want %q", repo.created.Note, tc.want)
+			}
+			if v, ok := repo.created.Details["volume_ml"]; !ok || v != 60 {
+				t.Fatalf("details = %+v", repo.created.Details)
+			}
+		})
 	}
 }
 
@@ -152,7 +178,7 @@ func TestCreateFeedingWithLeftoverInOneCall(t *testing.T) {
 			repo, spaces, audit := ownerSetup(nil)
 			service := activityService(repo, spaces, audit)
 			if _, err := service.Create(context.Background(), ownerActor("activities:create"), dto.ActivityCreateInput{
-				Kind: "feeding", Subject: "Aisha", Note: "ignored", OccurredAt: at, Details: tc.details,
+				Kind: "feeding", Subject: "Aisha", OccurredAt: at, Details: tc.details,
 			}); err != nil {
 				t.Fatalf("create: %v", err)
 			}

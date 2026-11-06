@@ -22,7 +22,7 @@ type ActivityCreateInput struct {
 	Space      string         `json:"space,omitempty" jsonschema:"Space UUID or exact user-facing name; blank selects Personal Space in a private chat or the bound Space in a group or other shared chat"`
 	Kind       string         `json:"kind" jsonschema:"short event type such as breastfeeding, diaper, sleep, or note"`
 	Subject    string         `json:"subject,omitempty" jsonschema:"who or what the event is about, e.g. a child's name or a medicine; optional"`
-	Note       string         `json:"note,omitempty" jsonschema:"human-readable details. May be omitted for a feeding created with details.volume_ml: the backend writes the note"`
+	Note       string         `json:"note,omitempty" jsonschema:"human-readable details. May be omitted for a feeding created with details.volume_ml: the backend writes and keeps updating the note. Send a note for a feeding only to add information the details cannot hold (brand, vomiting, ...): it is then kept as written and never regenerated"`
 	Details    map[string]any `json:"details,omitempty" jsonschema:"structured details by kind. feeding: {volume_ml}, optionally leftover_ml/outcome/expired_ml at creation. medication: {name,dose,unit}. vaccination: {vaccine,dose_no,next_due}. temperature: {celsius}. growth_measurement: {weight_kg,height_cm,head_cm}"`
 	OccurredAt string         `json:"occurred_at,omitempty" jsonschema:"RFC3339 event time ONLY when the user specifies a time. Omit for now or no stated time: backend uses the trusted WhatsApp message timestamp, not processing time. Never use another record's created_at or updated_at."`
 }
@@ -243,7 +243,7 @@ func registerActivityTools(server *mcpsdk.Server, resolver interfaceidentity.Res
 		return ActivityCreateWithReminder(ctx, resolver, service, reminderService, input)
 	})
 	addTool(server, &mcpsdk.Tool{
-		Name: "activity_create", Description: "Record a standalone timestamped note or care event in an authorized Space. Use activity_create when only an activity is requested; use activity_create_with_reminder when a reminder is also requested. Put structured data in details by kind: feeding {volume_ml, optionally leftover_ml/outcome/expired_ml}, medication {name,dose,unit}, vaccination {vaccine,dose_no,next_due}, temperature {celsius}, growth_measurement {weight_kg,height_cm,head_cm}. For a feeding with details.volume_ml the backend writes the note; omit note.",
+		Name: "activity_create", Description: "Record a standalone timestamped note or care event in an authorized Space. Use activity_create when only an activity is requested; use activity_create_with_reminder when a reminder is also requested. Put structured data in details by kind: feeding {volume_ml, optionally leftover_ml/outcome/expired_ml}, medication {name,dose,unit}, vaccination {vaccine,dose_no,next_due}, temperature {celsius}, growth_measurement {weight_kg,height_cm,head_cm}. For a feeding with details.volume_ml the backend writes the note; omit note unless the message adds information details cannot hold (brand, vomiting, ...), which a supplied note keeps verbatim. Never put amounts in a feeding note.",
 	}, func(ctx context.Context, input ActivityCreateInput) (*domainactivity.Activity, error) {
 		return ActivityCreate(ctx, resolver, service, input)
 	})
