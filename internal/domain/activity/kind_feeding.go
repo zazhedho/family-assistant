@@ -43,6 +43,9 @@ func validateFeeding(d Details) error {
 	if hasVolume && hasExpired && expired > volume {
 		return detailsErr("details.expired_ml", "must not exceed volume_ml")
 	}
+	if hasLeftover && hasExpired && expired > leftover {
+		return detailsErr("details.expired_ml", "must not exceed leftover_ml")
+	}
 	if outcome == OutcomeExpired && !hasExpired {
 		return detailsErr("details.expired_ml", "is required when outcome is expired")
 	}

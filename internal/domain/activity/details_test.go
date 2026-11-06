@@ -43,6 +43,8 @@ func TestValidateDetails(t *testing.T) {
 		{"feeding bad outcome", "feeding", Details{"outcome": "spilled"}, true},
 		{"feeding leftover too big", "feeding", Details{"volume_ml": 60, "leftover_ml": 70}, true},
 		{"feeding expired too big", "feeding", Details{"volume_ml": 60, "expired_ml": 70}, true},
+		{"feeding expired above leftover", "feeding", Details{"volume_ml": 100, "leftover_ml": 10, "outcome": "expired", "expired_ml": 40}, true},
+		{"feeding expired equals leftover", "feeding", Details{"volume_ml": 100, "leftover_ml": 10, "outcome": "expired", "expired_ml": 10}, false},
 		{"feeding expired needs amount", "feeding", Details{"outcome": "expired"}, true},
 		{"feeding negative leftover", "feeding", Details{"leftover_ml": -1}, true},
 		{"medication ok", "medication", Details{"name": "Paracetamol"}, false},
