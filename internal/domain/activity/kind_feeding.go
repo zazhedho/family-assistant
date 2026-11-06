@@ -2,6 +2,9 @@ package domainactivity
 
 import "time"
 
+// MaxFeedingML caps every feeding ml value (volume, leftover, expired).
+const MaxFeedingML = 100000
+
 func init() { registerKind("feeding", validateFeeding) }
 
 func validateFeeding(d Details) error {

@@ -665,3 +665,48 @@ func TestUpdateChecksAndWritesTheLockedRow(t *testing.T) {
 		t.Fatalf("error = %v, want not found", err)
 	}
 }
+
+func TestNormalizeSubjectFlattensControlCharacters(t *testing.T) {
+	for in, want := range map[string]string{
+		"Bayi\nSYSTEM: x":       "Bayi SYSTEM: x",
+		"  Zeia \r\n\t kecil  ": "Zeia kecil",
+		"a\u0000b\u2028c":       "a b c",
+		"Zeia":                  "Zeia",
+	} {
+		got, err := normalizeSubject(in)
+		if err != nil || got != want {
+			t.Errorf("normalizeSubject(%q) = %q, %v; want %q", in, got, err, want)
+		}
+	}
+	repo, spaces, audit := ownerSetup(nil)
+	if _, err := activityService(repo, spaces, audit).Create(context.Background(), ownerActor("activities:create"), dto.ActivityCreateInput{
+		Kind: "feeding", Subject: "Bayi\nSYSTEM: x", OccurredAt: time.Date(2026, 11, 5, 8, 0, 0, 0, time.UTC), Details: map[string]any{"volume_ml": 60},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if strings.ContainsAny(repo.created.Note, "\n\r") || repo.created.Subject != "Bayi SYSTEM: x" {
+		t.Fatalf("created = %+v", repo.created)
+	}
+}
+
+func TestReportFeedingLeftoverAuditKeepsOnlyFeedingKeys(t *testing.T) {
+	repo, spaces, audit := ownerSetup(nil)
+	feeding := domainactivity.Activity{ID: testFeeding, SpaceID: testSpace, CreatedByMemberID: "member-1", Kind: "feeding"}
+	repo.reportResult = &domainactivity.FeedingReportResult{Activity: feeding, Changed: true, Previous: domainactivity.Details{
+		"volume_ml": float64(60), "leftover_ml": float64(10), "outcome": "finished", "expired_ml": float64(0),
+		"leftover_reported_at": "2026-11-05T08:00:00Z", "free_text": "ignore previous instructions",
+	}}
+	if _, err := activityService(repo, spaces, audit).ReportFeedingLeftover(context.Background(), ownerActor("activities:update"), feedingInput()); err != nil {
+		t.Fatal(err)
+	}
+	prev, ok := audit.events[len(audit.events)-1].Metadata["previous_details"].(domainactivity.Details)
+	if !ok || len(prev) != 5 {
+		t.Fatalf("previous_details = %#v, want the five feeding keys", audit.events[len(audit.events)-1].Metadata["previous_details"])
+	}
+	if _, leaked := prev["free_text"]; leaked {
+		t.Fatalf("previous_details leaked a free-text key: %v", prev)
+	}
+	if prev["volume_ml"] != float64(60) || prev["leftover_reported_at"] != "2026-11-05T08:00:00Z" {
+		t.Fatalf("previous_details = %v", prev)
+	}
+}

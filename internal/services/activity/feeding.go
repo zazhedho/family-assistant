@@ -187,7 +187,7 @@ func (s *service) ReportFeedingLeftover(ctx context.Context, actor domainidentit
 	}
 	resourceID = result.Activity.ID
 	event := activityAuditEvent(actor, domainaudit.ActionUpdate, spaceID, resourceID, domainaudit.StatusSuccess)
-	event.Metadata["previous_details"] = result.Previous
+	event.Metadata["previous_details"] = auditedFeedingDetails(result.Previous)
 	event.Metadata["changed"] = result.Changed
 	s.writeAudit(ctx, event)
 	return result, nil
@@ -231,4 +231,18 @@ func feedingReportError(err error) error {
 		return serviceauthorization.ErrNotFound
 	}
 	return err
+}
+
+// auditedFeedingKeys are the only details keys copied into audit metadata;
+// other keys may hold free text.
+var auditedFeedingKeys = []string{"volume_ml", "leftover_ml", "outcome", "expired_ml", "leftover_reported_at"}
+
+func auditedFeedingDetails(previous domainactivity.Details) domainactivity.Details {
+	out := domainactivity.Details{}
+	for _, key := range auditedFeedingKeys {
+		if v, ok := previous[key]; ok {
+			out[key] = v
+		}
+	}
+	return out
 }

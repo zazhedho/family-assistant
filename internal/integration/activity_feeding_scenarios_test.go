@@ -499,6 +499,22 @@ func TestFeedingLeftoverScenarios(t *testing.T) {
 		}
 	})
 
+	t.Run("m: oversized ml and numbers are refused on every path", func(t *testing.T) {
+		s := newSpace(t, "scn-m")
+		feed := createFeeding(t, s, s.owner, at(5, 17, 0), 90)
+		before := snap(t, feed.ID)
+		if _, err := svc.ReportFeedingLeftover(ctx, s.owner.actor, dto.FeedingLeftoverInput{Space: s.id, FeedingID: feed.ID, MessageAt: at(5, 17, 30), LeftoverML: ip(9_000_000_000_000_000_000)}); !isValidation(err) {
+			t.Fatalf("9e18 leftover error = %v, want validation", err)
+		}
+		if _, err := svc.Update(ctx, s.owner.actor, s.id, feed.ID, dto.ActivityUpdateInput{Details: map[string]any{"volume_ml": domainactivity.MaxFeedingML + 1}}); !isValidation(err) {
+			t.Fatalf("volume over cap error = %v, want validation", err)
+		}
+		assertSame(t, feed.ID, before)
+		if _, err := svc.Create(ctx, s.owner.actor, dto.ActivityCreateInput{Space: s.id, Kind: "mood", Note: "x", Details: map[string]any{"a": 1e300}, OccurredAt: at(5, 17, 0)}); !isValidation(err) {
+			t.Fatalf("1e300 error = %v, want validation", err)
+		}
+	})
+
 	t.Run("g: kind alias is stored canonically and found by filter", func(t *testing.T) {
 		s := newSpace(t, "scn-g")
 		a, err := svc.Create(ctx, s.owner.actor, dto.ActivityCreateInput{Space: s.id, Kind: "Bathing", Subject: "Zeia", Note: "mandi", OccurredAt: at(4, 17, 0)})

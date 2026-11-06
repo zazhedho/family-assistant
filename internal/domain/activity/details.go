@@ -115,6 +115,11 @@ func ValidateDetails(kind string, details Details) error {
 	if len(b) > MaxDetailsJSONBytes {
 		return detailsErr("details", fmt.Sprintf("too large (max %d bytes)", MaxDetailsJSONBytes))
 	}
+	// Compact JSON such as 1e300 renders as hundreds of digits in jsonb text,
+	// which would exceed the database size limit.
+	if !numbersWithinBound(map[string]any(details)) {
+		return detailsErr("details", "numbers must be between -1e15 and 1e15")
+	}
 	if v, ok := kindValidators[NormalizeKind(kind)]; ok {
 		return v(details)
 	}
@@ -149,13 +154,17 @@ func requireString(details Details, key string) error {
 	return nil
 }
 
-// optInt reads an optional integer key with a minimum value.
+// optInt reads an optional feeding ml key with a minimum value and the
+// MaxFeedingML cap (native Go ints included).
 func optInt(d Details, key string, min int) (val int, present bool, err error) {
 	v, ok := d[key]
 	if !ok {
 		return 0, false, nil
 	}
 	n, ok := toInt(v)
+	if ok && n > MaxFeedingML {
+		return 0, true, detailsErr("details."+key, fmt.Sprintf("must be at most %d", MaxFeedingML))
+	}
 	if !ok || n < min {
 		if min > 0 {
 			return 0, true, detailsErr("details."+key, "must be a positive integer")
@@ -201,4 +210,44 @@ func toInt(v any) (int, bool) {
 		return int(f), true
 	}
 	return 0, false
+}
+
+// MaxDetailsNumber bounds the absolute value of every number in details.
+const MaxDetailsNumber = 1e15
+
+// numbersWithinBound walks nested maps and slices and reports whether every
+// number has an absolute value of at most MaxDetailsNumber.
+func numbersWithinBound(v any) bool {
+	switch n := v.(type) {
+	case map[string]any:
+		for _, item := range n {
+			if !numbersWithinBound(item) {
+				return false
+			}
+		}
+	case Details:
+		return numbersWithinBound(map[string]any(n))
+	case []any:
+		for _, item := range n {
+			if !numbersWithinBound(item) {
+				return false
+			}
+		}
+	case int:
+		return n >= -MaxDetailsNumber && n <= MaxDetailsNumber
+	case int64:
+		return n >= -MaxDetailsNumber && n <= MaxDetailsNumber
+	case uint:
+		return n <= MaxDetailsNumber
+	case uint64:
+		return n <= MaxDetailsNumber
+	default:
+		if f, ok := toFloat(v); ok {
+			return math.Abs(f) <= MaxDetailsNumber
+		}
+		if _, isNum := v.(json.Number); isNum {
+			return false
+		}
+	}
+	return true
 }

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"strings"
 	"time"
+	"unicode"
 	"unicode/utf8"
 
 	domainactivity "family-assistant/internal/domain/activity"
@@ -12,8 +13,16 @@ import (
 
 const maxSubjectLength = 128
 
+// normalizeSubject flattens control characters and line breaks to single
+// spaces: the subject is user text that flows into the generated note.
 func normalizeSubject(subject string) (string, error) {
-	subject = strings.TrimSpace(subject)
+	subject = strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) {
+			return ' '
+		}
+		return r
+	}, subject)
+	subject = strings.Join(strings.Fields(subject), " ")
 	if utf8.RuneCountInString(subject) > maxSubjectLength {
 		return "", &serviceauthorization.ValidationError{Field: "subject", Reason: "must be at most 128 characters"}
 	}

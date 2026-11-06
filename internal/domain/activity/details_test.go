@@ -62,6 +62,15 @@ func TestValidateDetails(t *testing.T) {
 		{"medication too big", "medication", Details{"name": "x", "x": strings.Repeat("a", 4100)}, true},
 		{"unknown too big", "mood", big, true},
 		{"just over go cap", "mood", Details{"x": strings.Repeat("a", 2700)}, true},
+		{"feeding volume at cap", "feeding", Details{"volume_ml": MaxFeedingML}, false},
+		{"feeding volume over cap", "feeding", Details{"volume_ml": MaxFeedingML + 1}, true},
+		{"feeding huge native leftover", "feeding", Details{"leftover_ml": 9_000_000_000_000_000_000}, true},
+		{"feeding huge native expired", "feeding", Details{"expired_ml": int64(9_000_000_000_000_000_000), "outcome": "expired"}, true},
+		{"unknown huge number", "mood", Details{"a": 1e300, "b": "x"}, true},
+		{"unknown huge nested number", "mood", Details{"a": map[string]any{"b": []any{1, -1e16}}}, true},
+		{"unknown huge native int", "mood", Details{"a": int64(1) << 60}, true},
+		{"unknown number at bound", "mood", Details{"a": 1e15, "b": []any{-1e15}}, false},
+		{"medication huge extra number", "medication", Details{"name": "x", "dose": 1e300}, true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

@@ -231,6 +231,18 @@ func TestApplyFeedingReport(t *testing.T) {
 			t.Fatalf("%v %v %v", got, changed, err)
 		}
 	})
+	t.Run("huge native leftover is rejected", func(t *testing.T) {
+		_, _, err := ApplyFeedingReport(Details{}, FeedingReport{LeftoverML: ip(9_000_000_000_000_000_000)}, rep)
+		var de *DetailsError
+		if !errors.As(err, &de) {
+			t.Fatalf("err = %v, want *DetailsError", err)
+		}
+	})
+	t.Run("huge expired is rejected", func(t *testing.T) {
+		if _, _, err := ApplyFeedingReport(Details{}, FeedingReport{Outcome: "expired", ExpiredML: ip(MaxFeedingML + 1)}, rep); err == nil {
+			t.Fatal("want error")
+		}
+	})
 	t.Run("nothing reported", func(t *testing.T) {
 		if _, _, err := ApplyFeedingReport(Details{}, FeedingReport{}, rep); err == nil {
 			t.Fatal("want error")
@@ -254,10 +266,10 @@ func TestFeedingReportedKeys(t *testing.T) {
 func TestIsGeneratedFeedingNote(t *testing.T) {
 	d := Details{"volume_ml": float64(60), "leftover_ml": float64(20)}
 	if !IsGeneratedFeedingNote("Zeia", d, FeedingNote("Zeia", d)) {
-		t.Fatal("backend note not recognised")
+		t.Fatal("backend note not recognized")
 	}
 	if !IsGeneratedFeedingNote("", Details{"volume_ml": 60}, FeedingNote("", Details{"volume_ml": 60})) {
-		t.Fatal("backend note without subject not recognised")
+		t.Fatal("backend note without subject not recognized")
 	}
 	for name, tc := range map[string]struct {
 		subject string
