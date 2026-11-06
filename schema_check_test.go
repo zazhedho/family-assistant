@@ -28,7 +28,7 @@ func TestCheckActivityColumnsLogsMissingColumns(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			defer db.Close()
+			defer func() { _ = db.Close() }()
 			rows := sqlmock.NewRows([]string{"column_name"})
 			for _, c := range tc.present {
 				rows.AddRow(c)
@@ -66,7 +66,7 @@ func TestCheckActivityColumnsQueryFailureDoesNotStopStartup(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	mock.ExpectQuery(activityColumnsQuery).WillReturnError(errors.New("boom"))
 	var buf bytes.Buffer
 	if got := checkActivityColumns(context.Background(), db, slog.New(slog.NewTextHandler(&buf, nil))); got != nil {

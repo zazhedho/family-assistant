@@ -19,7 +19,7 @@ func checkActivityColumns(ctx context.Context, db *sql.DB, logger *slog.Logger) 
 		logger.Error("schema check: cannot read space_activities columns", "error", err)
 		return nil
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	present := map[string]bool{}
 	for rows.Next() {
 		var name string
