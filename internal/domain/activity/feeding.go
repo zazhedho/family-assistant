@@ -202,24 +202,35 @@ func sameInt(a, b any) bool {
 }
 
 // FeedingNote renders a deterministic Indonesian note from structured details.
-// It never includes free text from the details.
+// It never includes free text from the details. Once a feeding has an outcome
+// the note states only the final split (diminum / expired) and drops the
+// leftover, so no amount appears twice; an open feeding shows its leftover.
 func FeedingNote(subject string, details Details) string {
 	head := strings.TrimSpace("Feeding " + strings.TrimSpace(subject))
+	volume, hasVolume := toInt(details["volume_ml"])
 	var parts []string
-	if v, ok := toInt(details["volume_ml"]); ok {
-		parts = append(parts, fmt.Sprintf("volume %d ml", v))
-	}
-	if v, ok := toInt(details["leftover_ml"]); ok {
-		parts = append(parts, fmt.Sprintf("sisa %d ml", v))
+	if hasVolume {
+		parts = append(parts, fmt.Sprintf("volume %d ml", volume))
 	}
 	switch stringOf(details["outcome"]) {
 	case OutcomeFinished:
-		parts = append(parts, "habis diminum")
+		if hasVolume {
+			parts = append(parts, fmt.Sprintf("diminum %d ml", volume))
+		}
+		parts = append(parts, "habis")
 	case OutcomeExpired:
-		if v, ok := toInt(details["expired_ml"]); ok {
-			parts = append(parts, fmt.Sprintf("expired %d ml", v))
+		expired, hasExpired := toInt(details["expired_ml"])
+		if hasVolume && hasExpired {
+			parts = append(parts, fmt.Sprintf("diminum %d ml", volume-expired))
+		}
+		if hasExpired {
+			parts = append(parts, fmt.Sprintf("expired %d ml", expired))
 		} else {
 			parts = append(parts, "expired")
+		}
+	default:
+		if v, ok := toInt(details["leftover_ml"]); ok {
+			parts = append(parts, fmt.Sprintf("sisa %d ml", v))
 		}
 	}
 	if len(parts) == 0 {

@@ -15,12 +15,22 @@ func TestFeedingNote(t *testing.T) {
 	if got := FeedingNote("Zeia", Details{"volume_ml": 60, "leftover_ml": 20}); !strings.Contains(got, "sisa 20 ml") {
 		t.Fatalf("leftover: %q", got)
 	}
-	if got := FeedingNote("Zeia", Details{"volume_ml": 60, "outcome": "finished"}); !strings.Contains(got, "habis diminum") {
+	if got := FeedingNote("Zeia", Details{"volume_ml": 60, "outcome": "finished"}); got != "Feeding Zeia — volume 60 ml; diminum 60 ml; habis" {
 		t.Fatalf("finished: %q", got)
 	}
-	got := FeedingNote("Zeia", Details{"volume_ml": 100, "leftover_ml": float64(70), "outcome": "expired", "expired_ml": 40})
-	if !strings.Contains(got, "expired") || !strings.Contains(got, "40 ml") {
+	// A finished feeding that had a leftover reports only the final state.
+	if got := FeedingNote("Zeia", Details{"volume_ml": 90, "leftover_ml": 40, "outcome": "finished", "expired_ml": 0}); got != "Feeding Zeia — volume 90 ml; diminum 90 ml; habis" {
+		t.Fatalf("finished after leftover: %q", got)
+	}
+	if got := FeedingNote("Zeia", Details{"volume_ml": 90, "leftover_ml": 10, "outcome": "expired", "expired_ml": 10}); got != "Feeding Zeia — volume 90 ml; diminum 80 ml; expired 10 ml" {
 		t.Fatalf("expired: %q", got)
+	}
+	// Only part of the leftover expired: the rest was drunk.
+	if got := FeedingNote("Zeia", Details{"volume_ml": 90, "leftover_ml": float64(30), "outcome": "expired", "expired_ml": 10}); got != "Feeding Zeia — volume 90 ml; diminum 80 ml; expired 10 ml" {
+		t.Fatalf("partial expiry: %q", got)
+	}
+	if got := FeedingNote("Zeia", Details{"volume_ml": 90, "outcome": "expired"}); got != "Feeding Zeia — volume 90 ml; expired" {
+		t.Fatalf("expired without amount: %q", got)
 	}
 	d := Details{"volume_ml": 100, "leftover_ml": 70, "outcome": "expired", "expired_ml": 40, "junk": "free text"}
 	first, second := FeedingNote("Zeia", d), FeedingNote("Zeia", d)
