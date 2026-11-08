@@ -60,13 +60,13 @@ func TestScheduledMessageTextHidesInternalIDs(t *testing.T) {
 			name:       "recurring direct message",
 			target:     domainscheduledmessage.TargetDM,
 			recurrence: domainscheduledmessage.RecurrenceDaily,
-			want:       "message body\n\nBalas *unsubscribe* untuk berhenti menerima pesan ini.",
+			want:       "message body\n\n> Balas *unsubscribe* untuk berhenti menerima pesan ini.",
 		},
 		{
 			name:       "recurring group",
 			target:     domainscheduledmessage.TargetGroup,
 			recurrence: domainscheduledmessage.RecurrenceDaily,
-			want:       "message body\n\nHanya admin grup yang dapat mengubah atau menghentikan pesan terjadwal ini.",
+			want:       "message body\n\n> Hanya admin grup yang dapat mengubah atau menghentikan pesan terjadwal ini.",
 		},
 		{
 			name:       "one-time direct message",

@@ -592,15 +592,17 @@ func scheduledMessageTarget(channel *domainscheduledmessage.SpaceChannel, identi
 	return domainreminder.DeliveryTarget{Provider: "whatsapp", Target: identity.ExternalID}, nil
 }
 
+// scheduledMessageText appends the recurring-schedule footer as a WhatsApp quote
+// so it stays visually apart from the message body.
 func scheduledMessageText(schedule *domainscheduledmessage.Schedule, content string) string {
 	if schedule.Recurrence == domainscheduledmessage.RecurrenceOnce {
 		return content
 	}
 	lines := []string{content, ""}
 	if schedule.Target == domainscheduledmessage.TargetDM {
-		lines = append(lines, "Balas *unsubscribe* untuk berhenti menerima pesan ini.")
+		lines = append(lines, "> Balas *unsubscribe* untuk berhenti menerima pesan ini.")
 	} else {
-		lines = append(lines, "Hanya admin grup yang dapat mengubah atau menghentikan pesan terjadwal ini.")
+		lines = append(lines, "> Hanya admin grup yang dapat mengubah atau menghentikan pesan terjadwal ini.")
 	}
 	return strings.Join(lines, "\n")
 }
