@@ -3,6 +3,7 @@ package servicefinance
 import (
 	"context"
 	"errors"
+	"sort"
 	"strings"
 	"sync"
 	"testing"
@@ -28,6 +29,7 @@ const (
 	txOther     = "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
 	txMine      = "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
 	txOldOct    = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee"
+	catOther    = "12121212-1212-4212-8212-121212121212"
 	txOctLate   = "ffffffff-ffff-4fff-8fff-ffffffffffff"
 )
 
@@ -113,6 +115,21 @@ func (r *txRepo) FindRecentSimilar(_ context.Context, space string, t domainfina
 		}
 	}
 	return nil, nil
+}
+
+// ListCategories returns rows in the real repository order: kind, name, id.
+func (r *txRepo) ListCategories(ctx context.Context, space string, includeArchived bool) ([]domainfinance.Category, error) {
+	out, err := r.repoFake.ListCategories(ctx, space, includeArchived)
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Kind != out[j].Kind {
+			return out[i].Kind < out[j].Kind
+		}
+		if out[i].Name != out[j].Name {
+			return out[i].Name < out[j].Name
+		}
+		return out[i].ID < out[j].ID
+	})
+	return out, err
 }
 
 func (r *txRepo) ListBudgets(_ context.Context, space string, month time.Time) ([]domainfinance.Budget, error) {
@@ -403,7 +420,7 @@ func TestOccurredAtDefaultsToNow(t *testing.T) {
 func TestMerchantAndNoteLimits(t *testing.T) {
 	e := newTxEnv(t)
 	in := expense(10)
-	in.Merchant = strings.Repeat("é", 129)
+	in.Merchant = strings.Repeat("é", 256)
 	_, err := e.svc.TransactionCreate(context.Background(), memberActor(), in)
 	vErr(t, err, "merchant")
 	in = expense(10)
@@ -411,7 +428,7 @@ func TestMerchantAndNoteLimits(t *testing.T) {
 	_, err = e.svc.TransactionCreate(context.Background(), memberActor(), in)
 	vErr(t, err, "note")
 	in = expense(10)
-	in.Merchant, in.Note = strings.Repeat("é", 128), " "+strings.Repeat("n", 1000)+" "
+	in.Merchant, in.Note = strings.Repeat("é", 255), " "+strings.Repeat("n", 1000)+" "
 	res, err := e.svc.TransactionCreate(context.Background(), memberActor(), in)
 	if err != nil || len(res.Transaction.Note) != 1000 {
 		t.Fatalf("limits must be inclusive: %v", err)
@@ -645,8 +662,54 @@ func TestUpdateKeepsArchivedUnchangedRefs(t *testing.T) {
 	if _, err := e.svc.TransactionUpdate(context.Background(), memberActor(), spaceID, txMine, dto.TransactionUpdateInput{Amount: ptr(int64(6))}); err != nil {
 		t.Fatalf("editing amount must not need live refs: %v", err)
 	}
-	_, err := e.svc.TransactionUpdate(context.Background(), memberActor(), spaceID, txMine, dto.TransactionUpdateInput{Account: ptr("Kas")})
-	vErr(t, err, "account")
+	// Re-sending the stored (archived) account and category by name or id is fine.
+	same := dto.TransactionUpdateInput{Account: ptr("kas"), Category: ptr("Makan"), Note: ptr("x")}
+	if _, err := e.svc.TransactionUpdate(context.Background(), memberActor(), spaceID, txMine, same); err != nil {
+		t.Fatalf("unchanged archived refs must be accepted: %v", err)
+	}
+	same = dto.TransactionUpdateInput{Account: ptr(acctID), Category: ptr(catFood)}
+	if _, err := e.svc.TransactionUpdate(context.Background(), memberActor(), spaceID, txMine, same); err != nil {
+		t.Fatalf("unchanged archived refs by id must be accepted: %v", err)
+	}
+	// A different archived account or category is still rejected.
+	e.repo.accounts[acct2].ArchivedAt = &now
+	_, err := e.svc.TransactionUpdate(context.Background(), memberActor(), spaceID, txMine, dto.TransactionUpdateInput{Account: ptr("Bank BCA")})
+	if r := reasonOf(t, err, "account"); r != "is archived" {
+		t.Fatalf("different archived account reason = %q", r)
+	}
+	e.repo.categories["archived-cat"] = &domainfinance.Category{ID: "archived-cat", SpaceID: spaceID, Name: "Lama", Kind: "expense", ArchivedAt: &now}
+	_, err = e.svc.TransactionUpdate(context.Background(), memberActor(), spaceID, txMine, dto.TransactionUpdateInput{Category: ptr("Lama")})
+	if r := reasonOf(t, err, "category"); r != "is archived" {
+		t.Fatalf("different archived category reason = %q", r)
+	}
+}
+
+func TestUpdateBudgetStatusFollowsNewMonthAndCategory(t *testing.T) {
+	e := newTxEnv(t)
+	ctx := context.Background()
+	nov := time.Date(2026, 11, 10, 0, 0, 0, 0, time.UTC)
+	dec := time.Date(2026, 12, 10, 0, 0, 0, 0, time.UTC)
+	e.repo.categories[catOther] = &domainfinance.Category{ID: catOther, SpaceID: spaceID, Name: "Hobi", Kind: "expense"}
+	e.repo.budgets = []domainfinance.Budget{budgetFor(catFood, nov, 1_000_000), budgetFor(catFood, dec, 400_000), budgetFor(catOther, nov, 200_000)}
+	e.seed(txMine, memberID, domainfinance.Transaction{Type: "expense", Amount: 100_000, AccountID: acctID, CategoryID: ptr(catFood), OccurredAt: nov})
+
+	// Moving across the WIB month boundary (Nov 30 23:30 WIB -> Dec 1 00:30 WIB).
+	moved := time.Date(2026, 11, 30, 17, 30, 0, 0, time.UTC)
+	res, err := e.svc.TransactionUpdate(ctx, memberActor(), spaceID, txMine, dto.TransactionUpdateInput{OccurredAt: &moved})
+	if err != nil || res.BudgetStatus == nil || res.BudgetStatus.Budget != 400_000 || res.BudgetStatus.Spent != 100_000 || res.BudgetStatus.PercentUsed != 25 {
+		t.Fatalf("new month status: err=%v res=%+v", err, res)
+	}
+	back := time.Date(2026, 11, 30, 16, 30, 0, 0, time.UTC)
+	res, err = e.svc.TransactionUpdate(ctx, memberActor(), spaceID, txMine, dto.TransactionUpdateInput{OccurredAt: &back})
+	if err != nil || res.BudgetStatus == nil || res.BudgetStatus.Budget != 1_000_000 || res.BudgetStatus.PercentUsed != 10 {
+		t.Fatalf("november status: err=%v res=%+v", err, res)
+	}
+
+	// Changing the category reports the new category's budget.
+	res, err = e.svc.TransactionUpdate(ctx, memberActor(), spaceID, txMine, dto.TransactionUpdateInput{Category: ptr("Hobi")})
+	if err != nil || res.BudgetStatus == nil || res.BudgetStatus.CategoryID != catOther || res.BudgetStatus.Budget != 200_000 || res.BudgetStatus.PercentUsed != 50 {
+		t.Fatalf("new category status: err=%v res=%+v", err, res)
+	}
 }
 
 func TestUpdateReturnsBudgetStatus(t *testing.T) {
@@ -737,5 +800,71 @@ func TestTransactionWritesAreAuditedWithoutSensitiveData(t *testing.T) {
 	}
 	if e.audit.events[0].ResourceID != res.Transaction.ID {
 		t.Fatalf("create audit resource id = %q", e.audit.events[0].ResourceID)
+	}
+}
+
+const (
+	lainnyaExpense = "13131313-1313-4313-8313-131313131313"
+	lainnyaIncome  = "14141414-1414-4414-8414-141414141414"
+)
+
+func seedLainnya(e *txEnv) {
+	e.repo.categories[lainnyaExpense] = &domainfinance.Category{ID: lainnyaExpense, SpaceID: spaceID, Name: "Lainnya", Kind: "expense"}
+	e.repo.categories[lainnyaIncome] = &domainfinance.Category{ID: lainnyaIncome, SpaceID: spaceID, Name: "Lainnya", Kind: "income"}
+}
+
+func TestCategoryNameSharedByBothKindsResolvesByType(t *testing.T) {
+	e := newTxEnv(t)
+	seedLainnya(e)
+	for typ, want := range map[string]string{"income": lainnyaIncome, "expense": lainnyaExpense} {
+		in := dto.TransactionCreateInput{Type: typ, Amount: 10, Account: "Kas", Category: " lainnya "}
+		res := e.create(t, in)
+		if res.Transaction.CategoryID == nil || *res.Transaction.CategoryID != want {
+			t.Fatalf("%s: category = %v, want %s", typ, res.Transaction.CategoryID, want)
+		}
+	}
+	// A transfer has no category kind: the shared name is ambiguous (and a transfer takes none anyway).
+	tr := dto.TransactionCreateInput{Type: "transfer", Amount: 10, Account: "Kas", ToAccount: "Bank BCA", Category: "Lainnya"}
+	_, err := e.svc.TransactionCreate(context.Background(), memberActor(), tr)
+	if r := reasonOf(t, err, "category"); r != "is ambiguous" {
+		t.Fatalf("transfer reason = %q", r)
+	}
+
+	// Update: a type change with the category re-sent picks the row of the new type.
+	e.seed(txMine, memberID, domainfinance.Transaction{Type: "expense", Amount: 5, AccountID: acctID, CategoryID: ptr(lainnyaExpense)})
+	res, err := e.svc.TransactionUpdate(context.Background(), memberActor(), spaceID, txMine, dto.TransactionUpdateInput{Type: ptr("income"), Category: ptr("Lainnya")})
+	if err != nil || *res.Transaction.CategoryID != lainnyaIncome {
+		t.Fatalf("update: %v %+v", err, res)
+	}
+}
+
+func TestUserCategoryWithDefaultIncomeNameResolvesPerType(t *testing.T) {
+	e := newTxEnv(t)
+	e.repo.categories[lainnyaExpense] = &domainfinance.Category{ID: lainnyaExpense, SpaceID: spaceID, Name: "Gaji", Kind: "expense"}
+	exp := e.create(t, dto.TransactionCreateInput{Type: "expense", Amount: 10, Account: "Kas", Category: "Gaji"})
+	inc := e.create(t, dto.TransactionCreateInput{Type: "income", Amount: 10, Account: "Kas", Category: "Gaji"})
+	if *exp.Transaction.CategoryID != lainnyaExpense || *inc.Transaction.CategoryID != catSalary {
+		t.Fatalf("expense=%v income=%v", *exp.Transaction.CategoryID, *inc.Transaction.CategoryID)
+	}
+}
+
+func TestListCategoryFilterSharedName(t *testing.T) {
+	e := newTxEnv(t)
+	seedLainnya(e)
+	ctx := context.Background()
+	_, err := e.svc.TransactionList(ctx, memberActor(), dto.TransactionListInput{Category: "Lainnya"})
+	if r := reasonOf(t, err, "category"); r != "is ambiguous" {
+		t.Fatalf("reason = %q", r)
+	}
+	for typ, want := range map[string]string{"income": lainnyaIncome, "expense": lainnyaExpense} {
+		if _, err := e.svc.TransactionList(ctx, memberActor(), dto.TransactionListInput{Type: typ, Category: "Lainnya"}); err != nil {
+			t.Fatal(err)
+		}
+		if e.repo.lastFilter.CategoryID != want {
+			t.Fatalf("%s filter = %s, want %s", typ, e.repo.lastFilter.CategoryID, want)
+		}
+	}
+	if _, err := e.svc.TransactionList(ctx, memberActor(), dto.TransactionListInput{Category: lainnyaIncome}); err != nil || e.repo.lastFilter.CategoryID != lainnyaIncome {
+		t.Fatalf("id filter: %v %s", err, e.repo.lastFilter.CategoryID)
 	}
 }

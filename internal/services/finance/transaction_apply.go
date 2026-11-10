@@ -70,10 +70,14 @@ func applyScalars(tx *domainfinance.Transaction, patch dto.TransactionUpdateInpu
 // applyAccounts resolves the account and transfer target. An empty string
 // clears the target (and leaves the account empty, which validation rejects).
 func (s *service) applyAccounts(ctx context.Context, tx *domainfinance.Transaction, patch dto.TransactionUpdateInput) error {
+	currentAccount, currentTo := tx.AccountID, ""
+	if tx.ToAccountID != nil {
+		currentTo = *tx.ToAccountID
+	}
 	if patch.Account != nil {
 		tx.AccountID = ""
 		if strings.TrimSpace(*patch.Account) != "" {
-			id, err := s.resolveAccount(ctx, tx.SpaceID, *patch.Account, fieldAccount, false)
+			id, err := s.resolveAccount(ctx, tx.SpaceID, *patch.Account, fieldAccount, false, currentAccount)
 			if err != nil {
 				return err
 			}
@@ -83,7 +87,7 @@ func (s *service) applyAccounts(ctx context.Context, tx *domainfinance.Transacti
 	if patch.ToAccount != nil {
 		tx.ToAccountID = nil
 		if strings.TrimSpace(*patch.ToAccount) != "" {
-			id, err := s.resolveAccount(ctx, tx.SpaceID, *patch.ToAccount, fieldToAccount, false)
+			id, err := s.resolveAccount(ctx, tx.SpaceID, *patch.ToAccount, fieldToAccount, false, currentTo)
 			if err != nil {
 				return err
 			}
@@ -98,11 +102,15 @@ func (s *service) applyAccounts(ctx context.Context, tx *domainfinance.Transacti
 // are left to domain validation, which rejects any category on them.
 func (s *service) applyCategory(ctx context.Context, tx *domainfinance.Transaction, patch dto.TransactionUpdateInput) error {
 	var category *domainfinance.Category
+	currentCategory := ""
+	if tx.CategoryID != nil {
+		currentCategory = *tx.CategoryID
+	}
 	if patch.Category != nil {
 		tx.CategoryID = nil
 		if strings.TrimSpace(*patch.Category) != "" {
 			var err error
-			if category, err = s.resolveCategory(ctx, tx.SpaceID, *patch.Category, false); err != nil {
+			if category, err = s.resolveCategory(ctx, tx.SpaceID, *patch.Category, kindHint(tx.Type), false, currentCategory); err != nil {
 				return err
 			}
 			tx.CategoryID = &category.ID
@@ -114,7 +122,7 @@ func (s *service) applyCategory(ctx context.Context, tx *domainfinance.Transacti
 	if category == nil {
 		// Unchanged category: it may be archived since, which is fine to keep.
 		var err error
-		if category, err = s.resolveCategory(ctx, tx.SpaceID, *tx.CategoryID, true); err != nil {
+		if category, err = s.resolveCategory(ctx, tx.SpaceID, *tx.CategoryID, "", true, ""); err != nil {
 			return err
 		}
 	}
@@ -157,4 +165,13 @@ func (s *service) budgetStatus(ctx context.Context, tx domainfinance.Transaction
 		return &status
 	}
 	return nil
+}
+
+// kindHint is the category kind a transaction type takes: the type itself for
+// income and expense, none for a transfer or an unset type.
+func kindHint(txType string) string {
+	if txType == domainfinance.TypeIncome || txType == domainfinance.TypeExpense {
+		return txType
+	}
+	return ""
 }

@@ -12,13 +12,16 @@ import (
 )
 
 const (
-	reasonNotFound = "not found"
-	reasonArchived = "is archived"
+	reasonNotFound  = "not found"
+	reasonArchived  = "is archived"
+	reasonAmbiguous = "is ambiguous"
 
 	fieldAccount   = "account"
 	fieldToAccount = "to_account"
 	fieldCategory  = "category"
 )
+
+var errKindMismatch = errors.New("category kind does not match")
 
 // refRow is what resolution needs from an account or category row.
 type refRow struct {
@@ -36,9 +39,10 @@ type refLookup struct {
 // resolveRef turns a UUID or an exact case-insensitive name into a row. An
 // unknown reference, one from another Space and a soft-deleted row all report
 // "not found" so a foreign id cannot be told apart from a missing one. An
-// archived row is accepted only with allowArchived (list filters, unchanged
-// references of an edited transaction).
-func resolveRef(field, ref string, allowArchived bool, lookup refLookup) (refRow, error) {
+// archived row is accepted only with allowArchived (list filters) or when its
+// id is current (the reference an edited transaction already holds). A name
+// that still matches more than one row is "is ambiguous".
+func resolveRef(field, ref string, allowArchived bool, current string, lookup refLookup) (refRow, error) {
 	ref = strings.TrimSpace(ref)
 	if ref == "" {
 		return refRow{}, validationError(field, requiredReason)
@@ -55,29 +59,19 @@ func resolveRef(field, ref string, allowArchived bool, lookup refLookup) (refRow
 		if err != nil {
 			return refRow{}, refError(field, err)
 		}
-		picked, ok := pickRow(rows)
-		if !ok {
+		switch len(rows) {
+		case 0:
 			return refRow{}, validationError(field, reasonNotFound)
+		case 1:
+			row = rows[0]
+		default:
+			return refRow{}, validationError(field, reasonAmbiguous)
 		}
-		row = picked
 	}
-	if row.archived && !allowArchived {
+	if row.archived && !allowArchived && row.id != current {
 		return refRow{}, validationError(field, reasonArchived)
 	}
 	return row, nil
-}
-
-// pickRow prefers a live row over an archived one with the same name.
-func pickRow(rows []refRow) (refRow, bool) {
-	if len(rows) == 0 {
-		return refRow{}, false
-	}
-	for _, row := range rows {
-		if !row.archived {
-			return row, true
-		}
-	}
-	return rows[0], true
 }
 
 func refError(field string, err error) error {
@@ -87,8 +81,8 @@ func refError(field string, err error) error {
 	return err
 }
 
-func (s *service) resolveAccount(ctx context.Context, spaceID, ref, field string, allowArchived bool) (string, error) {
-	row, err := resolveRef(field, ref, allowArchived, refLookup{
+func (s *service) resolveAccount(ctx context.Context, spaceID, ref, field string, allowArchived bool, current string) (string, error) {
+	row, err := resolveRef(field, ref, allowArchived, current, refLookup{
 		byID: func(id string) (refRow, error) {
 			a, err := s.repo.FindAccount(ctx, spaceID, id)
 			if err != nil {
@@ -114,12 +108,15 @@ func (s *service) resolveAccount(ctx context.Context, spaceID, ref, field string
 }
 
 // resolveCategory resolves a category and returns its row. The default
-// categories are seeded first so a name like "Makan" works on first use.
-func (s *service) resolveCategory(ctx context.Context, spaceID, ref string, allowArchived bool) (*domainfinance.Category, error) {
+// categories are seeded first so a name like "Makan" works on first use. The
+// name index is unique per kind, so one name can exist as both income and
+// expense: kind (income or expense, "" for none) narrows a name match, and a
+// name that still matches both kinds is ambiguous. An id ignores kind.
+func (s *service) resolveCategory(ctx context.Context, spaceID, ref, kind string, allowArchived bool, current string) (*domainfinance.Category, error) {
 	if err := s.ensureDefaultCategories(ctx, spaceID); err != nil {
 		return nil, err
 	}
-	row, err := resolveRef(fieldCategory, ref, allowArchived, refLookup{
+	row, err := resolveRef(fieldCategory, ref, allowArchived, current, refLookup{
 		byID: func(id string) (refRow, error) {
 			c, err := s.repo.FindCategory(ctx, spaceID, id)
 			if err != nil {
@@ -133,14 +130,26 @@ func (s *service) resolveCategory(ctx context.Context, spaceID, ref string, allo
 				return nil, err
 			}
 			var rows []refRow
+			otherKind := false
 			for i := range categories {
-				if strings.EqualFold(strings.TrimSpace(categories[i].Name), name) {
-					rows = append(rows, refRow{id: categories[i].ID, archived: categories[i].ArchivedAt != nil, value: &categories[i]})
+				if !strings.EqualFold(strings.TrimSpace(categories[i].Name), name) {
+					continue
 				}
+				if kind != "" && categories[i].Kind != kind {
+					otherKind = true
+					continue
+				}
+				rows = append(rows, refRow{id: categories[i].ID, archived: categories[i].ArchivedAt != nil, value: &categories[i]})
+			}
+			if len(rows) == 0 && otherKind {
+				return nil, errKindMismatch
 			}
 			return rows, nil
 		},
 	})
+	if errors.Is(err, errKindMismatch) {
+		return nil, validationError(fieldCategory, "kind does not match type")
+	}
 	if err != nil {
 		return nil, err
 	}

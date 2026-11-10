@@ -21,9 +21,8 @@ const (
 
 	resourceTransaction = "finance_transaction"
 
-	// maxMerchantLen matches the 128 limit of the other finance text fields
-	// (the column is VARCHAR(255)); maxNoteLen caps the TEXT column.
-	maxMerchantLen = 128
+	// maxMerchantLen is the VARCHAR(255) column; maxNoteLen caps the TEXT column.
+	maxMerchantLen = 255
 	maxNoteLen     = 1000
 
 	duplicateWindow = 2 * time.Minute
@@ -96,14 +95,14 @@ func (s *service) TransactionList(ctx context.Context, actor domainidentity.Acto
 		return nil, err
 	}
 	if strings.TrimSpace(input.Category) != "" {
-		category, err := s.resolveCategory(ctx, spaceID, input.Category, true)
+		category, err := s.resolveCategory(ctx, spaceID, input.Category, kindHint(filter.Type), true, "")
 		if err != nil {
 			return nil, err
 		}
 		filter.CategoryID = category.ID
 	}
 	if strings.TrimSpace(input.Account) != "" {
-		if filter.AccountID, err = s.resolveAccount(ctx, spaceID, input.Account, fieldAccount, true); err != nil {
+		if filter.AccountID, err = s.resolveAccount(ctx, spaceID, input.Account, fieldAccount, true, ""); err != nil {
 			return nil, err
 		}
 	}
