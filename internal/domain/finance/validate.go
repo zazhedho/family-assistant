@@ -24,22 +24,30 @@ func ValidateTransaction(t Transaction) error {
 	if err := ValidateAmount(t.Amount); err != nil {
 		return err
 	}
+	toAccount := ""
+	if t.ToAccountID != nil {
+		toAccount = *t.ToAccountID
+	}
+	category := ""
+	if t.CategoryID != nil {
+		category = *t.CategoryID
+	}
 	if t.AccountID == "" {
 		return ErrAccountRequired
 	}
 	if t.Type != TypeTransfer {
-		if t.ToAccountID != "" {
+		if toAccount != "" {
 			return ErrToAccountForbidden
 		}
 		return nil
 	}
-	if t.ToAccountID == "" {
+	if toAccount == "" {
 		return ErrToAccountRequired
 	}
-	if t.ToAccountID == t.AccountID {
+	if toAccount == t.AccountID {
 		return ErrTransferSameAcct
 	}
-	if t.CategoryID != "" {
+	if category != "" {
 		return ErrTransferCategory
 	}
 	return nil

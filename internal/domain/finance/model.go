@@ -48,14 +48,16 @@ type Category struct {
 	DeletedAt  gorm.DeletedAt `json:"-" gorm:"column:deleted_at"`
 }
 
+// Transaction. ToAccountID and CategoryID are nullable UUID columns: nil means
+// SQL NULL, and an empty string must never be written.
 type Transaction struct {
 	ID                string         `json:"id" gorm:"column:id;primaryKey"`
 	SpaceID           string         `json:"space_id" gorm:"column:space_id"`
 	Type              string         `json:"type" gorm:"column:type"`
 	Amount            int64          `json:"amount" gorm:"column:amount"`
 	AccountID         string         `json:"account_id" gorm:"column:account_id"`
-	ToAccountID       string         `json:"to_account_id,omitempty" gorm:"column:to_account_id"`
-	CategoryID        string         `json:"category_id,omitempty" gorm:"column:category_id"`
+	ToAccountID       *string        `json:"to_account_id,omitempty" gorm:"column:to_account_id"`
+	CategoryID        *string        `json:"category_id,omitempty" gorm:"column:category_id"`
 	Merchant          string         `json:"merchant,omitempty" gorm:"column:merchant"`
 	Note              string         `json:"note,omitempty" gorm:"column:note"`
 	OccurredAt        time.Time      `json:"occurred_at" gorm:"column:occurred_at"`
@@ -66,24 +68,28 @@ type Transaction struct {
 }
 
 type Budget struct {
-	ID         string         `json:"id" gorm:"column:id;primaryKey"`
-	SpaceID    string         `json:"space_id" gorm:"column:space_id"`
-	CategoryID string         `json:"category_id" gorm:"column:category_id"`
-	Month      time.Time      `json:"month" gorm:"column:month;type:date"`
-	Amount     int64          `json:"amount" gorm:"column:amount"`
-	CreatedAt  time.Time      `json:"created_at" gorm:"column:created_at"`
-	UpdatedAt  time.Time      `json:"updated_at" gorm:"column:updated_at"`
-	DeletedAt  gorm.DeletedAt `json:"-" gorm:"column:deleted_at"`
+	ID         string `json:"id" gorm:"column:id;primaryKey"`
+	SpaceID    string `json:"space_id" gorm:"column:space_id"`
+	CategoryID string `json:"category_id" gorm:"column:category_id"`
+	// Month is the DATE to store: use MonthDate (first day of the WIB month at
+	// 00:00 UTC), never MonthStart, whose UTC instant breaks the first-day check.
+	Month     time.Time      `json:"month" gorm:"column:month;type:date"`
+	Amount    int64          `json:"amount" gorm:"column:amount"`
+	CreatedAt time.Time      `json:"created_at" gorm:"column:created_at"`
+	UpdatedAt time.Time      `json:"updated_at" gorm:"column:updated_at"`
+	DeletedAt gorm.DeletedAt `json:"-" gorm:"column:deleted_at"`
 }
 
+// Recurring. ToAccountID and CategoryID are nullable UUID columns: nil means
+// SQL NULL, and an empty string must never be written.
 type Recurring struct {
 	ID                string         `json:"id" gorm:"column:id;primaryKey"`
 	SpaceID           string         `json:"space_id" gorm:"column:space_id"`
 	Type              string         `json:"type" gorm:"column:type"`
 	Amount            int64          `json:"amount" gorm:"column:amount"`
 	AccountID         string         `json:"account_id" gorm:"column:account_id"`
-	ToAccountID       string         `json:"to_account_id,omitempty" gorm:"column:to_account_id"`
-	CategoryID        string         `json:"category_id,omitempty" gorm:"column:category_id"`
+	ToAccountID       *string        `json:"to_account_id,omitempty" gorm:"column:to_account_id"`
+	CategoryID        *string        `json:"category_id,omitempty" gorm:"column:category_id"`
 	Merchant          string         `json:"merchant,omitempty" gorm:"column:merchant"`
 	Note              string         `json:"note,omitempty" gorm:"column:note"`
 	Frequency         string         `json:"frequency" gorm:"column:frequency"`

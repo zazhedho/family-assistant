@@ -43,6 +43,13 @@ func MonthStart(t time.Time) time.Time {
 	return time.Date(w.Year(), w.Month(), 1, 0, 0, 0, 0, WIB()).UTC()
 }
 
+// MonthDate returns the first day of the WIB calendar month containing t as a
+// date at 00:00 UTC. This is the value to store in finance_budgets.month.
+func MonthDate(t time.Time) time.Time {
+	w := t.In(WIB())
+	return time.Date(w.Year(), w.Month(), 1, 0, 0, 0, 0, time.UTC)
+}
+
 func daysIn(year int, month time.Month) int {
 	return time.Date(year, month+1, 0, 0, 0, 0, 0, time.UTC).Day()
 }
@@ -76,8 +83,8 @@ func NextOccurrence(r Recurring, after time.Time) time.Time {
 		}
 		total := w.Year()*12 + int(w.Month()) - 1 + months
 		year, month := total/12, time.Month(total%12+1)
-		if max := daysIn(year, month); day > max {
-			day = max
+		if last := daysIn(year, month); day > last {
+			day = last
 		}
 		return time.Date(year, month, day, w.Hour(), w.Minute(), w.Second(), w.Nanosecond(), WIB()).UTC()
 	}

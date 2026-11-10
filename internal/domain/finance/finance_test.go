@@ -6,6 +6,8 @@ import (
 	"time"
 )
 
+func sp(s string) *string { return &s }
+
 func utc(s string) time.Time {
 	t, err := time.Parse(time.RFC3339, s)
 	if err != nil {
@@ -28,17 +30,17 @@ func TestValidateAmountRejectsZeroNegativeAndOverLimit(t *testing.T) {
 }
 
 func TestValidateTransactionTransferRules(t *testing.T) {
-	ok := Transaction{Type: TypeTransfer, Amount: 10, AccountID: "a", ToAccountID: "b"}
+	ok := Transaction{Type: TypeTransfer, Amount: 10, AccountID: "a", ToAccountID: sp("b")}
 	if err := ValidateTransaction(ok); err != nil {
 		t.Fatalf("valid transfer: %v", err)
 	}
 	cases := map[string]Transaction{
-		"same account":  {Type: TypeTransfer, Amount: 10, AccountID: "a", ToAccountID: "a"},
+		"same account":  {Type: TypeTransfer, Amount: 10, AccountID: "a", ToAccountID: sp("a")},
 		"missing to":    {Type: TypeTransfer, Amount: 10, AccountID: "a"},
-		"category":      {Type: TypeTransfer, Amount: 10, AccountID: "a", ToAccountID: "b", CategoryID: "c"},
+		"category":      {Type: TypeTransfer, Amount: 10, AccountID: "a", ToAccountID: sp("b"), CategoryID: sp("c")},
 		"bad type":      {Type: "x", Amount: 10, AccountID: "a"},
 		"no account":    {Type: TypeExpense, Amount: 10},
-		"to on expense": {Type: TypeExpense, Amount: 10, AccountID: "a", ToAccountID: "b"},
+		"to on expense": {Type: TypeExpense, Amount: 10, AccountID: "a", ToAccountID: sp("b")},
 		"zero amount":   {Type: TypeExpense, Amount: 0, AccountID: "a"},
 		"over limit":    {Type: TypeIncome, Amount: MaxAmount + 1, AccountID: "a"},
 	}
@@ -47,7 +49,7 @@ func TestValidateTransactionTransferRules(t *testing.T) {
 			t.Errorf("%s: expected error", name)
 		}
 	}
-	if err := ValidateTransaction(Transaction{Type: TypeExpense, Amount: 5, AccountID: "a", CategoryID: "c"}); err != nil {
+	if err := ValidateTransaction(Transaction{Type: TypeExpense, Amount: 5, AccountID: "a", CategoryID: sp("c")}); err != nil {
 		t.Errorf("valid expense: %v", err)
 	}
 }
@@ -114,5 +116,30 @@ func TestNewBudgetStatus(t *testing.T) {
 	// spent*100 must not overflow for spent up to MaxAmount.
 	if s := NewBudgetStatus("c", 1, MaxAmount); s.PercentUsed != int(MaxAmount*100) {
 		t.Errorf("big pct %d", s.PercentUsed)
+	}
+}
+
+func TestValidateTransactionNilAndEmptyOptionalIDsAreAbsent(t *testing.T) {
+	if err := ValidateTransaction(Transaction{Type: TypeExpense, Amount: 5, AccountID: "a"}); err != nil {
+		t.Errorf("nil ids: %v", err)
+	}
+	if err := ValidateTransaction(Transaction{Type: TypeExpense, Amount: 5, AccountID: "a", ToAccountID: sp(""), CategoryID: sp("")}); err != nil {
+		t.Errorf("empty ids: %v", err)
+	}
+	if err := ValidateTransaction(Transaction{Type: TypeTransfer, Amount: 5, AccountID: "a", ToAccountID: sp("b"), CategoryID: sp("")}); err != nil {
+		t.Errorf("transfer with empty category: %v", err)
+	}
+}
+
+func TestMonthDate(t *testing.T) {
+	cases := map[string]string{
+		"2026-11-30T16:30:00Z": "2026-11-01T00:00:00Z",
+		"2026-11-30T17:30:00Z": "2026-12-01T00:00:00Z",
+		"2026-12-31T17:30:00Z": "2027-01-01T00:00:00Z",
+	}
+	for in, want := range cases {
+		if got := MonthDate(utc(in)); !got.Equal(utc(want)) || got.Location() != time.UTC {
+			t.Errorf("MonthDate(%s) = %v want %s", in, got, want)
+		}
 	}
 }
