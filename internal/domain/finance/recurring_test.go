@@ -151,3 +151,39 @@ func TestNextOccurrenceIgnoresEndAtAndUnknownFrequencyFallsBackToDaily(t *testin
 		t.Errorf("monthly WIB day: %v", got)
 	}
 }
+
+func TestFirstOccurrenceMonthlyMovesToDayOfMonth(t *testing.T) {
+	monthly := func(start string, day *int) Recurring {
+		return Recurring{Frequency: FreqMonthly, IntervalN: 1, DayOfMonth: day, StartAt: utc(start)}
+	}
+	cases := []struct {
+		name string
+		r    Recurring
+		want string
+	}{
+		// 10:00 WIB on 10 Nov, rent on the 25th: first posting 25 Nov 10:00 WIB.
+		{"later this month", monthly("2026-11-10T03:00:00Z", ip(25)), "2026-11-25T03:00:00Z"},
+		{"day already passed", monthly("2026-11-26T03:00:00Z", ip(25)), "2026-12-25T03:00:00Z"},
+		{"clamped to leap February", monthly("2028-02-10T03:00:00Z", ip(31)), "2028-02-29T03:00:00Z"},
+		{"start on the day itself", monthly("2026-11-25T03:00:00Z", ip(25)), "2026-11-25T03:00:00Z"},
+		{"WIB clock kept", monthly("2026-11-10T14:45:30Z", ip(12)), "2026-11-12T14:45:30Z"},
+		// 2026-11-24T17:30Z is 25 Nov 00:30 WIB: already the 25th in WIB.
+		{"across the WIB date boundary", monthly("2026-11-24T17:30:00Z", ip(25)), "2026-11-24T17:30:00Z"},
+		{"no day means start", monthly("2026-11-10T03:00:00Z", nil), "2026-11-10T03:00:00Z"},
+		{"December rolls into January", monthly("2026-12-28T03:00:00Z", ip(5)), "2027-01-05T03:00:00Z"},
+	}
+	for _, c := range cases {
+		if got := FirstOccurrence(c.r); !got.Equal(utc(c.want)) {
+			t.Errorf("%s: got %v want %s", c.name, got, c.want)
+		}
+	}
+}
+
+func TestFirstOccurrenceDailyAndWeeklyIsStart(t *testing.T) {
+	start := utc("2026-11-10T03:00:00Z")
+	for _, f := range []string{FreqDaily, FreqWeekly} {
+		if got := FirstOccurrence(Recurring{Frequency: f, IntervalN: 2, StartAt: start}); !got.Equal(start) {
+			t.Errorf("%s: %v", f, got)
+		}
+	}
+}

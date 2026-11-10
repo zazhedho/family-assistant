@@ -61,7 +61,7 @@ func (r *Repository) UpdateRecurring(ctx context.Context, rec *domainfinance.Rec
 	result := r.db(ctx).Model(&domainfinance.Recurring{}).
 		Where("id = ? AND space_id = ? AND updated_at = ?", rec.ID, rec.SpaceID, expectedUpdatedAt).
 		Select("type", "amount", "account_id", "to_account_id", "category_id", "merchant", "note", "frequency", "interval_n",
-			"day_of_month", "start_at", "next_run_at", "end_at", "paused", "updated_at").
+			"day_of_month", "start_at", "next_run_at", "end_at", "paused", "pause_reason", "failure_count", "last_failure_code", "updated_at").
 		Updates(rec)
 	return checkAffected(result)
 }

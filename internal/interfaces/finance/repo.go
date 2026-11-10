@@ -73,8 +73,11 @@ type RepoFinanceInterface interface {
 	// most maxPerTemplate each, the rest fast-forwarded and counted as
 	// dropped) and advances their next_run_at, all in one transaction that
 	// locks the templates with FOR UPDATE SKIP LOCKED, so an occurrence is
-	// never posted twice nor lost on a crash. build makes each transaction; a
-	// failing template is paused or skipped under a savepoint without
+	// never posted twice nor lost on a crash (posted rows carry recurring_id,
+	// unique per occurrence). build makes each transaction; a failing
+	// template is paused (with pause_reason) or, for an unclassified error,
+	// skipped with failure_count and a sanitized last_failure_code until
+	// MaxConsecutiveFailures pauses it, all under a savepoint without
 	// affecting the others. See the repository for the full contract.
 	PostDueRecurring(ctx context.Context, now time.Time, limit, maxPerTemplate int, build domainfinance.RecurringBuildFunc) (domainfinance.PostResult, error)
 }

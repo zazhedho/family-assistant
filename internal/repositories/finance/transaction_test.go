@@ -30,7 +30,7 @@ func TestCreateTransactionInsertsRowAndNullableIDs(t *testing.T) {
 
 	// nil ToAccountID is written as NULL (the 6th column).
 	mock.ExpectExec(sqlRe(`INSERT INTO "finance_transactions"`)).
-		WithArgs(sqlmock.AnyArg(), spaceID, "expense", int64(25000), accountID, nilArg{}, categoryID, "Kopi", "", fixedNow, memberID, fixedNow, fixedNow, nilArg{}).
+		WithArgs(sqlmock.AnyArg(), spaceID, "expense", int64(25000), accountID, nilArg{}, categoryID, "Kopi", "", fixedNow, memberID, fixedNow, fixedNow, nilArg{}, nilArg{}).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	if err := repo.CreateTransaction(context.Background(), tx); err != nil {
 		t.Fatalf("create: %v", err)

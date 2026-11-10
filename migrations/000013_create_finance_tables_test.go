@@ -66,6 +66,44 @@ func TestFinanceMigrationIsSpaceScopedAndConstrained(t *testing.T) {
 	}
 }
 
+func TestFinanceMigrationRecurringFailureStateAndIdempotency(t *testing.T) {
+	upBytes, err := os.ReadFile("000013_create_finance_tables.up.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	up := string(upBytes)
+	for _, required := range []string{
+		"pause_reason VARCHAR(32)",
+		"failure_count INTEGER NOT NULL DEFAULT 0",
+		"last_failure_code VARCHAR(32)",
+		"CHECK (failure_count >= 0)",
+		"recurring_id UUID",
+		"CONSTRAINT fk_finance_transactions_recurring FOREIGN KEY (recurring_id)\n        REFERENCES finance_recurring(id)",
+		"CREATE UNIQUE INDEX IF NOT EXISTS uq_finance_transactions_recurring_occurrence\n    ON finance_transactions (recurring_id, occurred_at)\n    WHERE recurring_id IS NOT NULL;",
+		"ON finance_recurring (failure_count, next_run_at)",
+	} {
+		if !strings.Contains(up, required) {
+			t.Errorf("up migration missing %q", required)
+		}
+	}
+	// finance_transactions references finance_recurring, so the template
+	// table must exist first.
+	if strings.Index(up, "CREATE TABLE IF NOT EXISTS finance_recurring") > strings.Index(up, "CREATE TABLE IF NOT EXISTS finance_transactions") {
+		t.Error("finance_recurring must be created before finance_transactions")
+	}
+
+	downBytes, err := os.ReadFile("000013_create_finance_tables.down.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	down := string(downBytes)
+	drop := "ALTER TABLE IF EXISTS finance_transactions DROP CONSTRAINT IF EXISTS fk_finance_transactions_recurring;"
+	i := strings.Index(down, drop)
+	if i < 0 || i > strings.Index(down, "DROP TABLE IF EXISTS finance_recurring") {
+		t.Error("down migration must drop the transaction->recurring foreign key before dropping finance_recurring")
+	}
+}
+
 func TestFinanceMigrationSeedsPermissions(t *testing.T) {
 	upBytes, err := os.ReadFile("000013_create_finance_tables.up.sql")
 	if err != nil {

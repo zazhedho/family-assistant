@@ -65,6 +65,10 @@ type Transaction struct {
 	CreatedAt         time.Time      `json:"created_at" gorm:"column:created_at"`
 	UpdatedAt         time.Time      `json:"updated_at" gorm:"column:updated_at"`
 	DeletedAt         gorm.DeletedAt `json:"-" gorm:"column:deleted_at"`
+	// RecurringID is the template that posted the row (nil for manual
+	// entries); (recurring_id, occurred_at) is unique, so an occurrence can
+	// never be posted twice.
+	RecurringID *string `json:"recurring_id,omitempty" gorm:"column:recurring_id"`
 }
 
 type Budget struct {
@@ -83,22 +87,29 @@ type Budget struct {
 // Recurring. ToAccountID and CategoryID are nullable UUID columns: nil means
 // SQL NULL, and an empty string must never be written.
 type Recurring struct {
-	ID                string         `json:"id" gorm:"column:id;primaryKey"`
-	SpaceID           string         `json:"space_id" gorm:"column:space_id"`
-	Type              string         `json:"type" gorm:"column:type"`
-	Amount            int64          `json:"amount" gorm:"column:amount"`
-	AccountID         string         `json:"account_id" gorm:"column:account_id"`
-	ToAccountID       *string        `json:"to_account_id,omitempty" gorm:"column:to_account_id"`
-	CategoryID        *string        `json:"category_id,omitempty" gorm:"column:category_id"`
-	Merchant          string         `json:"merchant,omitempty" gorm:"column:merchant"`
-	Note              string         `json:"note,omitempty" gorm:"column:note"`
-	Frequency         string         `json:"frequency" gorm:"column:frequency"`
-	IntervalN         int            `json:"interval_n" gorm:"column:interval_n"`
-	DayOfMonth        *int           `json:"day_of_month,omitempty" gorm:"column:day_of_month"`
-	StartAt           time.Time      `json:"start_at" gorm:"column:start_at"`
-	NextRunAt         time.Time      `json:"next_run_at" gorm:"column:next_run_at"`
-	EndAt             *time.Time     `json:"end_at,omitempty" gorm:"column:end_at"`
-	Paused            bool           `json:"paused" gorm:"column:paused"`
+	ID          string     `json:"id" gorm:"column:id;primaryKey"`
+	SpaceID     string     `json:"space_id" gorm:"column:space_id"`
+	Type        string     `json:"type" gorm:"column:type"`
+	Amount      int64      `json:"amount" gorm:"column:amount"`
+	AccountID   string     `json:"account_id" gorm:"column:account_id"`
+	ToAccountID *string    `json:"to_account_id,omitempty" gorm:"column:to_account_id"`
+	CategoryID  *string    `json:"category_id,omitempty" gorm:"column:category_id"`
+	Merchant    string     `json:"merchant,omitempty" gorm:"column:merchant"`
+	Note        string     `json:"note,omitempty" gorm:"column:note"`
+	Frequency   string     `json:"frequency" gorm:"column:frequency"`
+	IntervalN   int        `json:"interval_n" gorm:"column:interval_n"`
+	DayOfMonth  *int       `json:"day_of_month,omitempty" gorm:"column:day_of_month"`
+	StartAt     time.Time  `json:"start_at" gorm:"column:start_at"`
+	NextRunAt   time.Time  `json:"next_run_at" gorm:"column:next_run_at"`
+	EndAt       *time.Time `json:"end_at,omitempty" gorm:"column:end_at"`
+	Paused      bool       `json:"paused" gorm:"column:paused"`
+	// PauseReason is the scheduler's reason code when it paused the template
+	// (nil when running or paused by a user). FailureCount counts consecutive
+	// unclassified posting failures and LastFailureCode is the sanitized code
+	// of the last one (an SQLSTATE or an error class, never error text).
+	PauseReason       *string        `json:"pause_reason,omitempty" gorm:"column:pause_reason"`
+	FailureCount      int            `json:"failure_count" gorm:"column:failure_count"`
+	LastFailureCode   *string        `json:"last_failure_code,omitempty" gorm:"column:last_failure_code"`
 	CreatedByMemberID string         `json:"created_by_member_id" gorm:"column:created_by_member_id"`
 	CreatedAt         time.Time      `json:"created_at" gorm:"column:created_at"`
 	UpdatedAt         time.Time      `json:"updated_at" gorm:"column:updated_at"`

@@ -54,6 +54,31 @@ func ValidateRecurring(r Recurring) error {
 	return nil
 }
 
+// FirstOccurrence is the first occurrence of r, which is where next_run_at
+// starts. Daily and weekly schedules, and a monthly one without DayOfMonth,
+// start at StartAt. A monthly schedule with DayOfMonth starts on the first
+// WIB date on or after StartAt whose day is DayOfMonth (clamped to the
+// month's length, so 31 means the last day), at StartAt's WIB clock time.
+func FirstOccurrence(r Recurring) time.Time {
+	if r.Frequency != FreqMonthly || r.DayOfMonth == nil {
+		return r.StartAt
+	}
+	w := r.StartAt.In(WIB())
+	for _, add := range []int{0, 1} {
+		total := w.Year()*12 + int(w.Month()) - 1 + add
+		year, month := total/12, time.Month(total%12+1)
+		day := *r.DayOfMonth
+		if last := daysIn(year, month); day > last {
+			day = last
+		}
+		candidate := time.Date(year, month, day, w.Hour(), w.Minute(), w.Second(), w.Nanosecond(), WIB())
+		if !candidate.Before(w) {
+			return candidate.UTC()
+		}
+	}
+	return r.StartAt // unreachable: next month's candidate is always later
+}
+
 // TransactionAt is the transaction the template posts for one occurrence:
 // the template's type, amount, accounts, category, merchant and note, dated at
 // the occurrence and attributed to the template's creator. The optional ids
@@ -84,8 +109,13 @@ const (
 	PauseValidationFailed = "validation_failed" // the built transaction fails validation
 	PauseInsertRejected   = "insert_rejected"   // the database rejected the row (constraint or data error)
 	PauseScheduleInvalid  = "schedule_invalid"  // the schedule does not advance
+	PauseRetryExhausted   = "retry_exhausted"   // MaxConsecutiveFailures transient failures in a row
 	SkipTransient         = "transient"         // rolled back, retried on the next run
 )
+
+// MaxConsecutiveFailures is how many runs in a row may fail a template with an
+// unclassified (transient) error before it is paused with PauseRetryExhausted.
+const MaxConsecutiveFailures = 5
 
 // PauseError makes the scheduler pause a template with Reason. Any other error
 // from a build callback is treated as transient: the template is rolled back
@@ -143,19 +173,23 @@ type PostedOccurrence struct {
 	OccurredAt    time.Time
 }
 
-// RecurringIssue is a template a run paused or skipped, with a reason code.
+// RecurringIssue is a template a run paused or skipped, with a reason code
+// and, when an error caused it, its sanitized failure code.
 type RecurringIssue struct {
 	RecurringID string
 	SpaceID     string
 	MemberID    string
 	Reason      string
+	Code        string
 }
 
 // PostResult is the outcome of one committed scheduler run. Dropped counts,
-// per template id, the missed occurrences skipped after the catch-up cap.
+// per template id, the missed occurrences skipped after the catch-up cap;
+// AlreadyPosted counts occurrences found already posted and passed over.
 type PostResult struct {
-	Posted  []PostedOccurrence
-	Paused  []RecurringIssue
-	Skipped []RecurringIssue
-	Dropped map[string]int
+	Posted        []PostedOccurrence
+	Paused        []RecurringIssue
+	Skipped       []RecurringIssue
+	Dropped       map[string]int
+	AlreadyPosted int
 }

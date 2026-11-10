@@ -15,7 +15,8 @@ import (
 const recurringID = "00000000-0000-4000-8000-000000000901"
 
 var recurringCols = []string{"id", "space_id", "type", "amount", "account_id", "to_account_id", "category_id", "merchant", "note",
-	"frequency", "interval_n", "day_of_month", "start_at", "next_run_at", "end_at", "paused", "created_by_member_id", "created_at", "updated_at", "deleted_at"}
+	"frequency", "interval_n", "day_of_month", "start_at", "next_run_at", "end_at", "paused", "created_by_member_id", "created_at", "updated_at", "deleted_at",
+	"pause_reason", "failure_count", "last_failure_code"}
 
 func recurringFixture() *domainfinance.Recurring {
 	return &domainfinance.Recurring{
@@ -68,7 +69,7 @@ func TestUpdateRecurringClearsNullableColumns(t *testing.T) {
 
 	// The row is written only when updated_at still holds the version the
 	// caller loaded, so a concurrent scheduler advance is never overwritten.
-	mock.ExpectExec(sqlRe(`UPDATE "finance_recurring" SET`, `"category_id"=$`, `"day_of_month"=$`, `"end_at"=$`, `WHERE (id = $`, `AND space_id = $`, `AND updated_at = $`, `"deleted_at" IS NULL`)).
+	mock.ExpectExec(sqlRe(`UPDATE "finance_recurring" SET`, `"category_id"=$`, `"day_of_month"=$`, `"end_at"=$`, `"pause_reason"=$`, `"failure_count"=$`, `"last_failure_code"=$`, `WHERE (id = $`, `AND space_id = $`, `AND updated_at = $`, `"deleted_at" IS NULL`)).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	if err := repo.UpdateRecurring(context.Background(), r, version); err != nil {
 		t.Fatalf("update: %v", err)
