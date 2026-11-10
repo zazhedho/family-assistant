@@ -9,18 +9,21 @@ import (
 	notificationInfra "family-assistant/infrastructure/notification"
 	reminderCache "family-assistant/internal/cache/reminder"
 	scheduledMessageCache "family-assistant/internal/cache/scheduledmessage"
+	domainaudit "family-assistant/internal/domain/audit"
 	domainidentity "family-assistant/internal/domain/identity"
 	domainspace "family-assistant/internal/domain/space"
 	"family-assistant/internal/dto"
 	mcpHandler "family-assistant/internal/handlers/mcp"
 	interfaceaudit "family-assistant/internal/interfaces/audit"
 	interfaceauthorization "family-assistant/internal/interfaces/authorization"
+	interfacefinance "family-assistant/internal/interfaces/finance"
 	interfacenotification "family-assistant/internal/interfaces/notification"
 	interfaceonboarding "family-assistant/internal/interfaces/onboarding"
 	interfacereminder "family-assistant/internal/interfaces/reminder"
 	interfacescheduledmessage "family-assistant/internal/interfaces/scheduledmessage"
 	interfacespace "family-assistant/internal/interfaces/space"
 	activityRepo "family-assistant/internal/repositories/activity"
+	financeRepo "family-assistant/internal/repositories/finance"
 	identityRepo "family-assistant/internal/repositories/identity"
 	invitationRepo "family-assistant/internal/repositories/invitation"
 	onboardingRepo "family-assistant/internal/repositories/onboarding"
@@ -33,6 +36,7 @@ import (
 	"family-assistant/internal/router"
 	activityService "family-assistant/internal/services/activity"
 	authorizationService "family-assistant/internal/services/authorization"
+	financeService "family-assistant/internal/services/finance"
 	identityService "family-assistant/internal/services/identity"
 	invitationService "family-assistant/internal/services/invitation"
 	onboardingService "family-assistant/internal/services/onboarding"
@@ -95,6 +99,7 @@ func run() error {
 	logger.WriteLog(logger.LogLevelDebug, fmt.Sprintf("ConfigID: %s", confID))
 	mcpConfig := config.LoadMCPConfig()
 	reminderSchedulerConfig := config.LoadReminderSchedulerConfig()
+	financeRecurringConfig := config.LoadFinanceRecurringConfig()
 	scheduledMessageConfig := config.LoadScheduledMessageConfig()
 	FailOnError(config.ValidateStartupConfig(port), "Invalid app configuration")
 
@@ -163,6 +168,9 @@ func run() error {
 	if _, err := startReminderScheduler(serverContext, reminderSchedulerConfig, reminderSchedulerRepository, identityRepository, spaceRepository, reminderDueIndex, activityRepository); err != nil {
 		return fmt.Errorf("start reminder scheduler: %w", err)
 	}
+	if _, err := startFinanceScheduler(serverContext, financeRecurringConfig, financeRepo.NewRepository(routes.DB), spaceRepository, audit); err != nil {
+		return fmt.Errorf("start finance recurring scheduler: %w", err)
+	}
 	scheduledMessages, err := startScheduledMessageLane(serverContext, scheduledMessageConfig, scheduledMessageLaneDependencies{
 		db: routes.DB, redis: database.GetRedisClient(), spaces: spaceRepository,
 		authorizer: authorizationService.NewAuthorizer(), audit: audit,
@@ -207,6 +215,32 @@ type schedulerMembershipLookup interface {
 
 type schedulerActivityCounter interface {
 	CountByKind(ctx context.Context, spaceID string, kinds []string, from, to time.Time) (map[string]int64, error)
+}
+
+type financeAuditStore interface {
+	Store(context.Context, domainaudit.AuditEvent) error
+}
+
+// startFinanceScheduler starts the recurring finance transaction scheduler,
+// which stops when ctx is canceled, like the reminder scheduler. Posting is
+// one database transaction per tick, so a shutdown mid-tick rolls the tick
+// back and loses nothing.
+func startFinanceScheduler(
+	ctx context.Context,
+	cfg config.FinanceRecurringConfig,
+	repo interfacefinance.RepoFinanceInterface,
+	members schedulerMembershipLookup,
+	audit financeAuditStore,
+) (*financeService.Scheduler, error) {
+	if !cfg.Enabled {
+		return nil, nil
+	}
+	if repo == nil || members == nil {
+		return nil, errors.New("finance recurring scheduler dependencies are missing")
+	}
+	scheduler := financeService.NewScheduler(repo, members, audit, cfg.Interval, time.Now)
+	go scheduler.Run(ctx)
+	return scheduler, nil
 }
 
 func startReminderScheduler(
