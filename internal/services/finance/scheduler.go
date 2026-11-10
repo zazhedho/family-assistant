@@ -21,7 +21,8 @@ const (
 	MaxCatchUp = 12
 
 	defaultSchedulerInterval = time.Minute
-	schedulerBatch           = 100 // templates per run
+	minSchedulerInterval     = time.Second // a shorter interval falls back to the default
+	schedulerBatch           = 100         // templates per run
 	auditSourceScheduler     = "scheduler"
 )
 
@@ -40,10 +41,10 @@ type Scheduler struct {
 	now      func() time.Time
 }
 
-// NewScheduler builds a scheduler that ticks every interval (60s when not
-// positive); now defaults to time.Now.
+// NewScheduler builds a scheduler that ticks every interval (60s when below
+// one second); now defaults to time.Now.
 func NewScheduler(repo interfacefinance.RepoFinanceInterface, members schedulerMembers, audit auditStore, interval time.Duration, now func() time.Time) *Scheduler {
-	if interval <= 0 {
+	if interval < minSchedulerInterval {
 		interval = defaultSchedulerInterval
 	}
 	if now == nil {
@@ -99,6 +100,7 @@ func (s *Scheduler) Tick(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("post due recurring: %w", err)
 	}
+	logIssues(result)
 	s.auditRun(ctx, b, result)
 	if len(result.Posted)+len(result.Paused)+len(result.Skipped)+len(result.Dropped) > 0 {
 		logger.WriteLog(logger.LogLevelInfo, fmt.Sprintf("finance recurring scheduler: posted=%d paused=%d skipped=%d templates_with_dropped=%d",
@@ -189,15 +191,26 @@ func (s *Scheduler) auditRun(ctx context.Context, b *templateBuilder, result dom
 		event.Metadata["reason"], event.Metadata["paused"] = issue.Reason, true
 		s.store(ctx, event)
 	}
-	for _, issue := range result.Skipped {
-		logger.WriteLog(logger.LogLevelWarn, fmt.Sprintf("finance recurring %s skipped this run: %s", issue.RecurringID, issue.Reason))
-	}
 	for recurringID, dropped := range result.Dropped {
 		spaceID, memberID := templateOwner(result, recurringID)
 		event := s.schedulerEvent(b, spaceID, memberID, domainaudit.ActionUpdate, resourceRecurring, recurringID, domainaudit.StatusSuccess)
 		event.Message = "catch-up cap reached; missed occurrences dropped"
 		event.Metadata["dropped"] = dropped
 		s.store(ctx, event)
+	}
+}
+
+// logIssues logs each paused or skipped template with its reason and its
+// sanitized failure code (an SQLSTATE or error class, never error text).
+func logIssues(result domainfinance.PostResult) {
+	for _, issue := range result.Paused {
+		logger.WriteLog(logger.LogLevelWarn, fmt.Sprintf("finance recurring %s paused: reason=%s code=%s", issue.RecurringID, issue.Reason, issue.Code))
+	}
+	for _, issue := range result.Skipped {
+		logger.WriteLog(logger.LogLevelWarn, fmt.Sprintf("finance recurring %s skipped this run: reason=%s code=%s", issue.RecurringID, issue.Reason, issue.Code))
+	}
+	if result.AlreadyPosted > 0 {
+		logger.WriteLog(logger.LogLevelWarn, fmt.Sprintf("finance recurring: %d occurrence(s) were already posted and passed over", result.AlreadyPosted))
 	}
 }
 

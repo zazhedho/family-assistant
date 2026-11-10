@@ -290,7 +290,8 @@ func TestTickUnconfiguredIsAnError(t *testing.T) {
 
 func TestRunRecoversFromPanicAndStopsOnCancel(t *testing.T) {
 	repo := &postFake{panic: true, recs: map[string]*domainfinance.Recurring{}}
-	s := NewScheduler(repo, financeMembers(domainspace.CategoryFinance), &auditFake{}, 5*time.Millisecond, nil)
+	s := NewScheduler(repo, financeMembers(domainspace.CategoryFinance), &auditFake{}, time.Second, nil)
+	s.interval = 5 * time.Millisecond // below the production minimum, to keep the test fast
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	go func() {
@@ -310,6 +311,17 @@ func TestRunRecoversFromPanicAndStopsOnCancel(t *testing.T) {
 	case <-done:
 	case <-time.After(2 * time.Second):
 		t.Fatal("Run did not stop on cancel")
+	}
+}
+
+func TestSchedulerIntervalBelowOneSecondFallsBackToDefault(t *testing.T) {
+	for in, want := range map[time.Duration]time.Duration{
+		0: time.Minute, -time.Second: time.Minute, time.Millisecond: time.Minute, 999 * time.Millisecond: time.Minute,
+		time.Second: time.Second, 90 * time.Second: 90 * time.Second,
+	} {
+		if got := NewScheduler(nil, nil, nil, in, nil).interval; got != want {
+			t.Errorf("interval %v -> %v, want %v", in, got, want)
+		}
 	}
 }
 

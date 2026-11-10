@@ -15,11 +15,19 @@ import (
 	"gorm.io/gorm"
 )
 
-const resourceRecurring = "finance_recurring"
+const (
+	resourceRecurring = "finance_recurring"
+
+	// maxStartInPast bounds how far back a new template may start, so that
+	// creating one cannot back-post up to a dozen occurrences by surprise.
+	maxStartInPast = 24 * time.Hour
+)
 
 // RecurringCreate stores a recurring transaction template. References resolve
-// like a transaction's (archived ones rejected); the first occurrence, and so
-// the initial next_run_at, is StartAt itself.
+// like a transaction's (archived ones rejected). StartAt may be at most 24
+// hours in the past. The initial next_run_at is the first occurrence
+// (domainfinance.FirstOccurrence): StartAt itself, or for a monthly schedule
+// the first date on or after it that falls on DayOfMonth.
 func (s *service) RecurringCreate(ctx context.Context, actor domainidentity.ActorContext, input dto.RecurringCreateInput) (rec *domainfinance.Recurring, err error) {
 	spaceID := resolveSpace(actor, input.Space)
 	defer func() {
@@ -46,6 +54,9 @@ func (s *service) RecurringCreate(ctx context.Context, actor domainidentity.Acto
 	if r.IntervalN == 0 {
 		r.IntervalN = 1
 	}
+	if !r.StartAt.IsZero() && now.Sub(r.StartAt) > maxStartInPast {
+		return nil, validationError("start_at", "is too far in the past")
+	}
 	if r.Frequency == domainfinance.FreqMonthly && r.DayOfMonth == nil && !r.StartAt.IsZero() {
 		day := r.StartAt.In(domainfinance.WIB()).Day()
 		r.DayOfMonth = &day
@@ -57,7 +68,7 @@ func (s *service) RecurringCreate(ctx context.Context, actor domainidentity.Acto
 	if err = s.applyTemplate(ctx, &r, patch); err != nil {
 		return nil, err
 	}
-	r.NextRunAt = r.StartAt
+	r.NextRunAt = domainfinance.FirstOccurrence(r)
 	if err = s.repo.CreateRecurring(ctx, &r); err != nil {
 		return nil, err
 	}
@@ -90,12 +101,13 @@ func (s *service) RecurringList(ctx context.Context, actor domainidentity.ActorC
 }
 
 // RecurringUpdate changes the fields that are set and re-validates the merged
-// template. Pausing and resuming change nothing else: a resumed template that
-// fell behind is caught up by the scheduler's per-run cap. A schedule change
-// (frequency, interval, day, start) re-chains next_run_at from StartAt but
-// never before the occurrence that was due next, so nothing already posted is
-// posted again. The write is rejected when the scheduler (or another edit)
-// changed the template after it was loaded.
+// template. A schedule change (frequency, interval, day, start) re-chains
+// next_run_at from the first occurrence but never before the occurrence that
+// was due next, so nothing already posted is posted again. Pausing changes
+// nothing else. Unpausing clears the scheduler's pause reason and failure
+// state and moves next_run_at to the first occurrence at or after now, so a
+// long pause is never back-posted. The write is rejected when the scheduler
+// (or another edit) changed the template after it was loaded.
 func (s *service) RecurringUpdate(ctx context.Context, actor domainidentity.ActorContext, input dto.RecurringUpdateInput) (rec *domainfinance.Recurring, err error) {
 	spaceID := resolveSpace(actor, input.Space)
 	defer func() { s.auditResult(ctx, actor, domainaudit.ActionUpdate, resourceRecurring, spaceID, input.ID, err) }()
@@ -128,6 +140,10 @@ func (s *service) RecurringUpdate(ctx context.Context, actor domainidentity.Acto
 	}
 	if scheduleChanged(before, *cur) {
 		cur.NextRunAt = firstOccurrenceFrom(*cur, before.NextRunAt)
+	}
+	if before.Paused && !cur.Paused {
+		cur.PauseReason, cur.FailureCount, cur.LastFailureCode = nil, 0, nil
+		cur.NextRunAt = chainFrom(*cur, cur.NextRunAt, s.now().UTC())
 	}
 	if err = s.repo.UpdateRecurring(ctx, cur, version); err != nil {
 		return nil, s.staleOrMissing(ctx, spaceID, id, err)
@@ -206,10 +222,16 @@ func scheduleChanged(a, b domainfinance.Recurring) bool {
 	return a.Frequency != b.Frequency || a.IntervalN != b.IntervalN || dayA != dayB || !a.StartAt.Equal(b.StartAt)
 }
 
-// firstOccurrenceFrom returns the first occurrence of r (chained from StartAt)
-// at or after notBefore.
+// firstOccurrenceFrom returns the first occurrence of r (chained from its
+// first occurrence) at or after notBefore.
 func firstOccurrenceFrom(r domainfinance.Recurring, notBefore time.Time) time.Time {
-	occurrence := r.StartAt
+	return chainFrom(r, domainfinance.FirstOccurrence(r), notBefore)
+}
+
+// chainFrom follows r's schedule from the occurrence `from` to the first
+// occurrence at or after notBefore.
+func chainFrom(r domainfinance.Recurring, from, notBefore time.Time) time.Time {
+	occurrence := from
 	for occurrence.Before(notBefore) {
 		next := domainfinance.NextOccurrence(r, occurrence)
 		if !next.After(occurrence) {

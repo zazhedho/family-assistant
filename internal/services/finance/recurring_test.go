@@ -248,17 +248,76 @@ func TestRecurringPermissions(t *testing.T) {
 	}
 }
 
-func TestRecurringPauseAndResumeKeepNextRun(t *testing.T) {
+func TestRecurringPauseKeepsNextRunAndFutureResumeKeepsIt(t *testing.T) {
 	e := newRecEnv(t)
 	ctx := context.Background()
-	rec := e.createRec(t, monthlyBill(e.now.Add(-48*time.Hour)))
+	in := monthlyBill(e.now)
+	in.DayOfMonth = ptr(25) // next run 25 Nov, in the future
+	rec := e.createRec(t, in)
 	got, err := e.svc.RecurringUpdate(ctx, ownerActor(), dto.RecurringUpdateInput{ID: rec.ID, Paused: ptr(true)})
-	if err != nil || !got.Paused || !e.recs.recs[rec.ID].Paused {
+	if err != nil || !got.Paused || !e.recs.recs[rec.ID].Paused || !got.NextRunAt.Equal(rec.NextRunAt) {
 		t.Fatalf("pause: %+v %v", got, err)
 	}
 	got, err = e.svc.RecurringUpdate(ctx, ownerActor(), dto.RecurringUpdateInput{ID: rec.ID, Paused: ptr(false)})
 	if err != nil || got.Paused || !got.NextRunAt.Equal(rec.NextRunAt) {
 		t.Fatalf("resume: %+v %v", got, err)
+	}
+}
+
+// Resuming a template paused long ago does not back-post the missed months:
+// next_run_at moves to the first occurrence at or after now, and the
+// scheduler's failure state is cleared.
+func TestRecurringResumeFastForwardsAndClearsFailureState(t *testing.T) {
+	e := newRecEnv(t)
+	ctx := context.Background()
+	in := monthlyBill(e.now)
+	in.DayOfMonth = ptr(10)
+	rec := e.createRec(t, in)
+	stored := e.recs.recs[rec.ID]
+	stored.Paused = true
+	stored.NextRunAt = time.Date(2026, 5, 10, 3, 0, 0, 0, time.UTC) // paused since May
+	stored.PauseReason = ptr(domainfinance.PauseRetryExhausted)
+	stored.FailureCount = 5
+	stored.LastFailureCode = ptr("SQLSTATE_40001")
+
+	got, err := e.svc.RecurringUpdate(ctx, ownerActor(), dto.RecurringUpdateInput{ID: rec.ID, Paused: ptr(false)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 10 Nov 10:00 WIB is exactly now: due now, not again in December.
+	if !got.NextRunAt.Equal(e.now) || got.Paused || got.PauseReason != nil || got.FailureCount != 0 || got.LastFailureCode != nil {
+		t.Fatalf("resumed = %+v", got)
+	}
+	// An edit that does not unpause keeps the failure state.
+	stored = e.recs.recs[rec.ID]
+	stored.FailureCount, stored.LastFailureCode = 2, ptr("GO_x")
+	got, err = e.svc.RecurringUpdate(ctx, ownerActor(), dto.RecurringUpdateInput{ID: rec.ID, Note: ptr("x")})
+	if err != nil || got.FailureCount != 2 || got.LastFailureCode == nil {
+		t.Fatalf("plain edit: %+v %v", got, err)
+	}
+}
+
+func TestRecurringCreateMonthlyFirstRunIsOnDayOfMonth(t *testing.T) {
+	e := newRecEnv(t)
+	in := monthlyBill(e.now) // 10 Nov 10:00 WIB
+	in.DayOfMonth = ptr(25)
+	rec := e.createRec(t, in)
+	if want := time.Date(2026, 11, 25, 3, 0, 0, 0, time.UTC); !rec.NextRunAt.Equal(want) || !rec.StartAt.Equal(e.now) {
+		t.Fatalf("next = %v want %v", rec.NextRunAt, want)
+	}
+}
+
+func TestRecurringCreateRejectsStartMoreThanADayInThePast(t *testing.T) {
+	e := newRecEnv(t)
+	if _, err := e.svc.RecurringCreate(context.Background(), ownerActor(), monthlyBill(e.now.Add(-24*time.Hour))); err != nil {
+		t.Fatalf("exactly 24h back must be accepted: %v", err)
+	}
+	_, err := e.svc.RecurringCreate(context.Background(), ownerActor(), monthlyBill(e.now.Add(-24*time.Hour-time.Second)))
+	if r := reasonOf(t, err, "start_at"); r != "is too far in the past" {
+		t.Fatalf("reason %q", r)
+	}
+	if len(e.recs.recs) != 1 {
+		t.Fatalf("rows = %d", len(e.recs.recs))
 	}
 }
 
@@ -305,12 +364,12 @@ func TestRecurringScheduleChangeNeverRepostsBeforeNextRun(t *testing.T) {
 	ctx := context.Background()
 	day := 24 * time.Hour
 	start := e.now.Add(-10 * day)
-	in := monthlyBill(start)
+	in := monthlyBill(e.now)
 	in.Frequency = "daily"
 	rec := e.createRec(t, in)
-	// The scheduler has posted through yesterday.
+	// A template started 10 days ago; the scheduler has posted through yesterday.
 	stored := e.recs.recs[rec.ID]
-	stored.NextRunAt = e.now
+	stored.StartAt, stored.NextRunAt = start, e.now
 
 	got, err := e.svc.RecurringUpdate(ctx, ownerActor(), dto.RecurringUpdateInput{ID: rec.ID, IntervalN: ptr(3)})
 	if err != nil {
@@ -334,6 +393,20 @@ func TestRecurringScheduleChangeNeverRepostsBeforeNextRun(t *testing.T) {
 	got, err = e.svc.RecurringUpdate(ctx, ownerActor(), dto.RecurringUpdateInput{ID: rec.ID, Note: ptr("baru")})
 	if err != nil || !got.NextRunAt.Equal(e.recs.recs[rec.ID].NextRunAt) || got.Note != "baru" {
 		t.Fatalf("note: %+v %v", got, err)
+	}
+}
+
+// Moving a monthly template to another day re-chains from the first
+// occurrence on that day, not from StartAt's own date.
+func TestRecurringDayOfMonthChangeUsesFirstOccurrence(t *testing.T) {
+	e := newRecEnv(t)
+	rec := e.createRec(t, monthlyBill(e.now)) // day 10, next run now
+	got, err := e.svc.RecurringUpdate(context.Background(), ownerActor(), dto.RecurringUpdateInput{ID: rec.ID, DayOfMonth: ptr(25)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := time.Date(2026, 11, 25, 3, 0, 0, 0, time.UTC); !got.NextRunAt.Equal(want) {
+		t.Fatalf("next = %v want %v", got.NextRunAt, want)
 	}
 }
 

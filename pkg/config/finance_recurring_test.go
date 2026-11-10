@@ -23,9 +23,15 @@ func TestLoadFinanceRecurringConfigFromEnv(t *testing.T) {
 	}
 }
 
-func TestLoadFinanceRecurringConfigRejectsNonPositiveInterval(t *testing.T) {
-	t.Setenv("FINANCE_RECURRING_INTERVAL", "-5s")
-	if got := LoadFinanceRecurringConfig(); got.Interval != time.Minute {
-		t.Fatalf("interval = %v, want default", got.Interval)
+func TestLoadFinanceRecurringConfigRejectsIntervalBelowOneSecond(t *testing.T) {
+	for _, v := range []string{"-5s", "0", "500ms"} {
+		t.Setenv("FINANCE_RECURRING_INTERVAL", v)
+		if got := LoadFinanceRecurringConfig(); got.Interval != time.Minute {
+			t.Fatalf("%s: interval = %v, want default", v, got.Interval)
+		}
+	}
+	t.Setenv("FINANCE_RECURRING_INTERVAL", "1s")
+	if got := LoadFinanceRecurringConfig(); got.Interval != time.Second {
+		t.Fatalf("1s: interval = %v", got.Interval)
 	}
 }
