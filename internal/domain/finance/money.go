@@ -59,8 +59,8 @@ func daysIn(year int, month time.Month) int {
 // yearly schedules use DayOfMonth (or StartAt's WIB day) clamped to the length
 // of the target month.
 //
-// It only chains occurrences: a schedule's first occurrence is StartAt itself
-// (which is what next_run_at starts at), and each later one is NextOccurrence
+// It only chains later occurrences: the first occurrence of a schedule is
+// given by FirstOccurrence (recurring.go), and each later one is NextOccurrence
 // of the previous. It does not apply EndAt (the caller stops at it), and it
 // does not validate the schedule: an unknown Frequency advances like daily, an
 // IntervalN below 1 counts as 1, and DayOfMonth is used unchecked. Validate

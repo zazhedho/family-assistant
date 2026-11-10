@@ -168,7 +168,9 @@ func run() error {
 	if _, err := startReminderScheduler(serverContext, reminderSchedulerConfig, reminderSchedulerRepository, identityRepository, spaceRepository, reminderDueIndex, activityRepository); err != nil {
 		return fmt.Errorf("start reminder scheduler: %w", err)
 	}
-	if _, err := startFinanceScheduler(serverContext, financeRecurringConfig, financeRepo.NewRepository(routes.DB), spaceRepository, audit); err != nil {
+	financeRepository := financeRepo.NewRepository(routes.DB)
+	finance := financeService.NewService(financeRepository, spaceRepository, authorizationService.NewAuthorizer(), audit)
+	if _, err := startFinanceScheduler(serverContext, financeRecurringConfig, financeRepository, spaceRepository, audit); err != nil {
 		return fmt.Errorf("start finance recurring scheduler: %w", err)
 	}
 	scheduledMessages, err := startScheduledMessageLane(serverContext, scheduledMessageConfig, scheduledMessageLaneDependencies{
@@ -187,6 +189,7 @@ func run() error {
 		return mcpHandler.Listen(mcpConfig, identityResolver, identityLink, accountRegistrar, spaces, reminders, mcpHandler.ToolServices{
 			Invitation:       invitations,
 			Activity:         activities,
+			Finance:          finance,
 			ScheduledMessage: scheduledMessages,
 			GroupBinder:      groupBinder,
 			GroupSpaces:      identityRepo.NewGroupSpaceRepository(routes.DB),

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	interfaceactivity "family-assistant/internal/interfaces/activity"
+	interfacefinance "family-assistant/internal/interfaces/finance"
 	interfaceidentity "family-assistant/internal/interfaces/identity"
 	interfaceinvitation "family-assistant/internal/interfaces/invitation"
 	interfaceonboarding "family-assistant/internal/interfaces/onboarding"
@@ -19,8 +20,10 @@ import (
 )
 
 type ToolServices struct {
-	Invitation       interfaceinvitation.ServiceInvitationInterface
-	Activity         interfaceactivity.ServiceActivityInterface
+	Invitation interfaceinvitation.ServiceInvitationInterface
+	Activity   interfaceactivity.ServiceActivityInterface
+	// Finance is optional: the finance_ tools are registered only when it is set.
+	Finance          interfacefinance.ServiceFinanceInterface
 	ScheduledMessage interfacescheduledmessage.Service
 	// GroupBinder backs space_channel_bind, which is registered whether or not the
 	// scheduled-message lane is enabled; when nil the tool fails closed.
@@ -51,6 +54,9 @@ func NewHTTPHandler(cfg config.MCPConfig, resolver interfaceidentity.Resolver, l
 	registerReminderTools(sdkServer, reminderService, resolver)
 	registerInvitationTools(sdkServer, resolver, toolServices.Invitation)
 	registerActivityTools(sdkServer, resolver, toolServices.Activity, reminderService)
+	if toolServices.Finance != nil {
+		registerFinanceTools(sdkServer, resolver, toolServices.Finance)
+	}
 	registerGroupBindTool(sdkServer, resolver, toolServices.GroupBinder)
 	if toolServices.ScheduledMessage != nil {
 		registerScheduledMessageTools(sdkServer, resolver, toolServices.ScheduledMessage)
