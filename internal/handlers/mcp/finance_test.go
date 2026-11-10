@@ -405,6 +405,33 @@ func TestFinanceToolDescriptionsCarryRules(t *testing.T) {
 	}
 }
 
+func TestFinanceToolDescriptionsPinLLMContracts(t *testing.T) {
+	want := map[string][]string{
+		"finance_summary":            {"EXPENSE only", "by_account", "imply custom", "Transfers count in neither"},
+		"finance_transaction_update": {"does not return possible_duplicate", "budget_status"},
+		"finance_transaction_create": {"owner/admin only; otherwise ask an admin", "must not have a to_account", "send to_account as an empty string", "send category as an empty string"},
+		"finance_budget_list":        {"within 24 months"},
+		"finance_budget_delete":      {"within 24 months"},
+		"finance_recurring_update":   {"must not have a to_account"},
+	}
+	got := map[string]string{}
+	for _, tool := range financeTools(t, ToolServices{Finance: &mcpFinanceServiceStub{}}) {
+		got[tool.Name] = tool.Description
+	}
+	for name, phrases := range want {
+		for _, phrase := range phrases {
+			if !strings.Contains(got[name], phrase) {
+				t.Errorf("%s description lacks %q", name, phrase)
+			}
+		}
+	}
+	for _, name := range []string{"finance_transaction_create", "finance_transaction_update", "finance_transaction_list"} {
+		if !strings.Contains(got[name], "update only the transactions they created") {
+			t.Errorf("%s description lacks the member permission rule", name)
+		}
+	}
+}
+
 type financeToolInfo struct{ Name, Description string }
 
 // financeTools lists the finance_ tools of a real server, sorted by name.

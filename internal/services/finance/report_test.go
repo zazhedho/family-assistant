@@ -76,6 +76,34 @@ func TestSummaryCustomPeriod(t *testing.T) {
 	}
 }
 
+func TestSummaryBlankPeriodWithRangeImpliesCustom(t *testing.T) {
+	from, to := utc(2026, 11, 1, 0, 0), utc(2026, 11, 11, 0, 0)
+	e := newRptEnv(t)
+	e.impl.now = func() time.Time { return utc(2026, 11, 15, 10, 0) }
+	rep, err := e.svc.Summary(context.Background(), memberActor(), dto.SummaryInput{From: &from, To: &to})
+	if err != nil || rep.Period != "custom" || !rep.From.Equal(from) || !rep.To.Equal(to) {
+		t.Fatalf("%v %+v", err, rep)
+	}
+	if e.repo.summaryCalls[0] != (span{from, to}) {
+		t.Fatalf("calls = %v", e.repo.summaryCalls)
+	}
+	// A plain blank period is still the current month.
+	e = newRptEnv(t)
+	e.impl.now = func() time.Time { return utc(2026, 11, 15, 10, 0) }
+	rep, err = e.svc.Summary(context.Background(), memberActor(), dto.SummaryInput{})
+	if err != nil || rep.Period != "month" {
+		t.Fatalf("%v %+v", err, rep)
+	}
+}
+
+func TestSummaryRangeWithExplicitPeriodIsRejected(t *testing.T) {
+	from, to := utc(2026, 11, 1, 0, 0), utc(2026, 11, 11, 0, 0)
+	_, err := newRptEnv(t).svc.Summary(context.Background(), memberActor(), dto.SummaryInput{Period: "month", From: &from, To: &to})
+	if r := reasonOf(t, err, "from"); r != "is only allowed with period custom" {
+		t.Fatalf("reason = %q", r)
+	}
+}
+
 func TestSummaryRejectsBadInput(t *testing.T) {
 	from, to := utc(2026, 11, 1, 0, 0), utc(2026, 11, 11, 0, 0)
 	tooLong := from.AddDate(0, 0, 367)
@@ -86,6 +114,11 @@ func TestSummaryRejectsBadInput(t *testing.T) {
 		field string
 	}{
 		{"unknown period", dto.SummaryInput{Period: "year"}, "period"},
+		{"month with from and to", dto.SummaryInput{Period: "month", From: &from, To: &to}, "from"},
+		{"today with to only", dto.SummaryInput{Period: "today", To: &to}, "to"},
+		{"last_month with from only", dto.SummaryInput{Period: " Last_Month ", From: &from}, "from"},
+		{"blank with from only still custom", dto.SummaryInput{From: &from}, "to"},
+		{"blank with to only still custom", dto.SummaryInput{To: &to}, "from"},
 		{"custom without from", dto.SummaryInput{Period: "custom", To: &to}, "from"},
 		{"custom without to", dto.SummaryInput{Period: "custom", From: &from}, "to"},
 		{"custom zero from", dto.SummaryInput{Period: "custom", From: &zero, To: &to}, "from"},

@@ -14,7 +14,7 @@ import (
 )
 
 type FinanceTransactionCreateInput struct {
-	Space      string `json:"space,omitempty" jsonschema:"Space UUID or exact user-facing name; blank selects Personal Space in a private chat or the bound Space in a group or other shared chat"`
+	Space      string `json:"space,omitempty" jsonschema:"finance Space UUID or exact user-facing name. In a private chat always name the finance Space: a blank value selects the Personal Space, which is never a finance Space (not found). In a group or other shared chat blank selects the bound Space"`
 	Type       string `json:"type" jsonschema:"one of income, expense, transfer"`
 	Amount     int64  `json:"amount" jsonschema:"amount as a positive integer in whole rupiah, e.g. 25000 for Rp 25.000; never a string or a decimal"`
 	Account    string `json:"account" jsonschema:"account UUID or exact name, from finance_account_list; the source account (the destination for income)"`
@@ -26,7 +26,7 @@ type FinanceTransactionCreateInput struct {
 }
 
 type FinanceTransactionListInput struct {
-	Space    string `json:"space,omitempty" jsonschema:"Space UUID or exact user-facing name; blank selects Personal Space in a private chat or the bound Space in a group or other shared chat"`
+	Space    string `json:"space,omitempty" jsonschema:"finance Space UUID or exact user-facing name. In a private chat always name the finance Space: a blank value selects the Personal Space, which is never a finance Space (not found). In a group or other shared chat blank selects the bound Space"`
 	Type     string `json:"type,omitempty" jsonschema:"optional filter: income, expense or transfer"`
 	Category string `json:"category,omitempty" jsonschema:"optional filter: category UUID or exact name"`
 	Account  string `json:"account,omitempty" jsonschema:"optional filter: account UUID or exact name (matches source or destination)"`
@@ -37,7 +37,7 @@ type FinanceTransactionListInput struct {
 }
 
 type FinanceTransactionUpdateInput struct {
-	Space      string  `json:"space,omitempty" jsonschema:"Space UUID or exact user-facing name; blank selects Personal Space in a private chat or the bound Space in a group or other shared chat"`
+	Space      string  `json:"space,omitempty" jsonschema:"finance Space UUID or exact user-facing name. In a private chat always name the finance Space: a blank value selects the Personal Space, which is never a finance Space (not found). In a group or other shared chat blank selects the bound Space"`
 	ID         string  `json:"id" jsonschema:"transaction UUID, from finance_transaction_list"`
 	Type       *string `json:"type,omitempty" jsonschema:"optional new type: income, expense or transfer"`
 	Amount     *int64  `json:"amount,omitempty" jsonschema:"optional new amount, positive integer in whole rupiah, e.g. 25000"`
@@ -46,11 +46,11 @@ type FinanceTransactionUpdateInput struct {
 	Category   *string `json:"category,omitempty" jsonschema:"optional new category UUID or exact name; an empty string clears the category; absent leaves it unchanged"`
 	Merchant   *string `json:"merchant,omitempty" jsonschema:"optional new merchant; empty string clears it"`
 	Note       *string `json:"note,omitempty" jsonschema:"optional new note; empty string clears it"`
-	OccurredAt *string `json:"occurred_at,omitempty" jsonschema:"optional new time, RFC3339 with offset, e.g. 2026-11-10T07:30:00+07:00"`
+	OccurredAt *string `json:"occurred_at,omitempty" jsonschema:"optional new time, RFC3339 with offset, e.g. 2026-11-10T07:30:00+07:00; omit to leave unchanged; an empty string is rejected"`
 }
 
 type FinanceTransactionDeleteInput struct {
-	Space string `json:"space,omitempty" jsonschema:"Space UUID or exact user-facing name; blank selects Personal Space in a private chat or the bound Space in a group or other shared chat"`
+	Space string `json:"space,omitempty" jsonschema:"finance Space UUID or exact user-facing name. In a private chat always name the finance Space: a blank value selects the Personal Space, which is never a finance Space (not found). In a group or other shared chat blank selects the bound Space"`
 	ID    string `json:"id" jsonschema:"transaction UUID, from finance_transaction_list or the create result"`
 }
 
@@ -156,7 +156,7 @@ func registerFinanceTransactionTools(server *mcpsdk.Server, resolver interfaceid
 		Description: "Record an income, expense or transfer in a finance Space (the family's books). amount is whole rupiah (25000 = Rp 25.000)." + financeKindRules +
 			" account and category are UUIDs or exact names from finance_account_list and finance_category_list. A blank occurred_at means now; otherwise pass an RFC3339 time with offset, preferably WIB." + financeTimeRules +
 			financeConfirmRules +
-			" The result is the saved transaction (its id, amount, occurred_at in WIB) plus two optional fields. If possible_duplicate is present, the transaction is ALREADY SAVED: tell the user a similar one exists, ask whether it was a double entry, and if so offer to delete the new one with finance_transaction_delete. If budget_status is present and its percent_used is 80 or more, mention it (budget, spent, remaining)." +
+			" The result is the saved transaction (its id, amount, occurred_at in WIB) plus two optional fields. If possible_duplicate is present, the transaction is ALREADY SAVED: tell the user a similar one exists, ask whether it was a double entry, and if so offer to delete the new one with finance_transaction_delete (owner/admin only; otherwise ask an admin). If budget_status is present and its percent_used is 80 or more, mention it (budget, spent, remaining)." +
 			financeNoMathRules + financeTxPermRules + financeRules,
 	}, func(ctx context.Context, input FinanceTransactionCreateInput) (*FinanceTransactionResultOutput, error) {
 		return FinanceTransactionCreate(ctx, resolver, service, input)
@@ -171,7 +171,7 @@ func registerFinanceTransactionTools(server *mcpsdk.Server, resolver interfaceid
 	addTool(server, &mcpsdk.Tool{
 		Name: "finance_transaction_update",
 		Description: "Change a transaction by id (UUID, from finance_transaction_list or the create result). Only the fields you send change; an absent field is left unchanged. An empty string for category clears the category, and an empty string for to_account clears the destination. The same rules as create apply to the resulting transaction." + financeKindRules +
-			financeTimeRules + financeConfirmRules + " The result has the same possible_duplicate and budget_status fields as create; relay them the same way." +
+			financeTimeRules + financeConfirmRules + " The result is the updated transaction plus budget_status when the category has a budget (relay it as for create: mention it at 80 percent or more); update does not return possible_duplicate." +
 			financeNoMathRules + financeTxPermRules + financeRules,
 	}, func(ctx context.Context, input FinanceTransactionUpdateInput) (*FinanceTransactionResultOutput, error) {
 		return FinanceTransactionUpdate(ctx, resolver, service, input)

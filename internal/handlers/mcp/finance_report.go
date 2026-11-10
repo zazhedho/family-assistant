@@ -14,14 +14,14 @@ import (
 )
 
 type FinanceSummaryInput struct {
-	Space  string `json:"space,omitempty" jsonschema:"Space UUID or exact user-facing name; blank selects Personal Space in a private chat or the bound Space in a group or other shared chat"`
+	Space  string `json:"space,omitempty" jsonschema:"finance Space UUID or exact user-facing name. In a private chat always name the finance Space: a blank value selects the Personal Space, which is never a finance Space (not found). In a group or other shared chat blank selects the bound Space"`
 	Period string `json:"period,omitempty" jsonschema:"one of today, week (Monday start), month, last_month, custom; blank means month"`
-	From   string `json:"from,omitempty" jsonschema:"custom only: inclusive start, RFC3339 with offset, e.g. 2026-11-01T00:00:00+07:00"`
-	To     string `json:"to,omitempty" jsonschema:"custom only: exclusive end, RFC3339 with offset, e.g. 2026-12-01T00:00:00+07:00; at most 366 days after from"`
+	From   string `json:"from,omitempty" jsonschema:"custom only (blank period then implies custom): inclusive start, RFC3339 with offset, e.g. 2026-11-01T00:00:00+07:00"`
+	To     string `json:"to,omitempty" jsonschema:"custom only (blank period then implies custom): exclusive end, RFC3339 with offset, e.g. 2026-12-01T00:00:00+07:00; at most 366 days after from"`
 }
 
 type FinanceBalancesInput struct {
-	Space string `json:"space,omitempty" jsonschema:"Space UUID or exact user-facing name; blank selects Personal Space in a private chat or the bound Space in a group or other shared chat"`
+	Space string `json:"space,omitempty" jsonschema:"finance Space UUID or exact user-facing name. In a private chat always name the finance Space: a blank value selects the Personal Space, which is never a finance Space (not found). In a group or other shared chat blank selects the bound Space"`
 }
 
 // FinanceSummaryOutput is a summary with from/to rendered in WIB.
@@ -79,7 +79,7 @@ func FinanceBalances(ctx context.Context, resolver interfaceidentity.Resolver, s
 func registerFinanceReportTools(server *mcpsdk.Server, resolver interfaceidentity.Resolver, service interfacefinance.ServiceFinanceInterface) {
 	addTool(server, &mcpsdk.Tool{
 		Name: "finance_summary",
-		Description: "Income, expense and net for a period with the previous period, the top categories, accounts and merchants. period is today, week (Monday start), month, last_month or custom, all in WIB; blank means month. custom needs from (inclusive) and to (exclusive), RFC3339 with offset, at most 366 days apart. from and to in the result are WIB. Transfers count in neither income nor expense. Answer spending questions only from this tool's output." +
+		Description: "Income, expense and net for a period with the previous period, plus by_category and top_merchants (EXPENSE only) and by_account (income and expense per account). period is today, week (Monday start), month, last_month or custom, all in WIB; blank means month. from (inclusive) and to (exclusive), RFC3339 with offset, at most 366 days apart, apply to custom only: with a blank period they imply custom (both are then required), with any other period they are rejected. from and to in the result are WIB. Transfers count in neither income nor expense. Answer spending questions only from this tool's output." +
 			financeNoMathRules + " Any member can read." + financeRules,
 	}, func(ctx context.Context, input FinanceSummaryInput) (*FinanceSummaryOutput, error) {
 		return FinanceSummary(ctx, resolver, service, input)

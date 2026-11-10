@@ -345,25 +345,25 @@ func TestTransferRules(t *testing.T) {
 	same := base
 	same.ToAccount = acctID
 	_, err = e.svc.TransactionCreate(ctx, memberActor(), same)
-	vErr(t, err, "to_account_id")
+	vErr(t, err, "to_account")
 	same.ToAccount = " kas "
 	_, err = e.svc.TransactionCreate(ctx, memberActor(), same)
-	vErr(t, err, "to_account_id")
+	vErr(t, err, "to_account")
 
 	withCat := base
 	withCat.Category = "Makan"
 	_, err = e.svc.TransactionCreate(ctx, memberActor(), withCat)
-	vErr(t, err, "category_id")
+	vErr(t, err, "category")
 
 	noTarget := base
 	noTarget.ToAccount = ""
 	_, err = e.svc.TransactionCreate(ctx, memberActor(), noTarget)
-	vErr(t, err, "to_account_id")
+	vErr(t, err, "to_account")
 
 	exp := expense(10)
 	exp.ToAccount = "Bank BCA"
 	_, err = e.svc.TransactionCreate(ctx, memberActor(), exp)
-	vErr(t, err, "to_account_id")
+	vErr(t, err, "to_account")
 
 	if len(e.repo.txs) != 1 {
 		t.Fatalf("only the valid transfer may be stored, have %d", len(e.repo.txs))
@@ -626,7 +626,7 @@ func TestUpdateMergesAndClears(t *testing.T) {
 	_, err = e.svc.TransactionUpdate(ctx, memberActor(), spaceID, txMine, dto.TransactionUpdateInput{Account: ptr(foreignAcct)})
 	vErr(t, err, "account")
 	_, err = e.svc.TransactionUpdate(ctx, memberActor(), spaceID, txMine, dto.TransactionUpdateInput{Account: ptr("")})
-	vErr(t, err, "account_id")
+	vErr(t, err, "account")
 	if e.repo.txs[txMine].Amount != 5 || e.repo.txs[txMine].AccountID != acctID {
 		t.Fatal("rejected updates must not write")
 	}
@@ -641,13 +641,13 @@ func TestUpdateRevalidatesKindAndTransferRules(t *testing.T) {
 		t.Fatalf("reason = %q", r)
 	}
 	_, err = e.svc.TransactionUpdate(ctx, memberActor(), spaceID, txMine, dto.TransactionUpdateInput{Type: ptr("transfer"), ToAccount: ptr("Bank BCA")})
-	vErr(t, err, "category_id")
+	vErr(t, err, "category")
 	res, err := e.svc.TransactionUpdate(ctx, memberActor(), spaceID, txMine, dto.TransactionUpdateInput{Type: ptr("transfer"), ToAccount: ptr("Bank BCA"), Category: ptr("")})
 	if err != nil || res.Transaction.ToAccountID == nil || *e.repo.txs[txMine].ToAccountID != acct2 || e.repo.txs[txMine].CategoryID != nil {
 		t.Fatalf("convert to transfer: %v %+v", err, e.repo.txs[txMine])
 	}
 	_, err = e.svc.TransactionUpdate(ctx, memberActor(), spaceID, txMine, dto.TransactionUpdateInput{Type: ptr("expense")})
-	vErr(t, err, "to_account_id")
+	vErr(t, err, "to_account")
 	if _, err = e.svc.TransactionUpdate(ctx, memberActor(), spaceID, txMine, dto.TransactionUpdateInput{Type: ptr("expense"), ToAccount: ptr("")}); err != nil || e.repo.txs[txMine].ToAccountID != nil {
 		t.Fatalf("convert back: %v", err)
 	}

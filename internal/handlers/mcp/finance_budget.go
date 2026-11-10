@@ -14,19 +14,19 @@ import (
 )
 
 type FinanceBudgetSetInput struct {
-	Space    string `json:"space,omitempty" jsonschema:"Space UUID or exact user-facing name; blank selects Personal Space in a private chat or the bound Space in a group or other shared chat"`
+	Space    string `json:"space,omitempty" jsonschema:"finance Space UUID or exact user-facing name. In a private chat always name the finance Space: a blank value selects the Personal Space, which is never a finance Space (not found). In a group or other shared chat blank selects the bound Space"`
 	Category string `json:"category" jsonschema:"expense category UUID or exact name, from finance_category_list"`
 	Month    string `json:"month" jsonschema:"calendar month in WIB as YYYY-MM, e.g. 2026-11"`
 	Amount   int64  `json:"amount" jsonschema:"monthly budget as a positive integer in whole rupiah, e.g. 2000000 for Rp 2.000.000"`
 }
 
 type FinanceBudgetListInput struct {
-	Space string `json:"space,omitempty" jsonschema:"Space UUID or exact user-facing name; blank selects Personal Space in a private chat or the bound Space in a group or other shared chat"`
+	Space string `json:"space,omitempty" jsonschema:"finance Space UUID or exact user-facing name. In a private chat always name the finance Space: a blank value selects the Personal Space, which is never a finance Space (not found). In a group or other shared chat blank selects the bound Space"`
 	Month string `json:"month,omitempty" jsonschema:"optional calendar month in WIB as YYYY-MM, e.g. 2026-11; blank means the current month"`
 }
 
 type FinanceBudgetDeleteInput struct {
-	Space    string `json:"space,omitempty" jsonschema:"Space UUID or exact user-facing name; blank selects Personal Space in a private chat or the bound Space in a group or other shared chat"`
+	Space    string `json:"space,omitempty" jsonschema:"finance Space UUID or exact user-facing name. In a private chat always name the finance Space: a blank value selects the Personal Space, which is never a finance Space (not found). In a group or other shared chat blank selects the bound Space"`
 	Category string `json:"category" jsonschema:"expense category UUID or exact name"`
 	Month    string `json:"month" jsonschema:"calendar month in WIB as YYYY-MM, e.g. 2026-11"`
 }
@@ -86,14 +86,14 @@ func registerFinanceBudgetTools(server *mcpsdk.Server, resolver interfaceidentit
 	})
 	addTool(server, &mcpsdk.Tool{
 		Name: "finance_budget_list",
-		Description: "List every budget of a month with its status: category_name, budget, spent, remaining and percent_used. month is YYYY-MM (WIB); blank means the current month. Any member can list. If percent_used is 80 or more, mention it." +
+		Description: "List every budget of a month with its status: category_name, budget, spent, remaining and percent_used. month is YYYY-MM (WIB) within 24 months of the current month; blank means the current month. Any member can list. If percent_used is 80 or more, mention it." +
 			financeNoMathRules + financeRules,
 	}, func(ctx context.Context, input FinanceBudgetListInput) (FinanceBudgetListOutput, error) {
 		return FinanceBudgetList(ctx, resolver, service, input)
 	})
 	addTool(server, &mcpsdk.Tool{
 		Name: "finance_budget_delete",
-		Description: "Remove the budget of an expense category for a month (month is YYYY-MM, WIB). Past transactions are not affected. Confirm with the user before deleting." +
+		Description: "Remove the budget of an expense category for a month (month is YYYY-MM, WIB, within 24 months of the current month). Past transactions are not affected. Confirm with the user before deleting." +
 			financeAdminOnly + financeRules,
 	}, func(ctx context.Context, input FinanceBudgetDeleteInput) (FinanceDeleteOutput, error) {
 		return FinanceBudgetDelete(ctx, resolver, service, input)

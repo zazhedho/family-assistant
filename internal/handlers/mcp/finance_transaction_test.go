@@ -99,6 +99,12 @@ func TestFinanceTransactionToolsRejectBadTimeAndUUIDBeforeService(t *testing.T) 
 	assertMCPCode(t, err, "invalid_input")
 	_, err = FinanceTransactionUpdate(ctx, financeResolver(), service, FinanceTransactionUpdateInput{Space: "Family", ID: "not-a-uuid"})
 	assertMCPCode(t, err, "invalid_input")
+	blank := ""
+	_, err = FinanceTransactionUpdate(ctx, financeResolver(), service, FinanceTransactionUpdateInput{Space: "Family", ID: id, OccurredAt: &blank})
+	assertMCPCode(t, err, "invalid_input")
+	if !strings.Contains(err.Error(), "omit the field to leave it unchanged") {
+		t.Fatalf("empty occurred_at message = %v", err)
+	}
 	_, err = FinanceTransactionDelete(ctx, financeResolver(), service, FinanceTransactionDeleteInput{Space: "Family", ID: ""})
 	assertMCPCode(t, err, "invalid_input")
 	if service.calls != 0 {
@@ -236,7 +242,7 @@ func TestFinanceTransactionDescriptionsGuideTheBot(t *testing.T) {
 	d := financeDescriptions(t)
 	assertDescriptionHas(t, d, "finance_transaction_create",
 		"possible_duplicate", "double entry", "finance_transaction_delete", "percent_used", "80", "never compute", "confirm with the user",
-		"photo", "voice", "to_account", "no category", "income", "expense", "+07:00", "blank occurred_at", "own transactions", "ask an admin", "already saved")
+		"photo", "voice", "to_account", "no category", "income", "expense", "+07:00", "blank occurred_at", "they created", "ask an admin", "already saved")
 	assertDescriptionHas(t, d, "finance_transaction_list", "finance_account_list", "finance_category_list", "RFC3339", "never compute")
 	assertDescriptionHas(t, d, "finance_transaction_update", "empty string", "clears the category", "unchanged", "RFC3339")
 	assertDescriptionHas(t, d, "finance_transaction_delete", "owner or admin", "ask an admin")

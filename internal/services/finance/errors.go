@@ -24,13 +24,13 @@ func mapDomainError(err error) error {
 	case errors.Is(err, domainfinance.ErrInvalidAmount):
 		field = "amount"
 	case errors.Is(err, domainfinance.ErrAccountRequired):
-		field = "account_id"
+		field = fieldAccount
 	case errors.Is(err, domainfinance.ErrToAccountRequired),
 		errors.Is(err, domainfinance.ErrToAccountForbidden),
 		errors.Is(err, domainfinance.ErrTransferSameAcct):
-		field = "to_account_id"
+		field = fieldToAccount
 	case errors.Is(err, domainfinance.ErrTransferCategory):
-		field = "category_id"
+		field = fieldCategory
 	case errors.Is(err, domainfinance.ErrInvalidFrequency):
 		field = "frequency"
 	case errors.Is(err, domainfinance.ErrIntervalRange):
@@ -81,20 +81,18 @@ func notFound(err error) error {
 }
 
 // validateUpdate checks the fields shared by account and category updates and
-// returns the trimmed id and new name (empty when Name is nil).
-func validateUpdate(rawID string, name *string, archived *bool) (id, newName string, err error) {
-	if id, err = requireID(rawID); err != nil {
-		return "", "", err
-	}
+// returns the new name (empty when Name is nil). The row reference itself is
+// resolved later, behind the guard.
+func validateUpdate(name *string, archived *bool) (newName string, err error) {
 	if name == nil && archived == nil {
-		return "", "", validationError("update", "at least one field is required")
+		return "", validationError("update", "at least one field is required")
 	}
 	if name != nil {
 		if newName, err = normalizeName(*name); err != nil {
-			return "", "", err
+			return "", err
 		}
 	}
-	return id, newName, nil
+	return newName, nil
 }
 
 // archiveChange is what an update does to archived_at.
@@ -120,12 +118,14 @@ func wantArchive(archived *bool, currentlyArchived bool) archiveChange {
 	}
 }
 
+const reasonExists = "already exists (it may be archived: list with include_archived=true and restore it with the update tool by setting archived=false)"
+
 // mapUniqueViolation maps a Postgres unique violation (23505) to a name
 // ValidationError; other errors pass through.
 func mapUniqueViolation(err error) error {
 	var pgErr *pgconn.PgError
 	if errors.As(err, &pgErr) && pgErr.Code == "23505" {
-		return validationError("name", "already exists")
+		return validationError("name", reasonExists)
 	}
 	return err
 }

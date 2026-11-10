@@ -176,7 +176,7 @@ func TestRecurringCreateValidatesSchedule(t *testing.T) {
 		"end before start":  {func(in *dto.RecurringCreateInput) { in.EndAt = &before }, "end_at"},
 		"amount":            {func(in *dto.RecurringCreateInput) { in.Amount = 0 }, "amount"},
 		"type":              {func(in *dto.RecurringCreateInput) { in.Type = "gift" }, "type"},
-		"transfer category": {func(in *dto.RecurringCreateInput) { in.Type, in.ToAccount = "transfer", "Bank BCA" }, "category_id"},
+		"transfer category": {func(in *dto.RecurringCreateInput) { in.Type, in.ToAccount = "transfer", "Bank BCA" }, "category"},
 	}
 	for name, c := range cases {
 		in := monthlyBill(e.now)

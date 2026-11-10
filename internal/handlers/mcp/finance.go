@@ -101,6 +101,9 @@ func financeTimeSet(value *string, field string) (*time.Time, error) {
 	if value == nil {
 		return nil, nil
 	}
+	if *value == "" {
+		return nil, MapToolError(&serviceauthorization.ValidationError{Field: field, Reason: "must not be an empty string; omit the field to leave it unchanged"})
+	}
 	return financeParseTime(*value, field, true)
 }
 
@@ -148,8 +151,8 @@ const (
 	financeConfirmRules = " Confirm with the user before writing when the amount, account or category is ambiguous or comes from a photo or voice note; do not guess."
 	financeTimeRules    = " Times are RFC3339 strings WITH an offset; use WIB (+07:00), for example 2026-11-10T07:30:00+07:00."
 	financeNoMathRules  = " Take every amount, total and percentage from the tool output; never compute or estimate them yourself."
-	financeKindRules    = " type is income, expense or transfer. A transfer needs to_account (a different account) and no category; income and expense need no to_account, and a category must match the type (income category for income, expense category for expense)."
-	financeTxPermRules  = " Members can create, list and update their own transactions; only an owner or admin can delete a transaction or manage budgets and recurring templates. If the result is forbidden, tell the user to ask an admin."
+	financeKindRules    = " type is income, expense or transfer. A transfer needs to_account (a different account) and no category; income and expense must not have a to_account, and a category must match the type (income category for income, expense category for expense). When changing a transfer to income or expense send to_account as an empty string to clear the destination; when changing an income or expense to a transfer send category as an empty string to clear the category."
+	financeTxPermRules  = " Members can list all transactions of the Space and create new ones, and can update only the transactions they created; only an owner or admin can update anyone's transaction, delete a transaction or manage budgets and recurring templates. If the result is forbidden, tell the user to ask an admin."
 	financeAdminOnly    = " Only an owner or admin can do this; if the result is forbidden, tell the user to ask an admin."
 )
 
@@ -163,20 +166,20 @@ func registerFinanceTools(server *mcpsdk.Server, resolver interfaceidentity.Reso
 }
 
 type FinanceAccountCreateInput struct {
-	Space          string `json:"space,omitempty" jsonschema:"Space UUID or exact user-facing name; blank selects Personal Space in a private chat or the bound Space in a group or other shared chat"`
+	Space          string `json:"space,omitempty" jsonschema:"finance Space UUID or exact user-facing name. In a private chat always name the finance Space: a blank value selects the Personal Space, which is never a finance Space (not found). In a group or other shared chat blank selects the bound Space"`
 	Name           string `json:"name" jsonschema:"account name, unique per Space (case-insensitive), e.g. BCA, Cash, GoPay"`
 	Type           string `json:"type" jsonschema:"one of cash, bank, ewallet, savings, credit_card"`
 	OpeningBalance int64  `json:"opening_balance,omitempty" jsonschema:"starting balance as an integer in whole rupiah, e.g. 1500000 for Rp 1.500.000; omit or 0 for none. May be negative only for credit_card"`
 }
 
 type FinanceAccountListInput struct {
-	Space           string `json:"space,omitempty" jsonschema:"Space UUID or exact user-facing name; blank selects Personal Space in a private chat or the bound Space in a group or other shared chat"`
+	Space           string `json:"space,omitempty" jsonschema:"finance Space UUID or exact user-facing name. In a private chat always name the finance Space: a blank value selects the Personal Space, which is never a finance Space (not found). In a group or other shared chat blank selects the bound Space"`
 	IncludeArchived bool   `json:"include_archived,omitempty" jsonschema:"also list archived accounts; default false"`
 	Limit           int    `json:"limit,omitempty" jsonschema:"optional maximum results, default 50, capped at 100"`
 }
 
 type FinanceAccountUpdateInput struct {
-	Space    string  `json:"space,omitempty" jsonschema:"Space UUID or exact user-facing name; blank selects Personal Space in a private chat or the bound Space in a group or other shared chat"`
+	Space    string  `json:"space,omitempty" jsonschema:"finance Space UUID or exact user-facing name. In a private chat always name the finance Space: a blank value selects the Personal Space, which is never a finance Space (not found). In a group or other shared chat blank selects the bound Space"`
 	Account  string  `json:"account" jsonschema:"account UUID or exact name, from finance_account_list"`
 	Name     *string `json:"name,omitempty" jsonschema:"optional new name, unique per Space (case-insensitive)"`
 	Archived *bool   `json:"archived,omitempty" jsonschema:"true archives the account (hides it, keeps its transactions); false unarchives it; omit to leave unchanged"`

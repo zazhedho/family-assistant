@@ -128,8 +128,9 @@ type BalancesReport struct {
 }
 
 // SummaryInput selects a report period: today, week (ISO, Monday start),
-// month, last_month or custom, all in WIB; empty means month. From and To are
-// used only by custom.
+// month, last_month or custom, all in WIB; empty means month. From and To
+// belong to custom: with an empty Period they imply it, with any other Period
+// they are rejected.
 type SummaryInput struct {
 	Space  string
 	Period string

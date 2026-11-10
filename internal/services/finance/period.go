@@ -61,6 +61,18 @@ func wibMonthStart(t time.Time, months int) time.Time {
 // resolvePeriod resolves the report period in WIB (never UTC or local time).
 func resolvePeriod(input dto.SummaryInput, now time.Time) (periodRange, error) {
 	name := strings.ToLower(strings.TrimSpace(input.Period))
+	hasFrom := input.From != nil && !input.From.IsZero()
+	hasTo := input.To != nil && !input.To.IsZero()
+	if name == "" && (hasFrom || hasTo) {
+		name = periodCustom // a range without a period can only mean custom
+	}
+	if name != periodCustom && (hasFrom || hasTo) {
+		field := "from"
+		if !hasFrom {
+			field = "to"
+		}
+		return periodRange{}, validationError(field, "is only allowed with period custom")
+	}
 	switch name {
 	case "", periodMonth:
 		from, to := monthRange(now)

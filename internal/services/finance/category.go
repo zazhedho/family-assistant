@@ -98,6 +98,13 @@ func (s *service) CategoryList(ctx context.Context, actor domainidentity.ActorCo
 // row is stored in *row.
 func (s *service) categoryOps(ctx context.Context, spaceID string, row **domainfinance.Category) rowOps {
 	return rowOps{
+		resolve: func(ref string) (string, error) {
+			category, err := s.resolveCategory(ctx, spaceID, ref, "", true, "")
+			if err != nil {
+				return "", err
+			}
+			return category.ID, nil
+		},
 		load: func(id string) (err error) {
 			*row, err = s.repo.FindCategory(ctx, spaceID, id)
 			return err

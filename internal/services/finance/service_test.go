@@ -537,7 +537,7 @@ func TestUniqueViolationMapsToNameAlreadyExists(t *testing.T) {
 	_, err = svc.CategoryCreate(ctx, a, dto.CategoryCreateInput{Name: "Hobi", Kind: "expense"})
 	vErr(t, err, "name")
 	var ve *authorization.ValidationError
-	if errors.As(err, &ve) && ve.Reason != "already exists" {
+	if errors.As(err, &ve) && ve.Reason != reasonExists {
 		t.Fatalf("reason = %q", ve.Reason)
 	}
 
@@ -587,14 +587,14 @@ func TestAccountUpdateRenameAndScope(t *testing.T) {
 	if err != nil || got.Name != "Dompet" || repo.accounts[acctID].OpeningBalance != 5 {
 		t.Fatalf("%+v %v", got, err)
 	}
-	if _, err := svc.AccountUpdate(context.Background(), a, dto.AccountUpdateInput{ID: otherID, Name: &name}); !errors.Is(err, authorization.ErrNotFound) {
+	if _, err := svc.AccountUpdate(context.Background(), a, dto.AccountUpdateInput{ID: otherID, Name: &name}); reasonOf(t, err, "account") != "not found" {
 		t.Fatalf("foreign account err = %v", err)
 	}
 	if repo.accounts[otherID].Name != "Orang" {
 		t.Fatal("foreign account changed")
 	}
 	_, err = svc.AccountUpdate(context.Background(), a, dto.AccountUpdateInput{ID: "not-a-uuid", Name: &name})
-	vErr(t, err, "id")
+	vErr(t, err, "account")
 	_, err = svc.AccountUpdate(context.Background(), a, dto.AccountUpdateInput{ID: acctID})
 	vErr(t, err, "update")
 	empty := " "
@@ -621,7 +621,7 @@ func TestCategoryCreateAndUpdate(t *testing.T) {
 	if err != nil || got.Name != "Hobi Baru" || got.ArchivedAt == nil {
 		t.Fatalf("%+v %v", got, err)
 	}
-	if _, err := svc.CategoryUpdate(ctx, a, dto.CategoryUpdateInput{ID: otherID, Name: &name}); !errors.Is(err, authorization.ErrNotFound) {
+	if _, err := svc.CategoryUpdate(ctx, a, dto.CategoryUpdateInput{ID: otherID, Name: &name}); reasonOf(t, err, "category") != "not found" {
 		t.Fatalf("missing err = %v", err)
 	}
 }
@@ -663,11 +663,11 @@ func TestMapDomainError(t *testing.T) {
 	cases := map[error]string{
 		domainfinance.ErrInvalidType:        "type",
 		domainfinance.ErrInvalidAmount:      "amount",
-		domainfinance.ErrAccountRequired:    "account_id",
-		domainfinance.ErrToAccountRequired:  "to_account_id",
-		domainfinance.ErrToAccountForbidden: "to_account_id",
-		domainfinance.ErrTransferSameAcct:   "to_account_id",
-		domainfinance.ErrTransferCategory:   "category_id",
+		domainfinance.ErrAccountRequired:    "account",
+		domainfinance.ErrToAccountRequired:  "to_account",
+		domainfinance.ErrToAccountForbidden: "to_account",
+		domainfinance.ErrTransferSameAcct:   "to_account",
+		domainfinance.ErrTransferCategory:   "category",
 	}
 	for in, field := range cases {
 		vErr(t, mapDomainError(in), field)
@@ -678,5 +678,76 @@ func TestMapDomainError(t *testing.T) {
 	}
 	if mapDomainError(nil) != nil {
 		t.Fatal("nil must stay nil")
+	}
+}
+
+func TestAccountUpdateByName(t *testing.T) {
+	repo := newRepo()
+	repo.accounts[acctID] = &domainfinance.Account{ID: acctID, SpaceID: spaceID, Name: "BCA", Type: "bank"}
+	repo.accounts[otherID] = &domainfinance.Account{ID: otherID, SpaceID: foreign, Name: "Mandiri", Type: "bank"}
+	svc := newSvc(repo, financeSpaces(domainspace.CategoryFinance), &auditFake{})
+	a := actorWith("finance:manage")
+	ctx := context.Background()
+
+	name := "BCA Utama"
+	ref := " bca "
+	got, err := svc.AccountUpdate(ctx, a, dto.AccountUpdateInput{ID: ref, Name: &name})
+	if err != nil || got.Name != "BCA Utama" || repo.accounts[acctID].Name != "BCA Utama" {
+		t.Fatalf("rename by name: %+v %v", got, err)
+	}
+	yes := true
+	got, err = svc.AccountUpdate(ctx, a, dto.AccountUpdateInput{ID: "bca utama", Archived: &yes})
+	if err != nil || got.ArchivedAt == nil || repo.archiveCnt != 1 {
+		t.Fatalf("archive by name: %+v %v", got, err)
+	}
+	no := false
+	got, err = svc.AccountUpdate(ctx, a, dto.AccountUpdateInput{ID: "BCA Utama", Archived: &no})
+	if err != nil || got.ArchivedAt != nil {
+		t.Fatalf("restore archived by name: %+v %v", got, err)
+	}
+	// A name that lives in another Space is not found, and nothing changes.
+	_, err = svc.AccountUpdate(ctx, a, dto.AccountUpdateInput{ID: "Mandiri", Name: &name})
+	if r := reasonOf(t, err, "account"); r != "not found" {
+		t.Fatalf("reason = %q", r)
+	}
+	if repo.accounts[otherID].Name != "Mandiri" {
+		t.Fatal("foreign account changed")
+	}
+	// The permission guard still runs before any lookup.
+	if _, err = svc.AccountUpdate(ctx, actorWith(), dto.AccountUpdateInput{ID: "BCA Utama", Name: &name}); err == nil || errors.Is(err, authorization.ErrNotFound) {
+		t.Fatalf("expected a forbidden error, got %v", err)
+	}
+}
+
+func TestCategoryUpdateByName(t *testing.T) {
+	repo := newRepo()
+	svc := newSvc(repo, financeSpaces(domainspace.CategoryFinance), &auditFake{})
+	a := actorWith("finance:manage")
+	ctx := context.Background()
+	for _, in := range []dto.CategoryCreateInput{
+		{Name: "Hobi", Kind: "expense"}, {Name: "Bonus Tahunan", Kind: "income"}, {Name: "Lain Dua", Kind: "expense"}, {Name: "Lain Dua", Kind: "income"},
+	} {
+		if _, err := svc.CategoryCreate(ctx, a, in); err != nil {
+			t.Fatal(err)
+		}
+	}
+	name := "Hobi Baru"
+	got, err := svc.CategoryUpdate(ctx, a, dto.CategoryUpdateInput{ID: "hobi", Name: &name})
+	if err != nil || got.Name != "Hobi Baru" {
+		t.Fatalf("rename by name: %+v %v", got, err)
+	}
+	yes := true
+	got, err = svc.CategoryUpdate(ctx, a, dto.CategoryUpdateInput{ID: "BONUS TAHUNAN", Archived: &yes})
+	if err != nil || got.ArchivedAt == nil {
+		t.Fatalf("archive by name: %+v %v", got, err)
+	}
+	// One name for both kinds is ambiguous and nothing is changed.
+	_, err = svc.CategoryUpdate(ctx, a, dto.CategoryUpdateInput{ID: "lain dua", Archived: &yes})
+	if r := reasonOf(t, err, "category"); r != "is ambiguous" {
+		t.Fatalf("reason = %q", r)
+	}
+	_, err = svc.CategoryUpdate(ctx, a, dto.CategoryUpdateInput{ID: "no such", Archived: &yes})
+	if r := reasonOf(t, err, "category"); r != "not found" {
+		t.Fatalf("reason = %q", r)
 	}
 }

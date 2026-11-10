@@ -13,20 +13,20 @@ import (
 )
 
 type FinanceCategoryCreateInput struct {
-	Space string `json:"space,omitempty" jsonschema:"Space UUID or exact user-facing name; blank selects Personal Space in a private chat or the bound Space in a group or other shared chat"`
+	Space string `json:"space,omitempty" jsonschema:"finance Space UUID or exact user-facing name. In a private chat always name the finance Space: a blank value selects the Personal Space, which is never a finance Space (not found). In a group or other shared chat blank selects the bound Space"`
 	Name  string `json:"name" jsonschema:"category name, unique per Space (case-insensitive), e.g. Makan, Transport, Gaji"`
 	Kind  string `json:"kind" jsonschema:"income or expense"`
 }
 
 type FinanceCategoryListInput struct {
-	Space           string `json:"space,omitempty" jsonschema:"Space UUID or exact user-facing name; blank selects Personal Space in a private chat or the bound Space in a group or other shared chat"`
+	Space           string `json:"space,omitempty" jsonschema:"finance Space UUID or exact user-facing name. In a private chat always name the finance Space: a blank value selects the Personal Space, which is never a finance Space (not found). In a group or other shared chat blank selects the bound Space"`
 	Kind            string `json:"kind,omitempty" jsonschema:"optional filter: income or expense"`
 	IncludeArchived bool   `json:"include_archived,omitempty" jsonschema:"also list archived categories; default false"`
 	Limit           int    `json:"limit,omitempty" jsonschema:"optional maximum results, default 50, capped at 100"`
 }
 
 type FinanceCategoryUpdateInput struct {
-	Space    string  `json:"space,omitempty" jsonschema:"Space UUID or exact user-facing name; blank selects Personal Space in a private chat or the bound Space in a group or other shared chat"`
+	Space    string  `json:"space,omitempty" jsonschema:"finance Space UUID or exact user-facing name. In a private chat always name the finance Space: a blank value selects the Personal Space, which is never a finance Space (not found). In a group or other shared chat blank selects the bound Space"`
 	Category string  `json:"category" jsonschema:"category UUID or exact name, from finance_category_list"`
 	Name     *string `json:"name,omitempty" jsonschema:"optional new name, unique per Space (case-insensitive)"`
 	Archived *bool   `json:"archived,omitempty" jsonschema:"true archives the category (hides it, keeps its transactions); false unarchives it; omit to leave unchanged"`

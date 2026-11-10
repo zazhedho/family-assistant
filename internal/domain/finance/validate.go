@@ -6,9 +6,9 @@ import "errors"
 // maps them to serviceauthorization.ValidationError.
 var (
 	ErrInvalidType        = errors.New("type must be income, expense or transfer")
-	ErrAccountRequired    = errors.New("account_id is required")
-	ErrToAccountRequired  = errors.New("to_account_id is required for a transfer")
-	ErrToAccountForbidden = errors.New("to_account_id is only allowed for a transfer")
+	ErrAccountRequired    = errors.New("account is required")
+	ErrToAccountRequired  = errors.New("to_account is required for a transfer")
+	ErrToAccountForbidden = errors.New("to_account is only allowed for a transfer")
 	ErrTransferSameAcct   = errors.New("transfer accounts must differ")
 	ErrTransferCategory   = errors.New("a transfer cannot have a category")
 )

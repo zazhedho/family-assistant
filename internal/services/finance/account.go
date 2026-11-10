@@ -90,6 +90,9 @@ func (s *service) AccountUpdate(ctx context.Context, actor domainidentity.ActorC
 	var account *domainfinance.Account
 	load := func(id string) (err error) { account, err = s.repo.FindAccount(ctx, spaceID, id); return err }
 	err := s.updateRow(ctx, actor, spaceID, resourceAccount, input.ID, input.Name, input.Archived, rowOps{
+		resolve: func(ref string) (string, error) {
+			return s.resolveAccount(ctx, spaceID, ref, fieldAccount, true, "")
+		},
 		load:    load,
 		current: func() (string, bool) { return account.Name, account.ArchivedAt != nil },
 		rename: func(name string) error {

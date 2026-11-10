@@ -14,7 +14,7 @@ import (
 )
 
 type FinanceRecurringCreateInput struct {
-	Space      string `json:"space,omitempty" jsonschema:"Space UUID or exact user-facing name; blank selects Personal Space in a private chat or the bound Space in a group or other shared chat"`
+	Space      string `json:"space,omitempty" jsonschema:"finance Space UUID or exact user-facing name. In a private chat always name the finance Space: a blank value selects the Personal Space, which is never a finance Space (not found). In a group or other shared chat blank selects the bound Space"`
 	Type       string `json:"type" jsonschema:"one of income, expense, transfer"`
 	Amount     int64  `json:"amount" jsonschema:"amount per occurrence, positive integer in whole rupiah, e.g. 500000 for Rp 500.000"`
 	Account    string `json:"account" jsonschema:"account UUID or exact name, from finance_account_list"`
@@ -30,12 +30,12 @@ type FinanceRecurringCreateInput struct {
 }
 
 type FinanceRecurringListInput struct {
-	Space string `json:"space,omitempty" jsonschema:"Space UUID or exact user-facing name; blank selects Personal Space in a private chat or the bound Space in a group or other shared chat"`
+	Space string `json:"space,omitempty" jsonschema:"finance Space UUID or exact user-facing name. In a private chat always name the finance Space: a blank value selects the Personal Space, which is never a finance Space (not found). In a group or other shared chat blank selects the bound Space"`
 	Limit int    `json:"limit,omitempty" jsonschema:"optional maximum results, default 50, capped at 100"`
 }
 
 type FinanceRecurringUpdateInput struct {
-	Space      string  `json:"space,omitempty" jsonschema:"Space UUID or exact user-facing name; blank selects Personal Space in a private chat or the bound Space in a group or other shared chat"`
+	Space      string  `json:"space,omitempty" jsonschema:"finance Space UUID or exact user-facing name. In a private chat always name the finance Space: a blank value selects the Personal Space, which is never a finance Space (not found). In a group or other shared chat blank selects the bound Space"`
 	ID         string  `json:"id" jsonschema:"recurring template UUID, from finance_recurring_list"`
 	Type       *string `json:"type,omitempty" jsonschema:"optional new type: income, expense or transfer"`
 	Amount     *int64  `json:"amount,omitempty" jsonschema:"optional new amount, positive integer in whole rupiah, e.g. 500000"`
@@ -47,14 +47,14 @@ type FinanceRecurringUpdateInput struct {
 	Frequency  *string `json:"frequency,omitempty" jsonschema:"optional new frequency: daily, weekly or monthly"`
 	IntervalN  *int    `json:"interval_n,omitempty" jsonschema:"optional new interval; 1 to 365 for daily and weekly, 1 to 12 for monthly"`
 	DayOfMonth *int    `json:"day_of_month,omitempty" jsonschema:"optional new day 1-31; monthly only"`
-	StartAt    *string `json:"start_at,omitempty" jsonschema:"optional new first occurrence, RFC3339 with offset"`
-	EndAt      *string `json:"end_at,omitempty" jsonschema:"optional new end, RFC3339 with offset"`
+	StartAt    *string `json:"start_at,omitempty" jsonschema:"optional new first occurrence, RFC3339 with offset; omit to leave unchanged; an empty string is rejected"`
+	EndAt      *string `json:"end_at,omitempty" jsonschema:"optional new end, RFC3339 with offset; omit to leave unchanged (use clear_end_at to remove it); an empty string is rejected"`
 	ClearEndAt bool    `json:"clear_end_at,omitempty" jsonschema:"true removes the end date"`
 	Paused     *bool   `json:"paused,omitempty" jsonschema:"true pauses the template; false resumes it (missed occurrences while paused are skipped, not posted); omit to leave unchanged"`
 }
 
 type FinanceRecurringDeleteInput struct {
-	Space string `json:"space,omitempty" jsonschema:"Space UUID or exact user-facing name; blank selects Personal Space in a private chat or the bound Space in a group or other shared chat"`
+	Space string `json:"space,omitempty" jsonschema:"finance Space UUID or exact user-facing name. In a private chat always name the finance Space: a blank value selects the Personal Space, which is never a finance Space (not found). In a group or other shared chat blank selects the bound Space"`
 	ID    string `json:"id" jsonschema:"recurring template UUID, from finance_recurring_list"`
 }
 
