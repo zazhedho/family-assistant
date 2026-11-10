@@ -90,3 +90,9 @@ func checkFinanceTables(ctx context.Context, db *sql.DB, logger *slog.Logger) []
 		"missing_tables", missing)
 	return missing
 }
+
+// financeEnabled reports whether the finance tools and the recurring scheduler
+// may start: only when checkFinanceTables found no missing table. An
+// unreadable catalog reports nothing missing, so that case keeps finance on
+// (the previous behavior) rather than disabling it on a transient error.
+func financeEnabled(missing []string) bool { return len(missing) == 0 }

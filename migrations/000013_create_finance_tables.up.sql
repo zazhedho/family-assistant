@@ -81,6 +81,7 @@ CREATE TABLE IF NOT EXISTS finance_recurring (
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     deleted_at TIMESTAMPTZ,
+    CONSTRAINT uq_finance_recurring_space_id UNIQUE (space_id, id),
     CONSTRAINT ck_finance_recurring_amount CHECK (amount > 0 AND amount <= 1000000000000),
     CONSTRAINT ck_finance_recurring_type CHECK (type IN ('income', 'expense', 'transfer')),
     CONSTRAINT ck_finance_recurring_transfer_shape CHECK (
@@ -141,8 +142,8 @@ CREATE TABLE IF NOT EXISTS finance_transactions (
         REFERENCES finance_categories(space_id, id),
     CONSTRAINT fk_finance_transactions_creator_space FOREIGN KEY (space_id, created_by_member_id)
         REFERENCES space_members(space_id, id),
-    CONSTRAINT fk_finance_transactions_recurring FOREIGN KEY (recurring_id)
-        REFERENCES finance_recurring(id)
+    CONSTRAINT fk_finance_transactions_recurring_space FOREIGN KEY (space_id, recurring_id)
+        REFERENCES finance_recurring(space_id, id)
 );
 
 -- One posting per template occurrence, ever: no deleted_at filter, so a

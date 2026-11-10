@@ -142,3 +142,12 @@ func TestSchemaCheckFinanceTablesQueryFailureDoesNotStopStartup(t *testing.T) {
 		t.Fatalf("log = %s", buf.String())
 	}
 }
+
+func TestFinanceEnabledOnlyWithoutMissingTables(t *testing.T) {
+	if !financeEnabled(nil) {
+		t.Fatal("finance must be enabled when no table is reported missing (or the check could not run)")
+	}
+	if financeEnabled([]string{"finance_accounts"}) || financeEnabled([]string{"finance_accounts", "finance_budgets"}) {
+		t.Fatal("finance must be disabled when any table is missing")
+	}
+}

@@ -21,7 +21,7 @@ WHERE id = '22222222-2222-4222-8222-000000000006';
 
 -- finance_transactions references finance_recurring; drop that key first so
 -- the tables can go in this order.
-ALTER TABLE IF EXISTS finance_transactions DROP CONSTRAINT IF EXISTS fk_finance_transactions_recurring;
+ALTER TABLE IF EXISTS finance_transactions DROP CONSTRAINT IF EXISTS fk_finance_transactions_recurring_space;
 DROP TABLE IF EXISTS finance_recurring;
 DROP TABLE IF EXISTS finance_budgets;
 DROP TABLE IF EXISTS finance_transactions;

@@ -117,7 +117,7 @@ func run() error {
 	defer closeDatabase(sqlDb)
 	schemaCtx, cancelSchemaCheck := context.WithTimeout(context.Background(), 5*time.Second)
 	checkActivityColumns(schemaCtx, sqlDb, slog.Default())
-	checkFinanceTables(schemaCtx, sqlDb, slog.Default())
+	financeOn := financeEnabled(checkFinanceTables(schemaCtx, sqlDb, slog.Default()))
 	cancelSchemaCheck()
 
 	routes.UserRoutes()
@@ -168,10 +168,17 @@ func run() error {
 	if _, err := startReminderScheduler(serverContext, reminderSchedulerConfig, reminderSchedulerRepository, identityRepository, spaceRepository, reminderDueIndex, activityRepository); err != nil {
 		return fmt.Errorf("start reminder scheduler: %w", err)
 	}
-	financeRepository := financeRepo.NewRepository(routes.DB)
-	finance := financeService.NewService(financeRepository, spaceRepository, authorizationService.NewAuthorizer(), audit)
-	if _, err := startFinanceScheduler(serverContext, financeRecurringConfig, financeRepository, spaceRepository, audit); err != nil {
-		return fmt.Errorf("start finance recurring scheduler: %w", err)
+	// ToolServices.Finance stays a nil interface when the schema is out of
+	// date, so no finance tool is advertised and the scheduler does not run.
+	var finance interfacefinance.ServiceFinanceInterface
+	if financeOn {
+		financeRepository := financeRepo.NewRepository(routes.DB)
+		finance = financeService.NewService(financeRepository, spaceRepository, authorizationService.NewAuthorizer(), audit)
+		if _, err := startFinanceScheduler(serverContext, financeRecurringConfig, financeRepository, spaceRepository, audit); err != nil {
+			return fmt.Errorf("start finance recurring scheduler: %w", err)
+		}
+	} else {
+		logger.WriteLog(logger.LogLevelWarn, "finance disabled: apply migration 000013_create_finance_tables to enable the finance tools and the recurring scheduler")
 	}
 	scheduledMessages, err := startScheduledMessageLane(serverContext, scheduledMessageConfig, scheduledMessageLaneDependencies{
 		db: routes.DB, redis: database.GetRedisClient(), spaces: spaceRepository,
