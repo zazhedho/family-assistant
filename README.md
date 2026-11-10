@@ -1330,6 +1330,26 @@ complete every step below using the same release checkout as the backend.
    changed tool catalog needs a fresh conversation; it resets chat history
    and is not a substitute for updating the plugin or restarting the gateway.
 
+#### Release notes: finance bookkeeping
+
+This release adds migration 000013 (new finance tables, permissions and menu item
+only; existing tables are not altered, and the locks it takes on `spaces` and
+`space_members` last milliseconds):
+
+1. Back up the database first.
+2. Deploy the backend. With `RUN_MIGRATION=true` the migration applies at start. Check with
+   `SELECT version, dirty FROM schema_migrations;` (expect version 13, not dirty).
+   If the backend starts without the finance tables it logs a warning and leaves the
+   finance tools and the recurring scheduler off.
+3. A dirty state (version 13, dirty) means the migration failed part-way. Confirm the DDL
+   rolled back (no `finance_*` tables), then run `migrate force 12` and deploy again.
+
+Rollback: do NOT redeploy an older image with `RUN_MIGRATION=true` after 000013 ran;
+golang-migrate cannot find version 13 in the older image and the service crash-loops.
+Either set `RUN_MIGRATION=false` for the rollback image (the finance tables stay and
+are ignored), or run the 000013 down migration first. The down migration DROPS ALL
+FINANCE DATA, so back up before running it.
+
 #### Release notes: phone verification and shared-chat privacy
 
 This release adds no migrations (12 remains the latest), changes the plugin
@@ -1460,7 +1480,9 @@ create and list transactions and edit only the ones they created.
 
 ### MCP tools
 
-All tools take `space` (UUID or name), like the activity tools.
+All tools take `space` (UUID or name), like the activity tools. In a private chat a blank
+`space` selects the Personal Space, which is never a finance Space, so name the finance
+Space explicitly there.
 
 | Group | Tools |
 | --- | --- |
@@ -1475,7 +1497,9 @@ An expense in a budgeted category returns `budget_status` (budget, spent, remain
 percent used). Two identical creates within two minutes are both stored and the second
 returns `possible_duplicate` as a warning. `finance_summary` accepts `today`, `week`,
 `month` (default), `last_month`, and `custom`; it returns income, expense, net, the
-previous period, totals by category and account, and top merchants. Transfers count in
+previous period, totals by category (expenses only), by account (income and expense),
+and top merchants (expenses only). `from` and `to` apply to `custom` and imply it when
+`period` is blank; with any other period they are rejected. Transfers count in
 neither income nor expense. Lists default to 50 rows and cap at 100.
 
 ### Recurring scheduler
@@ -1491,9 +1515,22 @@ default.
 Posting happens inside one database transaction with row locks, so overlapping ticks or
 several instances never post an occurrence twice. After downtime it posts at most 12
 missed occurrences per template and drops older ones. A template whose account or
-category was archived or removed, or whose Space is no longer a finance Space, is
-paused with reason `reference_invalid` while the other templates keep posting. A
-template cannot start more than 24 hours in the past.
+category was archived or removed is paused while the other templates keep posting. A
+paused template shows a `pause_reason` (the scheduler also writes it to the audit log):
+
+| Reason | When |
+| --- | --- |
+| `space_invalid` | The Space is gone or is no longer a finance Space. |
+| `member_invalid` | The member who created the template is no longer an active member. |
+| `reference_invalid` | The account or category is missing, archived, or (for a category) of the wrong kind. |
+| `template_invalid` | The stored template no longer passes validation. |
+| `validation_failed` | The transaction built for an occurrence fails validation. |
+| `insert_rejected` | The database rejected the new row (constraint or data error). |
+| `schedule_invalid` | The schedule does not move forward. |
+| `retry_exhausted` | 30 runs in a row failed with an unclassified error (about 30 minutes at the default interval). |
+
+A transient failure only skips the run and is retried on the next one. A template
+cannot start more than 24 hours in the past.
 
 ### Limits
 

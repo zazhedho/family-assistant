@@ -159,7 +159,9 @@ type SummaryReport struct {
 // ToAccount and Category accept a UUID or an exact case-insensitive name.
 // Frequency is daily, weekly or monthly; IntervalN defaults to 1 (1..365 for
 // daily and weekly, 1..12 for monthly). DayOfMonth is for monthly only and
-// defaults to StartAt's WIB day. The first occurrence is StartAt itself.
+// defaults to StartAt's WIB day. The first occurrence is
+// domainfinance.FirstOccurrence: StartAt itself, except that a monthly schedule
+// with DayOfMonth starts on the first WIB date on or after StartAt with that day.
 type RecurringCreateInput struct {
 	Space      string
 	Type       string
