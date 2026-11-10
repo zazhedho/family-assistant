@@ -64,14 +64,17 @@ type RepoFinanceInterface interface {
 	CreateRecurring(ctx context.Context, r *domainfinance.Recurring) error
 	FindRecurring(ctx context.Context, spaceID, id string) (*domainfinance.Recurring, error)
 	ListRecurring(ctx context.Context, spaceID string) ([]domainfinance.Recurring, error)
-	UpdateRecurring(ctx context.Context, r *domainfinance.Recurring) error
+	// UpdateRecurring writes every editable column of r only while the row's
+	// updated_at equals expectedUpdatedAt (optimistic concurrency against the
+	// scheduler); a stale or missing row is gorm.ErrRecordNotFound.
+	UpdateRecurring(ctx context.Context, r *domainfinance.Recurring, expectedUpdatedAt time.Time) error
 	DeleteRecurring(ctx context.Context, spaceID, id string, at time.Time) error
-	// ClaimDueRecurring claims up to limit due schedules (not paused, not
-	// deleted, next_run_at <= now and within end_at) with FOR UPDATE SKIP
-	// LOCKED and advances each next_run_at by exactly one occurrence in the
-	// same transaction. The returned rows carry the PRE-advance NextRunAt: that
-	// is the occurrence the caller must post. A schedule that is still behind
-	// now is claimed again by the next call, so a catch-up caller loops (and
-	// stops at its own cap) and posts each returned NextRunAt in turn.
-	ClaimDueRecurring(ctx context.Context, now time.Time, limit int) ([]domainfinance.Recurring, error)
+	// PostDueRecurring posts the due occurrences of up to limit templates (at
+	// most maxPerTemplate each, the rest fast-forwarded and counted as
+	// dropped) and advances their next_run_at, all in one transaction that
+	// locks the templates with FOR UPDATE SKIP LOCKED, so an occurrence is
+	// never posted twice nor lost on a crash. build makes each transaction; a
+	// failing template is paused or skipped under a savepoint without
+	// affecting the others. See the repository for the full contract.
+	PostDueRecurring(ctx context.Context, now time.Time, limit, maxPerTemplate int, build domainfinance.RecurringBuildFunc) (domainfinance.PostResult, error)
 }

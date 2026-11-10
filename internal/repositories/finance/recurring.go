@@ -7,9 +7,6 @@ import (
 
 	domainfinance "family-assistant/internal/domain/finance"
 	"family-assistant/utils"
-
-	"gorm.io/gorm"
-	"gorm.io/gorm/clause"
 )
 
 func (r *Repository) CreateRecurring(ctx context.Context, rec *domainfinance.Recurring) error {
@@ -47,9 +44,13 @@ func (r *Repository) ListRecurring(ctx context.Context, spaceID string) ([]domai
 	return recs, nil
 }
 
-// UpdateRecurring writes every editable column; Select makes nil pointers
-// (category, transfer target, day of month, end) write NULL.
-func (r *Repository) UpdateRecurring(ctx context.Context, rec *domainfinance.Recurring) error {
+// UpdateRecurring writes every editable column, but only while the row's
+// updated_at still equals expectedUpdatedAt (the value the caller loaded):
+// every scheduler advance or pause stamps updated_at, so an edit built from a
+// stale copy can never write an old next_run_at back and repost an
+// occurrence. A stale or missing row reports gorm.ErrRecordNotFound. Select
+// makes nil pointers (category, transfer target, day of month, end) write NULL.
+func (r *Repository) UpdateRecurring(ctx context.Context, rec *domainfinance.Recurring, expectedUpdatedAt time.Time) error {
 	if rec == nil {
 		return ErrIDRequired
 	}
@@ -58,7 +59,7 @@ func (r *Repository) UpdateRecurring(ctx context.Context, rec *domainfinance.Rec
 	}
 	rec.UpdatedAt = time.Now().UTC()
 	result := r.db(ctx).Model(&domainfinance.Recurring{}).
-		Where("id = ? AND space_id = ?", rec.ID, rec.SpaceID).
+		Where("id = ? AND space_id = ? AND updated_at = ?", rec.ID, rec.SpaceID, expectedUpdatedAt).
 		Select("type", "amount", "account_id", "to_account_id", "category_id", "merchant", "note", "frequency", "interval_n",
 			"day_of_month", "start_at", "next_run_at", "end_at", "paused", "updated_at").
 		Updates(rec)
@@ -70,41 +71,4 @@ func (r *Repository) DeleteRecurring(ctx context.Context, spaceID, id string, at
 		return err
 	}
 	return updateScoped(r.db(ctx), &domainfinance.Recurring{}, spaceID, id, stamp("deleted_at", at))
-}
-
-// ClaimDueRecurring locks up to limit due schedules with FOR UPDATE SKIP
-// LOCKED (so overlapping scheduler ticks never claim the same row) and moves
-// each next_run_at forward by one occurrence in the same transaction; a failed
-// advance rolls everything back. A schedule past its end_at is never due.
-//
-// The returned rows keep the PRE-advance NextRunAt, which is the occurrence the
-// caller must post. When a schedule is several occurrences behind, the next
-// call claims the following one, so a catch-up caller loops until it has posted
-// its cap (12) and then moves the schedule on itself.
-func (r *Repository) ClaimDueRecurring(ctx context.Context, now time.Time, limit int) ([]domainfinance.Recurring, error) {
-	if limit <= 0 {
-		return nil, nil
-	}
-	var claimed []domainfinance.Recurring
-	err := r.db(ctx).Transaction(func(tx *gorm.DB) error {
-		var due []domainfinance.Recurring
-		if err := tx.Clauses(clause.Locking{Strength: "UPDATE", Options: "SKIP LOCKED"}).
-			Where("paused = ? AND next_run_at <= ? AND (end_at IS NULL OR next_run_at <= end_at)", false, now).
-			Order("next_run_at, id").Limit(limit).Find(&due).Error; err != nil {
-			return err
-		}
-		for _, rec := range due {
-			next := domainfinance.NextOccurrence(rec, rec.NextRunAt)
-			if err := updateScoped(tx, &domainfinance.Recurring{}, rec.SpaceID, rec.ID,
-				map[string]any{"next_run_at": next, "updated_at": now}); err != nil {
-				return err
-			}
-		}
-		claimed = due
-		return nil
-	})
-	if err != nil {
-		return nil, err
-	}
-	return claimed, nil
 }

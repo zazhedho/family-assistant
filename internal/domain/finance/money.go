@@ -54,10 +54,17 @@ func daysIn(year int, month time.Month) int {
 	return time.Date(year, month+1, 0, 0, 0, 0, 0, time.UTC).Day()
 }
 
-// NextOccurrence returns the first scheduled time strictly after `after`,
+// NextOccurrence returns the occurrence that follows the occurrence `after`,
 // computed on the WIB calendar and keeping after's WIB clock time. Monthly and
 // yearly schedules use DayOfMonth (or StartAt's WIB day) clamped to the length
 // of the target month.
+//
+// It only chains occurrences: a schedule's first occurrence is StartAt itself
+// (which is what next_run_at starts at), and each later one is NextOccurrence
+// of the previous. It does not apply EndAt (the caller stops at it), and it
+// does not validate the schedule: an unknown Frequency advances like daily, an
+// IntervalN below 1 counts as 1, and DayOfMonth is used unchecked. Validate
+// with ValidateRecurring first.
 func NextOccurrence(r Recurring, after time.Time) time.Time {
 	w := after.In(WIB())
 	n := r.IntervalN
