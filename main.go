@@ -112,6 +112,7 @@ func run() error {
 	defer closeDatabase(sqlDb)
 	schemaCtx, cancelSchemaCheck := context.WithTimeout(context.Background(), 5*time.Second)
 	checkActivityColumns(schemaCtx, sqlDb, slog.Default())
+	checkFinanceTables(schemaCtx, sqlDb, slog.Default())
 	cancelSchemaCheck()
 
 	routes.UserRoutes()
