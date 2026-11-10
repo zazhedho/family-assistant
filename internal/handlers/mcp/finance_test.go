@@ -20,8 +20,7 @@ import (
 	"family-assistant/pkg/config"
 )
 
-// mcpFinanceServiceStub implements only the account and category methods; the
-// embedded nil interface panics if a tool reaches anything else.
+// mcpFinanceServiceStub records every finance service call and its actor.
 type mcpFinanceServiceStub struct {
 	interfacefinance.ServiceFinanceInterface
 	err error
@@ -38,6 +37,29 @@ type mcpFinanceServiceStub struct {
 
 	accounts   []domainfinance.Account
 	categories []domainfinance.Category
+
+	txCreate      dto.TransactionCreateInput
+	txList        dto.TransactionListInput
+	txUpdate      dto.TransactionUpdateInput
+	txSpaceID     string
+	txID          string
+	txResult      *dto.TransactionResult
+	txs           []domainfinance.Transaction
+	budgetSet     dto.BudgetSetInput
+	budgetMonth   string
+	budgetDelete  dto.BudgetDeleteInput
+	budgetResult  *domainfinance.Budget
+	budgetStatus  []dto.BudgetStatusView
+	recCreate     dto.RecurringCreateInput
+	recList       dto.RecurringListInput
+	recUpdate     dto.RecurringUpdateInput
+	recDelete     dto.RecurringDeleteInput
+	recResult     *domainfinance.Recurring
+	recs          []domainfinance.Recurring
+	summaryIn     dto.SummaryInput
+	summary       *dto.SummaryReport
+	balancesSpace string
+	balances      *dto.BalancesReport
 }
 
 func (s *mcpFinanceServiceStub) hit(actor domainidentity.ActorContext) {
@@ -81,6 +103,84 @@ func (s *mcpFinanceServiceStub) CategoryUpdate(_ context.Context, actor domainid
 	return &domainfinance.Category{ID: in.ID, SpaceID: in.Space, Name: "Food", Kind: "expense"}, s.err
 }
 
+func (s *mcpFinanceServiceStub) TransactionCreate(_ context.Context, actor domainidentity.ActorContext, in dto.TransactionCreateInput) (*dto.TransactionResult, error) {
+	s.hit(actor)
+	s.txCreate = in
+	return s.txResult, s.err
+}
+
+func (s *mcpFinanceServiceStub) TransactionList(_ context.Context, actor domainidentity.ActorContext, in dto.TransactionListInput) ([]domainfinance.Transaction, error) {
+	s.hit(actor)
+	s.txList = in
+	return s.txs, s.err
+}
+
+func (s *mcpFinanceServiceStub) TransactionUpdate(_ context.Context, actor domainidentity.ActorContext, spaceID, id string, in dto.TransactionUpdateInput) (*dto.TransactionResult, error) {
+	s.hit(actor)
+	s.txSpaceID, s.txID, s.txUpdate = spaceID, id, in
+	return s.txResult, s.err
+}
+
+func (s *mcpFinanceServiceStub) TransactionDelete(_ context.Context, actor domainidentity.ActorContext, spaceID, id string) error {
+	s.hit(actor)
+	s.txSpaceID, s.txID = spaceID, id
+	return s.err
+}
+
+func (s *mcpFinanceServiceStub) BudgetSet(_ context.Context, actor domainidentity.ActorContext, in dto.BudgetSetInput) (*domainfinance.Budget, error) {
+	s.hit(actor)
+	s.budgetSet = in
+	return s.budgetResult, s.err
+}
+
+func (s *mcpFinanceServiceStub) BudgetList(_ context.Context, actor domainidentity.ActorContext, spaceID, month string) ([]dto.BudgetStatusView, error) {
+	s.hit(actor)
+	s.txSpaceID, s.budgetMonth = spaceID, month
+	return s.budgetStatus, s.err
+}
+
+func (s *mcpFinanceServiceStub) BudgetDelete(_ context.Context, actor domainidentity.ActorContext, in dto.BudgetDeleteInput) error {
+	s.hit(actor)
+	s.budgetDelete = in
+	return s.err
+}
+
+func (s *mcpFinanceServiceStub) Balances(_ context.Context, actor domainidentity.ActorContext, spaceID string) (*dto.BalancesReport, error) {
+	s.hit(actor)
+	s.balancesSpace = spaceID
+	return s.balances, s.err
+}
+
+func (s *mcpFinanceServiceStub) Summary(_ context.Context, actor domainidentity.ActorContext, in dto.SummaryInput) (*dto.SummaryReport, error) {
+	s.hit(actor)
+	s.summaryIn = in
+	return s.summary, s.err
+}
+
+func (s *mcpFinanceServiceStub) RecurringCreate(_ context.Context, actor domainidentity.ActorContext, in dto.RecurringCreateInput) (*domainfinance.Recurring, error) {
+	s.hit(actor)
+	s.recCreate = in
+	return s.recResult, s.err
+}
+
+func (s *mcpFinanceServiceStub) RecurringList(_ context.Context, actor domainidentity.ActorContext, in dto.RecurringListInput) ([]domainfinance.Recurring, error) {
+	s.hit(actor)
+	s.recList = in
+	return s.recs, s.err
+}
+
+func (s *mcpFinanceServiceStub) RecurringUpdate(_ context.Context, actor domainidentity.ActorContext, in dto.RecurringUpdateInput) (*domainfinance.Recurring, error) {
+	s.hit(actor)
+	s.recUpdate = in
+	return s.recResult, s.err
+}
+
+func (s *mcpFinanceServiceStub) RecurringDelete(_ context.Context, actor domainidentity.ActorContext, in dto.RecurringDeleteInput) error {
+	s.hit(actor)
+	s.recDelete = in
+	return s.err
+}
+
 const financeTestSpaceID = "00000000-0000-0000-0000-000000000501"
 
 func financeResolver() *mcpExternalResolverStub {
@@ -89,6 +189,14 @@ func financeResolver() *mcpExternalResolverStub {
 			mcpMembership("member-shared", financeTestSpaceID, "Family", domainspace.TypeShared, "role-admin"),
 		}},
 		permissions: []domainpermission.Permission{{Resource: "finance", Action: "create"}},
+	}
+}
+
+// assertFinanceActor checks the service saw the resolved user and Space.
+func assertFinanceActor(t *testing.T, s *mcpFinanceServiceStub) {
+	t.Helper()
+	if s.calls != 1 || s.actor.UserID != "user-1" || s.actor.SpaceID != financeTestSpaceID {
+		t.Fatalf("service calls = %d, actor user = %q, space = %q", s.calls, s.actor.UserID, s.actor.SpaceID)
 	}
 }
 
@@ -109,6 +217,7 @@ func TestFinanceAccountCreateMapsInput(t *testing.T) {
 		t.Fatalf("finance_account_create: %v", err)
 	}
 	want := dto.AccountCreateInput{Space: financeTestSpaceID, Name: "BCA", Type: "bank", OpeningBalance: 1500000}
+	assertFinanceActor(t, service)
 	if service.accountCreate != want || service.actor.SpaceID != financeTestSpaceID || got == nil || got.ID != "acc-1" || got.OpeningBalance != 1500000 {
 		t.Fatalf("input = %+v, output = %+v, actor space = %s", service.accountCreate, got, service.actor.SpaceID)
 	}
@@ -120,6 +229,7 @@ func TestFinanceAccountListMapsInputAndEncodesEmptyAsArray(t *testing.T) {
 	if err != nil {
 		t.Fatalf("finance_account_list: %v", err)
 	}
+	assertFinanceActor(t, service)
 	if service.accountList != (dto.AccountListInput{Space: financeTestSpaceID, IncludeArchived: true, Limit: 20}) {
 		t.Fatalf("input = %+v", service.accountList)
 	}
@@ -148,6 +258,7 @@ func TestFinanceAccountUpdateMapsInput(t *testing.T) {
 	if err != nil || got == nil {
 		t.Fatalf("finance_account_update: %v", err)
 	}
+	assertFinanceActor(t, service)
 	in := service.accountUpdate
 	if in.Space != financeTestSpaceID || in.ID != " BCA " || in.Name == nil || *in.Name != name || in.Archived == nil || !*in.Archived {
 		t.Fatalf("input = %+v", in)
@@ -160,6 +271,7 @@ func TestFinanceCategoryCreateMapsInput(t *testing.T) {
 	if err != nil || got == nil || got.ID != "cat-1" {
 		t.Fatalf("finance_category_create: %v, %+v", err, got)
 	}
+	assertFinanceActor(t, service)
 	if service.categoryCreate != (dto.CategoryCreateInput{Space: financeTestSpaceID, Name: "Makan", Kind: "expense"}) {
 		t.Fatalf("input = %+v", service.categoryCreate)
 	}
@@ -171,6 +283,7 @@ func TestFinanceCategoryListMapsInputAndEncodesEmptyAsArray(t *testing.T) {
 	if err != nil {
 		t.Fatalf("finance_category_list: %v", err)
 	}
+	assertFinanceActor(t, service)
 	if service.categoryList != (dto.CategoryListInput{Space: financeTestSpaceID, Kind: "income", IncludeArchived: true, Limit: 5}) {
 		t.Fatalf("input = %+v", service.categoryList)
 	}
@@ -187,6 +300,7 @@ func TestFinanceCategoryUpdateMapsInput(t *testing.T) {
 	if err != nil || got == nil {
 		t.Fatalf("finance_category_update: %v", err)
 	}
+	assertFinanceActor(t, service)
 	in := service.categoryUpdate
 	if in.Space != financeTestSpaceID || in.ID != "Makan" || in.Name == nil || *in.Name != name || in.Archived != nil {
 		t.Fatalf("input = %+v", in)
@@ -254,8 +368,16 @@ func TestFinanceToolNamesAreRegistered(t *testing.T) {
 	for _, tool := range tools {
 		got = append(got, tool.Name)
 	}
-	want := []string{"finance_account_create", "finance_account_list", "finance_account_update", "finance_category_create", "finance_category_list", "finance_category_update"}
-	if strings.Join(got, ",") != strings.Join(want, ",") {
+	want := []string{
+		"finance_account_create", "finance_account_list", "finance_account_update",
+		"finance_balances",
+		"finance_budget_delete", "finance_budget_list", "finance_budget_set",
+		"finance_category_create", "finance_category_list", "finance_category_update",
+		"finance_recurring_create", "finance_recurring_delete", "finance_recurring_list", "finance_recurring_update",
+		"finance_summary",
+		"finance_transaction_create", "finance_transaction_delete", "finance_transaction_list", "finance_transaction_update",
+	}
+	if len(got) != 19 || strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Fatalf("finance tools = %v, want %v", got, want)
 	}
 }
@@ -268,13 +390,13 @@ func TestFinanceToolsAreSkippedWithoutService(t *testing.T) {
 
 func TestFinanceToolDescriptionsCarryRules(t *testing.T) {
 	for _, tool := range financeTools(t, ToolServices{Finance: &mcpFinanceServiceStub{}}) {
-		for _, want := range []string{"finance Space", "list tool"} {
+		for _, want := range []string{"finance Space", "list tool", "Never invent ids", "integers in whole rupiah"} {
 			if !strings.Contains(tool.Description, want) {
 				t.Errorf("%s description lacks %q", tool.Name, want)
 			}
 		}
-		if strings.HasSuffix(tool.Name, "_create") || strings.HasSuffix(tool.Name, "_update") {
-			for _, want := range []string{"owner or admin", "ask an admin", "case-insensitive", "archive"} {
+		if (strings.HasPrefix(tool.Name, "finance_account_") || strings.HasPrefix(tool.Name, "finance_category_")) && !strings.HasSuffix(tool.Name, "_list") {
+			for _, want := range []string{"owner or admin", "ask an admin", "case-insensitive", "archive via the update tool"} {
 				if !strings.Contains(tool.Description, want) {
 					t.Errorf("%s description lacks %q", tool.Name, want)
 				}
@@ -299,13 +421,13 @@ func financeTools(t *testing.T, services ToolServices) []financeToolInfo {
 	var tools []financeToolInfo
 	seen := map[string]bool{}
 	for _, tool := range response.Result.Tools {
+		if seen[tool.Name] {
+			t.Fatalf("duplicate tool name %s (finance tools must not collide with other tools)", tool.Name)
+		}
+		seen[tool.Name] = true
 		if !strings.HasPrefix(tool.Name, "finance_") {
 			continue
 		}
-		if seen[tool.Name] {
-			t.Fatalf("duplicate tool %s", tool.Name)
-		}
-		seen[tool.Name] = true
 		tools = append(tools, financeToolInfo{tool.Name, tool.Description})
 	}
 	sort.Slice(tools, func(i, j int) bool { return tools[i].Name < tools[j].Name })

@@ -3,12 +3,15 @@ package mcp
 import (
 	"context"
 	"errors"
+	"time"
 
 	domainfinance "family-assistant/internal/domain/finance"
 	domainidentity "family-assistant/internal/domain/identity"
 	"family-assistant/internal/dto"
 	interfacefinance "family-assistant/internal/interfaces/finance"
 	interfaceidentity "family-assistant/internal/interfaces/identity"
+	serviceauthorization "family-assistant/internal/services/authorization"
+	"family-assistant/utils"
 
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -18,7 +21,7 @@ import (
 const financeRules = " A finance Space is required (a Space whose category is finance); other Spaces are rejected. Amounts are integers in whole rupiah (Rp 1.500.000 is 1500000), never decimals. Never invent ids: use the list tool first, or pass the exact name."
 
 // financeAdminRules is added to tools that change accounts or categories.
-const financeAdminRules = " Members can list but only an owner or admin can create or change accounts and categories; if the result is forbidden, tell the user to ask an admin. Names are unique per Space (case-insensitive). There is no delete: archive instead (archived=true), which keeps past transactions and reports intact."
+const financeAdminRules = " Members can list but only an owner or admin can create or change accounts and categories; if the result is forbidden, tell the user to ask an admin. Names are unique per Space (case-insensitive). There is no delete: archive via the update tool (archived=true), which keeps past transactions and reports intact."
 
 // financeCall resolves the actor and the selected Space and runs call with
 // them; every finance tool goes through it, so nil-service handling, Space
@@ -49,9 +52,114 @@ func nonNilSlice[T any](items []T) []T {
 	return items
 }
 
+// mapSlice converts items and never returns nil, so the result encodes as [].
+func mapSlice[T, U any](items []T, convert func(T) U) []U {
+	out := make([]U, 0, len(items))
+	for _, item := range items {
+		out = append(out, convert(item))
+	}
+	return out
+}
+
+// FinanceDeleteOutput confirms a delete; the record is soft-deleted.
+type FinanceDeleteOutput struct {
+	Deleted bool   `json:"deleted"`
+	ID      string `json:"id,omitempty"`
+}
+
+// financeParseTime parses an RFC3339 time with offset; a bad value becomes a
+// field error the model can act on.
+func financeParseTime(value, field string, required bool) (*time.Time, error) {
+	parsed, err := utils.ParseRFC3339(value, field, required)
+	if err != nil {
+		reason := "must be an RFC3339 timestamp with offset, e.g. 2026-11-10T07:30:00+07:00"
+		if required && value == "" {
+			reason = "is required (RFC3339 with offset, e.g. 2026-11-10T07:30:00+07:00)"
+		}
+		return nil, MapToolError(&serviceauthorization.ValidationError{Field: field, Reason: reason})
+	}
+	return parsed, nil
+}
+
+// financeTime parses an optional RFC3339 time; blank is the zero time.
+func financeTime(value, field string) (time.Time, error) {
+	parsed, err := financeParseTime(value, field, false)
+	if err != nil || parsed == nil {
+		return time.Time{}, err
+	}
+	return *parsed, nil
+}
+
+// financeTimePtr parses an optional RFC3339 time; blank is nil.
+func financeTimePtr(value, field string) (*time.Time, error) {
+	return financeParseTime(value, field, false)
+}
+
+// financeTimeSet parses a time that was explicitly provided: nil stays nil, and
+// an empty string is rejected rather than treated as unset.
+func financeTimeSet(value *string, field string) (*time.Time, error) {
+	if value == nil {
+		return nil, nil
+	}
+	return financeParseTime(*value, field, true)
+}
+
+// financeTimeRequired parses a mandatory RFC3339 time.
+func financeTimeRequired(value, field string) (time.Time, error) {
+	parsed, err := financeParseTime(value, field, true)
+	if err != nil {
+		return time.Time{}, err
+	}
+	return *parsed, nil
+}
+
+func financeID(value, field string) (string, error) {
+	id, err := utils.ParseUUID(value, field, true)
+	if err != nil {
+		return "", MapToolError(&serviceauthorization.ValidationError{Field: field, Reason: "must be a UUID from the list tool"})
+	}
+	return id, nil
+}
+
+// inWIB renders a time in Asia/Jakarta, the zone the family reads.
+func inWIB(t time.Time) time.Time { return t.In(domainfinance.WIB()) }
+
+func inWIBPtr(t *time.Time) *time.Time {
+	if t == nil {
+		return nil
+	}
+	converted := inWIB(*t)
+	return &converted
+}
+
+// financeDelete runs a delete through financeCall and shapes the confirmation.
+func financeDelete(ctx context.Context, resolver interfaceidentity.Resolver, service interfacefinance.ServiceFinanceInterface, space, id string,
+	call func(actor domainidentity.ActorContext, spaceID string) error,
+) (FinanceDeleteOutput, error) {
+	return financeCall(ctx, resolver, service, space, func(actor domainidentity.ActorContext, spaceID string) (FinanceDeleteOutput, error) {
+		if err := call(actor, spaceID); err != nil {
+			return FinanceDeleteOutput{}, err
+		}
+		return FinanceDeleteOutput{Deleted: true, ID: id}, nil
+	})
+}
+
+const (
+	financeConfirmRules = " Confirm with the user before writing when the amount, account or category is ambiguous or comes from a photo or voice note; do not guess."
+	financeTimeRules    = " Times are RFC3339 strings WITH an offset; use WIB (+07:00), for example 2026-11-10T07:30:00+07:00."
+	financeNoMathRules  = " Take every amount, total and percentage from the tool output; never compute or estimate them yourself."
+	financeKindRules    = " type is income, expense or transfer. A transfer needs to_account (a different account) and no category; income and expense need no to_account, and a category must match the type (income category for income, expense category for expense)."
+	financeTxPermRules  = " Members can create, list and update their own transactions; only an owner or admin can delete a transaction or manage budgets and recurring templates. If the result is forbidden, tell the user to ask an admin."
+	financeAdminOnly    = " Only an owner or admin can do this; if the result is forbidden, tell the user to ask an admin."
+)
+
 func registerFinanceTools(server *mcpsdk.Server, resolver interfaceidentity.Resolver, service interfacefinance.ServiceFinanceInterface) {
 	registerFinanceAccountTools(server, resolver, service)
 	registerFinanceCategoryTools(server, resolver, service)
+	registerFinanceTransactionTools(server, resolver, service)
+	registerFinanceBudgetTools(server, resolver, service)
+	registerFinanceRecurringTools(server, resolver, service)
+	registerFinanceReportTools(server, resolver, service)
 }
 
 type FinanceAccountCreateInput struct {
