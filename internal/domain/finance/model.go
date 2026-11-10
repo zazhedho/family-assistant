@@ -1,0 +1,167 @@
+package domainfinance
+
+import (
+	"time"
+
+	"gorm.io/gorm"
+)
+
+const (
+	TypeIncome   = "income"
+	TypeExpense  = "expense"
+	TypeTransfer = "transfer"
+)
+
+const (
+	FreqDaily   = "daily"
+	FreqWeekly  = "weekly"
+	FreqMonthly = "monthly"
+	FreqYearly  = "yearly"
+)
+
+func (Account) TableName() string     { return "finance_accounts" }
+func (Category) TableName() string    { return "finance_categories" }
+func (Transaction) TableName() string { return "finance_transactions" }
+func (Budget) TableName() string      { return "finance_budgets" }
+func (Recurring) TableName() string   { return "finance_recurring" }
+
+type Account struct {
+	ID             string         `json:"id" gorm:"column:id;primaryKey"`
+	SpaceID        string         `json:"space_id" gorm:"column:space_id"`
+	Name           string         `json:"name" gorm:"column:name"`
+	Type           string         `json:"type" gorm:"column:type"`
+	OpeningBalance int64          `json:"opening_balance" gorm:"column:opening_balance"`
+	ArchivedAt     *time.Time     `json:"archived_at,omitempty" gorm:"column:archived_at"`
+	CreatedAt      time.Time      `json:"created_at" gorm:"column:created_at"`
+	UpdatedAt      time.Time      `json:"updated_at" gorm:"column:updated_at"`
+	DeletedAt      gorm.DeletedAt `json:"-" gorm:"column:deleted_at"`
+}
+
+type Category struct {
+	ID         string         `json:"id" gorm:"column:id;primaryKey"`
+	SpaceID    string         `json:"space_id" gorm:"column:space_id"`
+	Name       string         `json:"name" gorm:"column:name"`
+	Kind       string         `json:"kind" gorm:"column:kind"`
+	ArchivedAt *time.Time     `json:"archived_at,omitempty" gorm:"column:archived_at"`
+	CreatedAt  time.Time      `json:"created_at" gorm:"column:created_at"`
+	UpdatedAt  time.Time      `json:"updated_at" gorm:"column:updated_at"`
+	DeletedAt  gorm.DeletedAt `json:"-" gorm:"column:deleted_at"`
+}
+
+type Transaction struct {
+	ID                string         `json:"id" gorm:"column:id;primaryKey"`
+	SpaceID           string         `json:"space_id" gorm:"column:space_id"`
+	Type              string         `json:"type" gorm:"column:type"`
+	Amount            int64          `json:"amount" gorm:"column:amount"`
+	AccountID         string         `json:"account_id" gorm:"column:account_id"`
+	ToAccountID       string         `json:"to_account_id,omitempty" gorm:"column:to_account_id"`
+	CategoryID        string         `json:"category_id,omitempty" gorm:"column:category_id"`
+	Merchant          string         `json:"merchant,omitempty" gorm:"column:merchant"`
+	Note              string         `json:"note,omitempty" gorm:"column:note"`
+	OccurredAt        time.Time      `json:"occurred_at" gorm:"column:occurred_at"`
+	CreatedByMemberID string         `json:"created_by_member_id" gorm:"column:created_by_member_id"`
+	CreatedAt         time.Time      `json:"created_at" gorm:"column:created_at"`
+	UpdatedAt         time.Time      `json:"updated_at" gorm:"column:updated_at"`
+	DeletedAt         gorm.DeletedAt `json:"-" gorm:"column:deleted_at"`
+}
+
+type Budget struct {
+	ID         string         `json:"id" gorm:"column:id;primaryKey"`
+	SpaceID    string         `json:"space_id" gorm:"column:space_id"`
+	CategoryID string         `json:"category_id" gorm:"column:category_id"`
+	Month      time.Time      `json:"month" gorm:"column:month;type:date"`
+	Amount     int64          `json:"amount" gorm:"column:amount"`
+	CreatedAt  time.Time      `json:"created_at" gorm:"column:created_at"`
+	UpdatedAt  time.Time      `json:"updated_at" gorm:"column:updated_at"`
+	DeletedAt  gorm.DeletedAt `json:"-" gorm:"column:deleted_at"`
+}
+
+type Recurring struct {
+	ID                string         `json:"id" gorm:"column:id;primaryKey"`
+	SpaceID           string         `json:"space_id" gorm:"column:space_id"`
+	Type              string         `json:"type" gorm:"column:type"`
+	Amount            int64          `json:"amount" gorm:"column:amount"`
+	AccountID         string         `json:"account_id" gorm:"column:account_id"`
+	ToAccountID       string         `json:"to_account_id,omitempty" gorm:"column:to_account_id"`
+	CategoryID        string         `json:"category_id,omitempty" gorm:"column:category_id"`
+	Merchant          string         `json:"merchant,omitempty" gorm:"column:merchant"`
+	Note              string         `json:"note,omitempty" gorm:"column:note"`
+	Frequency         string         `json:"frequency" gorm:"column:frequency"`
+	IntervalN         int            `json:"interval_n" gorm:"column:interval_n"`
+	DayOfMonth        *int           `json:"day_of_month,omitempty" gorm:"column:day_of_month"`
+	StartAt           time.Time      `json:"start_at" gorm:"column:start_at"`
+	NextRunAt         time.Time      `json:"next_run_at" gorm:"column:next_run_at"`
+	EndAt             *time.Time     `json:"end_at,omitempty" gorm:"column:end_at"`
+	Paused            bool           `json:"paused" gorm:"column:paused"`
+	CreatedByMemberID string         `json:"created_by_member_id" gorm:"column:created_by_member_id"`
+	CreatedAt         time.Time      `json:"created_at" gorm:"column:created_at"`
+	UpdatedAt         time.Time      `json:"updated_at" gorm:"column:updated_at"`
+	DeletedAt         gorm.DeletedAt `json:"-" gorm:"column:deleted_at"`
+}
+
+// ListFilter filters transaction listings. Limit is normalized by the service.
+type ListFilter struct {
+	SpaceID    string
+	Type       string
+	CategoryID string
+	AccountID  string
+	Search     string
+	From       *time.Time
+	To         *time.Time
+	Limit      int
+}
+
+type AccountBalance struct {
+	AccountID string `json:"account_id"`
+	Name      string `json:"name"`
+	Type      string `json:"type"`
+	Balance   int64  `json:"balance"`
+}
+
+type CategoryTotal struct {
+	CategoryID string `json:"category_id"`
+	Name       string `json:"name"`
+	Total      int64  `json:"total"`
+}
+
+type AccountTotal struct {
+	AccountID string `json:"account_id"`
+	Name      string `json:"name"`
+	Income    int64  `json:"income"`
+	Expense   int64  `json:"expense"`
+}
+
+type MerchantTotal struct {
+	Merchant string `json:"merchant"`
+	Total    int64  `json:"total"`
+	Count    int    `json:"count"`
+}
+
+type SummaryResult struct {
+	Income       int64           `json:"income"`
+	Expense      int64           `json:"expense"`
+	ByCategory   []CategoryTotal `json:"by_category"`
+	ByAccount    []AccountTotal  `json:"by_account"`
+	TopMerchants []MerchantTotal `json:"top_merchants"`
+}
+
+type BudgetStatus struct {
+	CategoryID  string `json:"category_id"`
+	Budget      int64  `json:"budget"`
+	Spent       int64  `json:"spent"`
+	Remaining   int64  `json:"remaining"`
+	PercentUsed int    `json:"percent_used"`
+}
+
+// NewBudgetStatus computes remaining (negative when over budget) and the
+// integer percent used, floor(spent*100/budget), 0 when budget is 0. The
+// percent is computed without multiplying spent by 100 first, so it cannot
+// overflow int64 for any input.
+func NewBudgetStatus(categoryID string, budget, spent int64) BudgetStatus {
+	s := BudgetStatus{CategoryID: categoryID, Budget: budget, Spent: spent, Remaining: budget - spent}
+	if budget > 0 && spent > 0 {
+		pct := spent/budget*100 + (spent%budget)*100/budget
+		s.PercentUsed = int(pct)
+	}
+	return s
+}
