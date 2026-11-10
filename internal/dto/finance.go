@@ -153,3 +153,57 @@ type SummaryReport struct {
 	ByAccount       []domainfinance.AccountTotal  `json:"by_account"`
 	TopMerchants    []domainfinance.MerchantTotal `json:"top_merchants"`
 }
+
+// RecurringCreateInput sets up a recurring transaction template. Account,
+// ToAccount and Category accept a UUID or an exact case-insensitive name.
+// Frequency is daily, weekly or monthly; IntervalN defaults to 1 (1..365 for
+// daily and weekly, 1..12 for monthly). DayOfMonth is for monthly only and
+// defaults to StartAt's WIB day. The first occurrence is StartAt itself.
+type RecurringCreateInput struct {
+	Space      string
+	Type       string
+	Amount     int64
+	Account    string
+	ToAccount  string
+	Category   string
+	Merchant   string
+	Note       string
+	Frequency  string
+	IntervalN  int
+	DayOfMonth *int
+	StartAt    time.Time
+	EndAt      *time.Time
+}
+
+type RecurringListInput struct {
+	Space string
+	Limit int
+}
+
+// RecurringUpdateInput changes only the fields that are set. An empty string
+// for ToAccount or Category clears it; ClearEndAt removes the end. Switching
+// to daily or weekly drops the monthly day unless DayOfMonth is sent (which
+// is then rejected). Paused pauses or resumes the template.
+type RecurringUpdateInput struct {
+	Space      string
+	ID         string
+	Type       *string
+	Amount     *int64
+	Account    *string
+	ToAccount  *string
+	Category   *string
+	Merchant   *string
+	Note       *string
+	Frequency  *string
+	IntervalN  *int
+	DayOfMonth *int
+	StartAt    *time.Time
+	EndAt      *time.Time
+	ClearEndAt bool
+	Paused     *bool
+}
+
+type RecurringDeleteInput struct {
+	Space string
+	ID    string
+}

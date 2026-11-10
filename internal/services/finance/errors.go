@@ -31,6 +31,16 @@ func mapDomainError(err error) error {
 		field = "to_account_id"
 	case errors.Is(err, domainfinance.ErrTransferCategory):
 		field = "category_id"
+	case errors.Is(err, domainfinance.ErrInvalidFrequency):
+		field = "frequency"
+	case errors.Is(err, domainfinance.ErrIntervalRange):
+		field = "interval_n"
+	case errors.Is(err, domainfinance.ErrDayOfMonthRange), errors.Is(err, domainfinance.ErrDayOfMonthNotMonthly):
+		field = "day_of_month"
+	case errors.Is(err, domainfinance.ErrStartRequired):
+		field = "start_at"
+	case errors.Is(err, domainfinance.ErrEndBeforeStart):
+		field = "end_at"
 	default:
 		return err
 	}

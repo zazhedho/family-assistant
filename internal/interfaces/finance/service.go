@@ -25,4 +25,8 @@ type ServiceFinanceInterface interface {
 	BudgetDelete(context.Context, domainidentity.ActorContext, dto.BudgetDeleteInput) error
 	Balances(ctx context.Context, actor domainidentity.ActorContext, spaceID string) (*dto.BalancesReport, error)
 	Summary(context.Context, domainidentity.ActorContext, dto.SummaryInput) (*dto.SummaryReport, error)
+	RecurringCreate(context.Context, domainidentity.ActorContext, dto.RecurringCreateInput) (*domainfinance.Recurring, error)
+	RecurringList(context.Context, domainidentity.ActorContext, dto.RecurringListInput) ([]domainfinance.Recurring, error)
+	RecurringUpdate(context.Context, domainidentity.ActorContext, dto.RecurringUpdateInput) (*domainfinance.Recurring, error)
+	RecurringDelete(context.Context, domainidentity.ActorContext, dto.RecurringDeleteInput) error
 }
