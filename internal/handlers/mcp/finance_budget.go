@@ -33,13 +33,13 @@ type FinanceBudgetDeleteInput struct {
 
 // FinanceBudgetOutput is a budget with its month as "YYYY-MM".
 type FinanceBudgetOutput struct {
-	ID         string    `json:"id"`
-	SpaceID    string    `json:"space_id"`
-	CategoryID string    `json:"category_id"`
-	Month      string    `json:"month"`
-	Amount     int64     `json:"amount"`
-	CreatedAt  time.Time `json:"created_at"`
-	UpdatedAt  time.Time `json:"updated_at"`
+	ID         string              `json:"id"`
+	SpaceID    string              `json:"space_id"`
+	CategoryID string              `json:"category_id"`
+	Month      string              `json:"month"`
+	Amount     domainfinance.Money `json:"amount"`
+	CreatedAt  time.Time           `json:"created_at"`
+	UpdatedAt  time.Time           `json:"updated_at"`
 }
 
 type FinanceBudgetListOutput struct {
@@ -48,7 +48,7 @@ type FinanceBudgetListOutput struct {
 
 func FinanceBudgetSet(ctx context.Context, resolver interfaceidentity.Resolver, service interfacefinance.ServiceFinanceInterface, input FinanceBudgetSetInput) (*FinanceBudgetOutput, error) {
 	return financeCall(ctx, resolver, service, input.Space, func(actor domainidentity.ActorContext, spaceID string) (*FinanceBudgetOutput, error) {
-		budget, err := service.BudgetSet(ctx, actor, dto.BudgetSetInput{Space: spaceID, Category: input.Category, Month: input.Month, Amount: input.Amount})
+		budget, err := service.BudgetSet(ctx, actor, dto.BudgetSetInput{Space: spaceID, Category: input.Category, Month: input.Month, Amount: wholeRupiah(input.Amount)})
 		if err != nil {
 			return nil, err
 		}

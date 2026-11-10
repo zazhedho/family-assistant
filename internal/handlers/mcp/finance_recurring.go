@@ -86,7 +86,7 @@ func FinanceRecurringCreate(ctx context.Context, resolver interfaceidentity.Reso
 	}
 	return financeCall(ctx, resolver, service, input.Space, func(actor domainidentity.ActorContext, spaceID string) (*FinanceRecurringOutput, error) {
 		recurring, err := service.RecurringCreate(ctx, actor, dto.RecurringCreateInput{
-			Space: spaceID, Type: input.Type, Amount: input.Amount, Account: input.Account, ToAccount: input.ToAccount, Category: input.Category,
+			Space: spaceID, Type: input.Type, Amount: wholeRupiah(input.Amount), Account: input.Account, ToAccount: input.ToAccount, Category: input.Category,
 			Merchant: input.Merchant, Note: input.Note, Frequency: input.Frequency, IntervalN: input.IntervalN, DayOfMonth: input.DayOfMonth,
 			StartAt: startAt, EndAt: endAt,
 		})
@@ -120,7 +120,7 @@ func FinanceRecurringUpdate(ctx context.Context, resolver interfaceidentity.Reso
 	}
 	return financeCall(ctx, resolver, service, input.Space, func(actor domainidentity.ActorContext, spaceID string) (*FinanceRecurringOutput, error) {
 		recurring, err := service.RecurringUpdate(ctx, actor, dto.RecurringUpdateInput{
-			Space: spaceID, ID: id, Type: input.Type, Amount: input.Amount, Account: input.Account, ToAccount: input.ToAccount, Category: input.Category,
+			Space: spaceID, ID: id, Type: input.Type, Amount: wholeRupiahPtr(input.Amount), Account: input.Account, ToAccount: input.ToAccount, Category: input.Category,
 			Merchant: input.Merchant, Note: input.Note, Frequency: input.Frequency, IntervalN: input.IntervalN, DayOfMonth: input.DayOfMonth,
 			StartAt: startAt, EndAt: endAt, ClearEndAt: input.ClearEndAt, Paused: input.Paused,
 		})

@@ -30,7 +30,7 @@ type Account struct {
 	SpaceID        string         `json:"space_id" gorm:"column:space_id"`
 	Name           string         `json:"name" gorm:"column:name"`
 	Type           string         `json:"type" gorm:"column:type"`
-	OpeningBalance int64          `json:"opening_balance" gorm:"column:opening_balance"`
+	OpeningBalance Money          `json:"opening_balance" gorm:"column:opening_balance"`
 	ArchivedAt     *time.Time     `json:"archived_at,omitempty" gorm:"column:archived_at"`
 	CreatedAt      time.Time      `json:"created_at" gorm:"column:created_at"`
 	UpdatedAt      time.Time      `json:"updated_at" gorm:"column:updated_at"`
@@ -54,7 +54,7 @@ type Transaction struct {
 	ID                string         `json:"id" gorm:"column:id;primaryKey"`
 	SpaceID           string         `json:"space_id" gorm:"column:space_id"`
 	Type              string         `json:"type" gorm:"column:type"`
-	Amount            int64          `json:"amount" gorm:"column:amount"`
+	Amount            Money          `json:"amount" gorm:"column:amount"`
 	AccountID         string         `json:"account_id" gorm:"column:account_id"`
 	ToAccountID       *string        `json:"to_account_id,omitempty" gorm:"column:to_account_id"`
 	CategoryID        *string        `json:"category_id,omitempty" gorm:"column:category_id"`
@@ -78,7 +78,7 @@ type Budget struct {
 	// Month is the DATE to store: use MonthDate (first day of the WIB month at
 	// 00:00 UTC), never MonthStart, whose UTC instant breaks the first-day check.
 	Month     time.Time      `json:"month" gorm:"column:month;type:date"`
-	Amount    int64          `json:"amount" gorm:"column:amount"`
+	Amount    Money          `json:"amount" gorm:"column:amount"`
 	CreatedAt time.Time      `json:"created_at" gorm:"column:created_at"`
 	UpdatedAt time.Time      `json:"updated_at" gorm:"column:updated_at"`
 	DeletedAt gorm.DeletedAt `json:"-" gorm:"column:deleted_at"`
@@ -90,7 +90,7 @@ type Recurring struct {
 	ID          string     `json:"id" gorm:"column:id;primaryKey"`
 	SpaceID     string     `json:"space_id" gorm:"column:space_id"`
 	Type        string     `json:"type" gorm:"column:type"`
-	Amount      int64      `json:"amount" gorm:"column:amount"`
+	Amount      Money      `json:"amount" gorm:"column:amount"`
 	AccountID   string     `json:"account_id" gorm:"column:account_id"`
 	ToAccountID *string    `json:"to_account_id,omitempty" gorm:"column:to_account_id"`
 	CategoryID  *string    `json:"category_id,omitempty" gorm:"column:category_id"`
@@ -132,31 +132,31 @@ type AccountBalance struct {
 	AccountID string `json:"account_id"`
 	Name      string `json:"name"`
 	Type      string `json:"type"`
-	Balance   int64  `json:"balance"`
+	Balance   Money  `json:"balance"`
 }
 
 type CategoryTotal struct {
 	CategoryID string `json:"category_id"`
 	Name       string `json:"name"`
-	Total      int64  `json:"total"`
+	Total      Money  `json:"total"`
 }
 
 type AccountTotal struct {
 	AccountID string `json:"account_id"`
 	Name      string `json:"name"`
-	Income    int64  `json:"income"`
-	Expense   int64  `json:"expense"`
+	Income    Money  `json:"income"`
+	Expense   Money  `json:"expense"`
 }
 
 type MerchantTotal struct {
 	Merchant string `json:"merchant"`
-	Total    int64  `json:"total"`
+	Total    Money  `json:"total"`
 	Count    int    `json:"count"`
 }
 
 type SummaryResult struct {
-	Income       int64           `json:"income"`
-	Expense      int64           `json:"expense"`
+	Income       Money           `json:"income"`
+	Expense      Money           `json:"expense"`
 	ByCategory   []CategoryTotal `json:"by_category"`
 	ByAccount    []AccountTotal  `json:"by_account"`
 	TopMerchants []MerchantTotal `json:"top_merchants"`
@@ -164,9 +164,9 @@ type SummaryResult struct {
 
 type BudgetStatus struct {
 	CategoryID  string `json:"category_id"`
-	Budget      int64  `json:"budget"`
-	Spent       int64  `json:"spent"`
-	Remaining   int64  `json:"remaining"`
+	Budget      Money  `json:"budget"`
+	Spent       Money  `json:"spent"`
+	Remaining   Money  `json:"remaining"`
 	PercentUsed int    `json:"percent_used"`
 }
 
@@ -174,7 +174,7 @@ type BudgetStatus struct {
 // integer percent used, floor(spent*100/budget), 0 when budget is 0. The
 // percent is computed without multiplying spent by 100 first, so it cannot
 // overflow int64 for any input.
-func NewBudgetStatus(categoryID string, budget, spent int64) BudgetStatus {
+func NewBudgetStatus(categoryID string, budget, spent Money) BudgetStatus {
 	s := BudgetStatus{CategoryID: categoryID, Budget: budget, Spent: spent, Remaining: budget - spent}
 	if budget > 0 && spent > 0 {
 		pct := spent/budget*100 + (spent%budget)*100/budget

@@ -216,9 +216,9 @@ func TestFinanceAccountCreateMapsInput(t *testing.T) {
 	if err != nil {
 		t.Fatalf("finance_account_create: %v", err)
 	}
-	want := dto.AccountCreateInput{Space: financeTestSpaceID, Name: "BCA", Type: "bank", OpeningBalance: 1500000}
+	want := dto.AccountCreateInput{Space: financeTestSpaceID, Name: "BCA", Type: "bank", OpeningBalance: 150000000}
 	assertFinanceActor(t, service)
-	if service.accountCreate != want || service.actor.SpaceID != financeTestSpaceID || got == nil || got.ID != "acc-1" || got.OpeningBalance != 1500000 {
+	if service.accountCreate != want || service.actor.SpaceID != financeTestSpaceID || got == nil || got.ID != "acc-1" || got.OpeningBalance != 150000000 {
 		t.Fatalf("input = %+v, output = %+v, actor space = %s", service.accountCreate, got, service.actor.SpaceID)
 	}
 }
@@ -240,7 +240,7 @@ func TestFinanceAccountListMapsInputAndEncodesEmptyAsArray(t *testing.T) {
 }
 
 func TestFinanceAccountListReturnsServiceOutput(t *testing.T) {
-	service := &mcpFinanceServiceStub{accounts: []domainfinance.Account{{ID: "a1", Name: "Cash", Type: "cash", OpeningBalance: 25000}}}
+	service := &mcpFinanceServiceStub{accounts: []domainfinance.Account{{ID: "a1", Name: "Cash", Type: "cash", OpeningBalance: 2500000}}}
 	got, err := FinanceAccountList(mcpExternalContext(), financeResolver(), service, FinanceAccountListInput{Space: "Family"})
 	if err != nil || len(got) != 1 || got[0].ID != "a1" {
 		t.Fatalf("got %+v, %v", got, err)

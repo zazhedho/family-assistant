@@ -10,14 +10,14 @@ import (
 )
 
 func TestFinanceBudgetSetMapsInput(t *testing.T) {
-	budget := &domainfinance.Budget{ID: "b-1", SpaceID: financeTestSpaceID, CategoryID: "cat-1", Month: time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC), Amount: 2000000}
+	budget := &domainfinance.Budget{ID: "b-1", SpaceID: financeTestSpaceID, CategoryID: "cat-1", Month: time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC), Amount: 200000000}
 	service := &mcpFinanceServiceStub{budgetResult: budget}
 	got, err := FinanceBudgetSet(mcpExternalContext(), financeResolver(), service, FinanceBudgetSetInput{Space: "Family", Category: "Makan", Month: "2026-11", Amount: 2000000})
 	if err != nil {
 		t.Fatalf("finance_budget_set: %v", err)
 	}
 	assertFinanceActor(t, service)
-	if service.budgetSet != (dto.BudgetSetInput{Space: financeTestSpaceID, Category: "Makan", Month: "2026-11", Amount: 2000000}) {
+	if service.budgetSet != (dto.BudgetSetInput{Space: financeTestSpaceID, Category: "Makan", Month: "2026-11", Amount: 200000000}) {
 		t.Fatalf("input = %+v", service.budgetSet)
 	}
 	out := encodeToMap(t, got)
@@ -43,7 +43,7 @@ func TestFinanceBudgetListMapsInputAndEncodes(t *testing.T) {
 
 func TestFinanceBudgetListReturnsStatuses(t *testing.T) {
 	service := &mcpFinanceServiceStub{budgetStatus: []dto.BudgetStatusView{{
-		BudgetStatus: domainfinance.BudgetStatus{CategoryID: "cat-1", Budget: 100000, Spent: 85000, Remaining: 15000, PercentUsed: 85}, CategoryName: "Makan",
+		BudgetStatus: domainfinance.BudgetStatus{CategoryID: "cat-1", Budget: 10000000, Spent: 8500000, Remaining: 1500000, PercentUsed: 85}, CategoryName: "Makan",
 	}}}
 	got, err := FinanceBudgetList(mcpExternalContext(), financeResolver(), service, FinanceBudgetListInput{Space: "Family"})
 	if err != nil || len(got.Budgets) != 1 {

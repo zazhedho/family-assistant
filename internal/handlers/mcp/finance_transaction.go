@@ -92,7 +92,7 @@ func FinanceTransactionCreate(ctx context.Context, resolver interfaceidentity.Re
 	}
 	return financeCall(ctx, resolver, service, input.Space, func(actor domainidentity.ActorContext, spaceID string) (*FinanceTransactionResultOutput, error) {
 		result, err := service.TransactionCreate(ctx, actor, dto.TransactionCreateInput{
-			Space: spaceID, Type: input.Type, Amount: input.Amount, Account: input.Account, ToAccount: input.ToAccount, Category: input.Category,
+			Space: spaceID, Type: input.Type, Amount: wholeRupiah(input.Amount), Account: input.Account, ToAccount: input.ToAccount, Category: input.Category,
 			Merchant: input.Merchant, Note: input.Note, OccurredAt: occurredAt,
 		})
 		if err != nil {
@@ -130,7 +130,7 @@ func FinanceTransactionUpdate(ctx context.Context, resolver interfaceidentity.Re
 	}
 	return financeCall(ctx, resolver, service, input.Space, func(actor domainidentity.ActorContext, spaceID string) (*FinanceTransactionResultOutput, error) {
 		result, err := service.TransactionUpdate(ctx, actor, spaceID, id, dto.TransactionUpdateInput{
-			Type: input.Type, Amount: input.Amount, Account: input.Account, ToAccount: input.ToAccount, Category: input.Category,
+			Type: input.Type, Amount: wholeRupiahPtr(input.Amount), Account: input.Account, ToAccount: input.ToAccount, Category: input.Category,
 			Merchant: input.Merchant, Note: input.Note, OccurredAt: occurredAt,
 		})
 		if err != nil {

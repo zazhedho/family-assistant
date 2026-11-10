@@ -202,7 +202,7 @@ func TestSummaryTransactionInstantsFallInWIBMonth(t *testing.T) {
 	e.seed(txOldOct, memberID, domainfinance.Transaction{Type: "expense", Amount: 3, AccountID: acctID, OccurredAt: utc(2026, 11, 30, 17, 0)})  // exactly Dec 1 00:00 WIB
 	for _, c := range []struct {
 		now            time.Time
-		expense, prior int64
+		expense, prior domainfinance.Money
 	}{{utc(2026, 11, 30, 16, 30), 100, 0}, {utc(2026, 11, 30, 17, 30), 10, 100}} {
 		e.impl.now = func() time.Time { return c.now }
 		rep, err := e.svc.Summary(context.Background(), memberActor(), dto.SummaryInput{Period: "month"})
@@ -251,11 +251,11 @@ func TestBalancesIncludeOpeningAndTransfers(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	got := map[string]int64{}
+	got := map[string]domainfinance.Money{}
 	for _, a := range rep.Accounts {
 		got[a.Name] = a.Balance
 	}
-	want := map[string]int64{"Kas": 870_000, "Bank BCA": 200_000, "Kartu": -70_000}
+	want := map[string]domainfinance.Money{"Kas": 870_000, "Bank BCA": 200_000, "Kartu": -70_000}
 	if len(got) != 3 {
 		t.Fatalf("archived account must be hidden: %v", got)
 	}

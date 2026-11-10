@@ -21,7 +21,7 @@ func mapDomainError(err error) error {
 		return nil
 	case errors.Is(err, domainfinance.ErrInvalidType):
 		field = "type"
-	case errors.Is(err, domainfinance.ErrInvalidAmount):
+	case isMoneyError(err):
 		field = "amount"
 	case errors.Is(err, domainfinance.ErrAccountRequired):
 		field = fieldAccount
@@ -45,6 +45,22 @@ func mapDomainError(err error) error {
 		return err
 	}
 	return &serviceauthorization.ValidationError{Field: field, Reason: err.Error()}
+}
+
+// isMoneyError reports whether err is an amount range or parse sentinel.
+func isMoneyError(err error) bool {
+	return errors.Is(err, domainfinance.ErrInvalidAmount) || errors.Is(err, domainfinance.ErrMoneyFormat) ||
+		errors.Is(err, domainfinance.ErrMoneyPrecision) || errors.Is(err, domainfinance.ErrAmountTooLarge)
+}
+
+// MapMoneyError converts an amount parse or range error (domainfinance.ParseMoney,
+// ValidateAmount) to a ValidationError on the given input field, e.g. "amount"
+// or "opening_balance". Other errors, and nil, pass through unchanged.
+func MapMoneyError(field string, err error) error {
+	if err == nil || !isMoneyError(err) {
+		return err
+	}
+	return validationError(field, err.Error())
 }
 
 func validationError(field, reason string) error {

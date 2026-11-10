@@ -15,7 +15,7 @@ var financeTestOccurredAt = time.Date(2026, 11, 10, 0, 30, 0, 0, time.UTC) // 07
 func financeTestTransaction() domainfinance.Transaction {
 	category := "cat-1"
 	return domainfinance.Transaction{
-		ID: "tx-1", SpaceID: financeTestSpaceID, Type: "expense", Amount: 25000, AccountID: "acc-1", CategoryID: &category,
+		ID: "tx-1", SpaceID: financeTestSpaceID, Type: "expense", Amount: 2500000, AccountID: "acc-1", CategoryID: &category,
 		Merchant: "Warung", Note: "lunch", OccurredAt: financeTestOccurredAt,
 		CreatedAt: financeTestOccurredAt, UpdatedAt: financeTestOccurredAt,
 	}
@@ -68,7 +68,7 @@ func TestFinanceTransactionCreateMapsInput(t *testing.T) {
 	}
 	assertFinanceActor(t, service)
 	in := service.txCreate
-	if in.Space != financeTestSpaceID || in.Type != "transfer" || in.Amount != 25000 || in.Account != "BCA" || in.ToAccount != "Cash" ||
+	if in.Space != financeTestSpaceID || in.Type != "transfer" || in.Amount != 2500000 || in.Account != "BCA" || in.ToAccount != "Cash" ||
 		in.Category != "Makan" || in.Merchant != "Warung" || in.Note != "lunch" || !in.OccurredAt.Equal(financeTestOccurredAt) {
 		t.Fatalf("input = %+v", in)
 	}
@@ -116,7 +116,7 @@ func TestCreateOutputCarriesDuplicateAndBudget(t *testing.T) {
 	tx := financeTestTransaction()
 	dup := financeTestTransaction()
 	dup.ID = "tx-0"
-	budget := domainfinance.BudgetStatus{CategoryID: "cat-1", Budget: 100000, Spent: 85000, Remaining: 15000, PercentUsed: 85}
+	budget := domainfinance.BudgetStatus{CategoryID: "cat-1", Budget: 10000000, Spent: 8500000, Remaining: 1500000, PercentUsed: 85}
 	service := &mcpFinanceServiceStub{txResult: &dto.TransactionResult{Transaction: tx, PossibleDuplicate: &dup, BudgetStatus: &budget}}
 	got, err := FinanceTransactionCreate(mcpExternalContext(), financeResolver(), service, FinanceTransactionCreateInput{Space: "Family"})
 	if err != nil || got == nil {
@@ -207,7 +207,7 @@ func TestFinanceTransactionUpdateMapsInput(t *testing.T) {
 	assertFinanceActor(t, service)
 	in := service.txUpdate
 	if service.txSpaceID != financeTestSpaceID || service.txID != id ||
-		in.Type == nil || *in.Type != "expense" || in.Amount == nil || *in.Amount != 30000 || in.Account == nil || *in.Account != "Cash" ||
+		in.Type == nil || *in.Type != "expense" || in.Amount == nil || *in.Amount != 3000000 || in.Account == nil || *in.Account != "Cash" ||
 		in.ToAccount == nil || *in.ToAccount != "" || in.Category == nil || *in.Category != "" ||
 		in.Merchant == nil || *in.Merchant != "Kantin" || in.Note == nil || *in.Note != "snack" ||
 		in.OccurredAt == nil || !in.OccurredAt.Equal(time.Date(2026, 11, 10, 1, 0, 0, 0, time.UTC)) {

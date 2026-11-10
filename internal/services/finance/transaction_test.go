@@ -146,11 +146,11 @@ func (r *txRepo) ListBudgets(_ context.Context, space string, month time.Time) (
 	return out, nil
 }
 
-func (r *txRepo) SpentByCategory(_ context.Context, space, category string, from, to time.Time) (int64, error) {
+func (r *txRepo) SpentByCategory(_ context.Context, space, category string, from, to time.Time) (domainfinance.Money, error) {
 	if r.spentErr != nil {
 		return 0, r.spentErr
 	}
-	var sum int64
+	var sum domainfinance.Money
 	for _, tx := range r.txs {
 		if tx.SpaceID == space && tx.Type == domainfinance.TypeExpense && tx.CategoryID != nil && *tx.CategoryID == category &&
 			!tx.OccurredAt.Before(from) && tx.OccurredAt.Before(to) {
@@ -201,7 +201,7 @@ func (e *txEnv) create(t *testing.T, in dto.TransactionCreateInput) *dto.Transac
 	return res
 }
 
-func expense(amount int64) dto.TransactionCreateInput {
+func expense(amount domainfinance.Money) dto.TransactionCreateInput {
 	return dto.TransactionCreateInput{Type: "expense", Amount: amount, Account: "kas", Category: "MAKAN", Merchant: " Warung "}
 }
 
@@ -238,7 +238,7 @@ func TestCreateStoresNormalizedTransaction(t *testing.T) {
 }
 
 func TestCreateRejectsInvalidAmount(t *testing.T) {
-	for _, amount := range []int64{0, -5, domainfinance.MaxAmount + 1, 1<<63 - 1} {
+	for _, amount := range []domainfinance.Money{0, -5, domainfinance.MaxAmount + 1, 1<<63 - 1} {
 		e := newTxEnv(t)
 		_, err := e.svc.TransactionCreate(context.Background(), memberActor(), expense(amount))
 		vErr(t, err, "amount")
@@ -468,7 +468,7 @@ func TestDuplicateLookupFailureDoesNotFailCreate(t *testing.T) {
 	}
 }
 
-func budgetFor(category string, when time.Time, amount int64) domainfinance.Budget {
+func budgetFor(category string, when time.Time, amount domainfinance.Money) domainfinance.Budget {
 	return domainfinance.Budget{ID: "b-" + category, SpaceID: spaceID, CategoryID: category, Month: domainfinance.MonthDate(when), Amount: amount}
 }
 
@@ -583,7 +583,7 @@ func TestMemberUpdatesOnlyOwnTransaction(t *testing.T) {
 	ctx := context.Background()
 	e.seed(txOther, otherMember, domainfinance.Transaction{Type: "expense", Amount: 5, AccountID: acctID})
 	e.seed(txMine, memberID, domainfinance.Transaction{Type: "expense", Amount: 5, AccountID: acctID})
-	up := dto.TransactionUpdateInput{Amount: ptr(int64(900))}
+	up := dto.TransactionUpdateInput{Amount: ptr(domainfinance.Money(900))}
 
 	if _, err := e.svc.TransactionUpdate(ctx, memberActor(), spaceID, txOther, up); !errors.Is(err, authorization.ErrForbidden) {
 		t.Fatalf("other's tx err = %v", err)
@@ -621,7 +621,7 @@ func TestUpdateMergesAndClears(t *testing.T) {
 	}
 	_, err = e.svc.TransactionUpdate(ctx, memberActor(), spaceID, txMine, dto.TransactionUpdateInput{})
 	vErr(t, err, "update")
-	_, err = e.svc.TransactionUpdate(ctx, memberActor(), spaceID, txMine, dto.TransactionUpdateInput{Amount: ptr(int64(0))})
+	_, err = e.svc.TransactionUpdate(ctx, memberActor(), spaceID, txMine, dto.TransactionUpdateInput{Amount: ptr(domainfinance.Money(0))})
 	vErr(t, err, "amount")
 	_, err = e.svc.TransactionUpdate(ctx, memberActor(), spaceID, txMine, dto.TransactionUpdateInput{Account: ptr(foreignAcct)})
 	vErr(t, err, "account")
@@ -659,7 +659,7 @@ func TestUpdateKeepsArchivedUnchangedRefs(t *testing.T) {
 	now := time.Now()
 	e.repo.accounts[acctID].ArchivedAt = &now
 	e.repo.categories[catFood].ArchivedAt = &now
-	if _, err := e.svc.TransactionUpdate(context.Background(), memberActor(), spaceID, txMine, dto.TransactionUpdateInput{Amount: ptr(int64(6))}); err != nil {
+	if _, err := e.svc.TransactionUpdate(context.Background(), memberActor(), spaceID, txMine, dto.TransactionUpdateInput{Amount: ptr(domainfinance.Money(6))}); err != nil {
 		t.Fatalf("editing amount must not need live refs: %v", err)
 	}
 	// Re-sending the stored (archived) account and category by name or id is fine.
@@ -717,7 +717,7 @@ func TestUpdateReturnsBudgetStatus(t *testing.T) {
 	now := time.Now().UTC()
 	e.repo.budgets = []domainfinance.Budget{budgetFor(catFood, now, 1_000_000)}
 	e.seed(txMine, memberID, domainfinance.Transaction{Type: "expense", Amount: 5, AccountID: acctID, CategoryID: ptr(catFood), OccurredAt: now})
-	res, err := e.svc.TransactionUpdate(context.Background(), memberActor(), spaceID, txMine, dto.TransactionUpdateInput{Amount: ptr(int64(500_000))})
+	res, err := e.svc.TransactionUpdate(context.Background(), memberActor(), spaceID, txMine, dto.TransactionUpdateInput{Amount: ptr(domainfinance.Money(500_000))})
 	if err != nil || res.BudgetStatus == nil || res.BudgetStatus.PercentUsed != 50 || res.PossibleDuplicate != nil {
 		t.Fatalf("err=%v res=%+v", err, res)
 	}
@@ -763,8 +763,8 @@ func TestTransactionWritesAreAuditedWithoutSensitiveData(t *testing.T) {
 	in.Note = "secret-note"
 	res := e.create(t, in)
 	_, _ = e.svc.TransactionCreate(ctx, memberActor(), expense(0))
-	_, _ = e.svc.TransactionUpdate(ctx, ownerActor(), spaceID, res.Transaction.ID, dto.TransactionUpdateInput{Amount: ptr(int64(7))})
-	_, _ = e.svc.TransactionUpdate(ctx, memberActor(), spaceID, "junk", dto.TransactionUpdateInput{Amount: ptr(int64(7))})
+	_, _ = e.svc.TransactionUpdate(ctx, ownerActor(), spaceID, res.Transaction.ID, dto.TransactionUpdateInput{Amount: ptr(domainfinance.Money(7))})
+	_, _ = e.svc.TransactionUpdate(ctx, memberActor(), spaceID, "junk", dto.TransactionUpdateInput{Amount: ptr(domainfinance.Money(7))})
 	_ = e.svc.TransactionDelete(ctx, memberActor(), spaceID, res.Transaction.ID)
 	_ = e.svc.TransactionDelete(ctx, ownerActor(), spaceID, res.Transaction.ID)
 

@@ -346,7 +346,7 @@ func TestRecurringUpdateRevalidatesMergedTemplate(t *testing.T) {
 	}
 
 	// Switching to weekly drops the monthly day; ClearEndAt removes the end.
-	got, err := e.svc.RecurringUpdate(ctx, a, dto.RecurringUpdateInput{ID: rec.ID, Frequency: ptr("weekly"), ClearEndAt: true, Amount: ptr(int64(400000))})
+	got, err := e.svc.RecurringUpdate(ctx, a, dto.RecurringUpdateInput{ID: rec.ID, Frequency: ptr("weekly"), ClearEndAt: true, Amount: ptr(domainfinance.Money(400000))})
 	if err != nil || got.Frequency != "weekly" || got.DayOfMonth != nil || got.EndAt != nil || got.Amount != 400000 {
 		t.Fatalf("update: %+v %v", got, err)
 	}

@@ -6,13 +6,10 @@ import (
 	"time"
 )
 
-// MaxAmount is the largest allowed amount in whole rupiah (IDR).
-const MaxAmount int64 = 1_000_000_000_000
+var ErrInvalidAmount = errors.New("amount must be between 0.01 and 10000000000 rupiah")
 
-var ErrInvalidAmount = errors.New("amount must be a whole number between 1 and 1000000000000")
-
-// ValidateAmount checks 1 <= v <= MaxAmount.
-func ValidateAmount(v int64) error {
+// ValidateAmount checks 1 <= v <= MaxAmount (sen).
+func ValidateAmount(v Money) error {
 	if v < 1 || v > MaxAmount {
 		return ErrInvalidAmount
 	}

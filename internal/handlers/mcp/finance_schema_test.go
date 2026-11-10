@@ -34,7 +34,7 @@ func validateAgainstSchema[T any](t *testing.T, value T) {
 
 func TestFinanceOutputsSatisfyTheirSchemas(t *testing.T) {
 	tx := financeTestTransaction()
-	budget := domainfinance.BudgetStatus{CategoryID: "cat-1", Budget: 1, Spent: 1, Remaining: 0, PercentUsed: 100}
+	budget := domainfinance.BudgetStatus{CategoryID: "cat-1", Budget: 100, Spent: 100, Remaining: 0, PercentUsed: 100}
 	validateAgainstSchema(t, *financeTransactionResult(&dto.TransactionResult{Transaction: tx, PossibleDuplicate: &tx, BudgetStatus: &budget}))
 	validateAgainstSchema(t, *financeTransactionResult(&dto.TransactionResult{Transaction: tx}))
 	validateAgainstSchema(t, FinanceTransactionListOutput{Transactions: []FinanceTransactionOutput{financeTransactionOutput(tx)}})

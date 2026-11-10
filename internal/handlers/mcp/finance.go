@@ -191,7 +191,7 @@ type FinanceAccountListOutput struct {
 
 func FinanceAccountCreate(ctx context.Context, resolver interfaceidentity.Resolver, service interfacefinance.ServiceFinanceInterface, input FinanceAccountCreateInput) (*domainfinance.Account, error) {
 	return financeCall(ctx, resolver, service, input.Space, func(actor domainidentity.ActorContext, spaceID string) (*domainfinance.Account, error) {
-		return service.AccountCreate(ctx, actor, dto.AccountCreateInput{Space: spaceID, Name: input.Name, Type: input.Type, OpeningBalance: input.OpeningBalance})
+		return service.AccountCreate(ctx, actor, dto.AccountCreateInput{Space: spaceID, Name: input.Name, Type: input.Type, OpeningBalance: wholeRupiah(input.OpeningBalance)})
 	})
 }
 
@@ -228,4 +228,27 @@ func registerFinanceAccountTools(server *mcpsdk.Server, resolver interfaceidenti
 	}, func(ctx context.Context, input FinanceAccountUpdateInput) (*domainfinance.Account, error) {
 		return FinanceAccountUpdate(ctx, resolver, service, input)
 	})
+}
+
+// wholeRupiah converts a tool's whole-rupiah integer input to Money (sen).
+// It is a stopgap until the tools accept decimal amounts: a value beyond the
+// range is saturated to just outside MaxAmount (instead of overflowing) so the
+// service validators reject it.
+func wholeRupiah(v int64) domainfinance.Money {
+	limit := int64(domainfinance.MaxAmount) / 100
+	switch {
+	case v > limit:
+		return domainfinance.MaxAmount + 1
+	case v < -limit:
+		return -domainfinance.MaxAmount - 1
+	}
+	return domainfinance.Money(v) * 100
+}
+
+func wholeRupiahPtr(v *int64) *domainfinance.Money {
+	if v == nil {
+		return nil
+	}
+	m := wholeRupiah(*v)
+	return &m
 }

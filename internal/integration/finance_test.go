@@ -122,7 +122,7 @@ func must[T any](t *testing.T, r result[T]) T {
 	return r.v
 }
 
-func wantInt(t *testing.T, what string, got, want int64) {
+func wantInt[T ~int64](t *testing.T, what string, got, want T) {
 	t.Helper()
 	if got != want {
 		t.Fatalf("%s = %d, want %d", what, got, want)
@@ -155,16 +155,16 @@ func (e *financeEnv) countRows(t *testing.T, table, spaceID string) int {
 	return n
 }
 
-func (e *financeEnv) account(t *testing.T, f financeSpaceFixture, name, kind string, opening int64) string {
+func (e *financeEnv) account(t *testing.T, f financeSpaceFixture, name, kind string, opening domainfinance.Money) string {
 	t.Helper()
 	acc := must(t, got(e.svc.AccountCreate(context.Background(), f.owner, dto.AccountCreateInput{Space: f.id, Name: name, Type: kind, OpeningBalance: opening})))
 	return acc.ID
 }
 
-func (e *financeEnv) balance(t *testing.T, f financeSpaceFixture) (map[string]int64, int64) {
+func (e *financeEnv) balance(t *testing.T, f financeSpaceFixture) (map[string]domainfinance.Money, domainfinance.Money) {
 	t.Helper()
 	rep := must(t, got(e.svc.Balances(context.Background(), f.owner, f.id)))
-	byName := map[string]int64{}
+	byName := map[string]domainfinance.Money{}
 	for _, a := range rep.Accounts {
 		byName[a.Name] = a.Balance
 	}
@@ -429,14 +429,14 @@ func testFinanceWIBBoundary(t *testing.T, env *financeEnv) {
 	}
 	novLast := time.Date(2026, 11, 30, 16, 30, 0, 0, time.UTC)  // 23:30 WIB on 30 Nov
 	decFirst := time.Date(2026, 11, 30, 17, 30, 0, 0, time.UTC) // 00:30 WIB on 1 Dec
-	spent := func(month string) int64 {
+	spent := func(month string) domainfinance.Money {
 		list := must(t, got(env.svc.BudgetList(ctx, f.owner, f.id, month)))
 		if len(list) != 1 {
 			t.Fatalf("budgets of %s = %+v, want one", month, list)
 		}
 		return list[0].Spent
 	}
-	expense := func(amount int64, at time.Time) *dto.TransactionResult {
+	expense := func(amount domainfinance.Money, at time.Time) *dto.TransactionResult {
 		return must(t, got(env.svc.TransactionCreate(ctx, f.owner, dto.TransactionCreateInput{
 			Space: f.id, Type: "expense", Amount: amount, Account: "Kas", Category: "Makan", OccurredAt: at,
 		})))

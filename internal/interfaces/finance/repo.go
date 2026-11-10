@@ -59,7 +59,7 @@ type RepoFinanceInterface interface {
 	// Summary and SpentByCategory take already-resolved half-open UTC
 	// instants [from, to).
 	Summary(ctx context.Context, spaceID string, from, to time.Time) (*domainfinance.SummaryResult, error)
-	SpentByCategory(ctx context.Context, spaceID, categoryID string, from, to time.Time) (int64, error)
+	SpentByCategory(ctx context.Context, spaceID, categoryID string, from, to time.Time) (domainfinance.Money, error)
 
 	CreateRecurring(ctx context.Context, r *domainfinance.Recurring) error
 	FindRecurring(ctx context.Context, spaceID, id string) (*domainfinance.Recurring, error)

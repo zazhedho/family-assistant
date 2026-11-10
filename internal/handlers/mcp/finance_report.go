@@ -29,11 +29,11 @@ type FinanceSummaryOutput struct {
 	Period          string                        `json:"period"`
 	From            time.Time                     `json:"from"`
 	To              time.Time                     `json:"to"`
-	Income          int64                         `json:"income"`
-	Expense         int64                         `json:"expense"`
-	Net             int64                         `json:"net"`
-	PreviousIncome  int64                         `json:"previous_income"`
-	PreviousExpense int64                         `json:"previous_expense"`
+	Income          domainfinance.Money           `json:"income"`
+	Expense         domainfinance.Money           `json:"expense"`
+	Net             domainfinance.Money           `json:"net"`
+	PreviousIncome  domainfinance.Money           `json:"previous_income"`
+	PreviousExpense domainfinance.Money           `json:"previous_expense"`
 	ByCategory      []domainfinance.CategoryTotal `json:"by_category"`
 	ByAccount       []domainfinance.AccountTotal  `json:"by_account"`
 	TopMerchants    []domainfinance.MerchantTotal `json:"top_merchants"`
@@ -41,7 +41,7 @@ type FinanceSummaryOutput struct {
 
 type FinanceBalancesOutput struct {
 	Accounts []domainfinance.AccountBalance `json:"accounts"`
-	Total    int64                          `json:"total"`
+	Total    domainfinance.Money            `json:"total"`
 }
 
 func FinanceSummary(ctx context.Context, resolver interfaceidentity.Resolver, service interfacefinance.ServiceFinanceInterface, input FinanceSummaryInput) (*FinanceSummaryOutput, error) {

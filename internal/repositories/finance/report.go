@@ -45,7 +45,7 @@ func (r *Repository) Summary(ctx context.Context, spaceID string, from, to time.
 		ByCategory: []domainfinance.CategoryTotal{}, ByAccount: []domainfinance.AccountTotal{}, TopMerchants: []domainfinance.MerchantTotal{},
 	}
 
-	var totals struct{ Income, Expense int64 }
+	var totals struct{ Income, Expense domainfinance.Money }
 	if err := db.Raw(`SELECT COALESCE(SUM(amount) FILTER (WHERE type = 'income'), 0)::bigint AS income,
  COALESCE(SUM(amount) FILTER (WHERE type = 'expense'), 0)::bigint AS expense
 FROM finance_transactions WHERE space_id = ? AND deleted_at IS NULL AND occurred_at >= ? AND occurred_at < ?`,
@@ -84,11 +84,11 @@ GROUP BY merchant ORDER BY total DESC, merchant LIMIT 5`, spaceID, from, to).Sca
 }
 
 // SpentByCategory sums the Space's live expenses of one category in [from, to).
-func (r *Repository) SpentByCategory(ctx context.Context, spaceID, categoryID string, from, to time.Time) (int64, error) {
+func (r *Repository) SpentByCategory(ctx context.Context, spaceID, categoryID string, from, to time.Time) (domainfinance.Money, error) {
 	if err := requireSpaceAndID(spaceID, categoryID); err != nil {
 		return 0, err
 	}
-	var row struct{ Total int64 }
+	var row struct{ Total domainfinance.Money }
 	if err := r.db(ctx).Raw(`SELECT COALESCE(SUM(amount), 0)::bigint AS total
 FROM finance_transactions
 WHERE space_id = ? AND deleted_at IS NULL AND type = 'expense' AND category_id = ? AND occurred_at >= ? AND occurred_at < ?`,

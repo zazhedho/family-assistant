@@ -101,7 +101,7 @@ func (r *rptRepo) Summary(_ context.Context, space string, from, to time.Time) (
 		return r.summary, nil
 	}
 	res := &domainfinance.SummaryResult{}
-	byCat := map[string]int64{}
+	byCat := map[string]domainfinance.Money{}
 	for _, tx := range r.txs {
 		if tx.SpaceID != space || tx.OccurredAt.Before(from) || !tx.OccurredAt.Before(to) {
 			continue
@@ -158,7 +158,7 @@ func (e *rptEnv) lastAudit(t *testing.T) domainaudit.AuditEvent {
 	return e.audit.events[len(e.audit.events)-1]
 }
 
-func budgetIn(month string, amount int64, category string) dto.BudgetSetInput {
+func budgetIn(month string, amount domainfinance.Money, category string) dto.BudgetSetInput {
 	return dto.BudgetSetInput{Category: category, Month: month, Amount: amount}
 }
 
@@ -245,7 +245,7 @@ func TestBudgetMonthWindowUsesWIBNow(t *testing.T) {
 }
 
 func TestBudgetAmountMustBeValid(t *testing.T) {
-	for _, amount := range []int64{0, -1, domainfinance.MaxAmount + 1} {
+	for _, amount := range []domainfinance.Money{0, -1, domainfinance.MaxAmount + 1} {
 		e := newRptEnv(t)
 		_, err := e.svc.BudgetSet(context.Background(), ownerActor(), budgetIn("2026-11", amount, "Makan"))
 		vErr(t, err, "amount")

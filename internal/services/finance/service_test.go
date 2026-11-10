@@ -663,6 +663,9 @@ func TestMapDomainError(t *testing.T) {
 	cases := map[error]string{
 		domainfinance.ErrInvalidType:        "type",
 		domainfinance.ErrInvalidAmount:      "amount",
+		domainfinance.ErrMoneyFormat:        "amount",
+		domainfinance.ErrMoneyPrecision:     "amount",
+		domainfinance.ErrAmountTooLarge:     "amount",
 		domainfinance.ErrAccountRequired:    "account",
 		domainfinance.ErrToAccountRequired:  "to_account",
 		domainfinance.ErrToAccountForbidden: "to_account",
@@ -678,6 +681,23 @@ func TestMapDomainError(t *testing.T) {
 	}
 	if mapDomainError(nil) != nil {
 		t.Fatal("nil must stay nil")
+	}
+}
+
+func TestMapMoneyErrorUsesTheGivenField(t *testing.T) {
+	for _, in := range []error{domainfinance.ErrMoneyFormat, domainfinance.ErrMoneyPrecision, domainfinance.ErrAmountTooLarge, domainfinance.ErrInvalidAmount} {
+		vErr(t, MapMoneyError("opening_balance", in), "opening_balance")
+		vErr(t, MapMoneyError("amount", fmt.Errorf("wrapped: %w", in)), "amount")
+	}
+	unknown := errors.New("boom")
+	if got := MapMoneyError("amount", unknown); !errors.Is(got, unknown) {
+		t.Fatalf("unknown must pass through, got %v", got)
+	}
+	if MapMoneyError("amount", nil) != nil {
+		t.Fatal("nil must stay nil")
+	}
+	if _, err := domainfinance.ParseMoney("5.123", false); err != nil {
+		vErr(t, MapMoneyError("opening_balance", err), "opening_balance")
 	}
 }
 

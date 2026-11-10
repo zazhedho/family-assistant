@@ -17,12 +17,12 @@ func utc(s string) time.Time {
 }
 
 func TestValidateAmountRejectsZeroNegativeAndOverLimit(t *testing.T) {
-	for _, v := range []int64{0, -1, MaxAmount + 1} {
+	for _, v := range []Money{0, -1, MaxAmount + 1} {
 		if err := ValidateAmount(v); !errors.Is(err, ErrInvalidAmount) {
 			t.Errorf("ValidateAmount(%d) = %v, want ErrInvalidAmount", v, err)
 		}
 	}
-	for _, v := range []int64{1, MaxAmount} {
+	for _, v := range []Money{1, MaxAmount} {
 		if err := ValidateAmount(v); err != nil {
 			t.Errorf("ValidateAmount(%d) = %v, want nil", v, err)
 		}
@@ -96,7 +96,7 @@ func TestNextOccurrenceDailyWeeklyYearly(t *testing.T) {
 
 func TestNewBudgetStatus(t *testing.T) {
 	cases := []struct {
-		budget, spent, remaining int64
+		budget, spent, remaining Money
 		pct                      int
 	}{
 		{1000, 0, 1000, 0},

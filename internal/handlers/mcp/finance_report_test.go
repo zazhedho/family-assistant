@@ -13,10 +13,10 @@ import (
 func TestFinanceSummaryMapsInputAndRendersWIB(t *testing.T) {
 	report := &dto.SummaryReport{
 		Period: "custom", From: time.Date(2026, 11, 9, 17, 0, 0, 0, time.UTC), To: time.Date(2026, 11, 30, 17, 0, 0, 0, time.UTC),
-		Income: 5000000, Expense: 1250000, Net: 3750000, PreviousIncome: 4000000, PreviousExpense: 900000,
-		ByCategory:   []domainfinance.CategoryTotal{{CategoryID: "cat-1", Name: "Makan", Total: 1250000}},
-		ByAccount:    []domainfinance.AccountTotal{{AccountID: "acc-1", Name: "BCA", Income: 5000000, Expense: 1250000}},
-		TopMerchants: []domainfinance.MerchantTotal{{Merchant: "Warung", Total: 250000, Count: 4}},
+		Income: 500000000, Expense: 125000000, Net: 375000000, PreviousIncome: 400000000, PreviousExpense: 90000000,
+		ByCategory:   []domainfinance.CategoryTotal{{CategoryID: "cat-1", Name: "Makan", Total: 125000000}},
+		ByAccount:    []domainfinance.AccountTotal{{AccountID: "acc-1", Name: "BCA", Income: 500000000, Expense: 125000000}},
+		TopMerchants: []domainfinance.MerchantTotal{{Merchant: "Warung", Total: 25000000, Count: 4}},
 	}
 	service := &mcpFinanceServiceStub{summary: report}
 	got, err := FinanceSummary(mcpExternalContext(), financeResolver(), service, FinanceSummaryInput{
@@ -74,8 +74,8 @@ func TestFinanceSummaryRejectsBadTime(t *testing.T) {
 
 func TestFinanceBalancesMapsInput(t *testing.T) {
 	service := &mcpFinanceServiceStub{balances: &dto.BalancesReport{
-		Accounts: []domainfinance.AccountBalance{{AccountID: "acc-1", Name: "BCA", Type: "bank", Balance: 1500000}, {AccountID: "acc-2", Name: "Visa", Type: "credit_card", Balance: -200000}},
-		Total:    1300000,
+		Accounts: []domainfinance.AccountBalance{{AccountID: "acc-1", Name: "BCA", Type: "bank", Balance: 150000000}, {AccountID: "acc-2", Name: "Visa", Type: "credit_card", Balance: -20000000}},
+		Total:    130000000,
 	}}
 	got, err := FinanceBalances(mcpExternalContext(), financeResolver(), service, FinanceBalancesInput{Space: "Family"})
 	if err != nil {

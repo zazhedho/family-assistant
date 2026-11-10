@@ -13,7 +13,7 @@ func financeTestRecurring() *domainfinance.Recurring {
 	end := time.Date(2027, 11, 9, 17, 0, 0, 0, time.UTC)
 	day, reason := 10, "account archived"
 	return &domainfinance.Recurring{
-		ID: "r-1", SpaceID: financeTestSpaceID, Type: "expense", Amount: 500000, AccountID: "acc-1", Frequency: "monthly", IntervalN: 1, DayOfMonth: &day,
+		ID: "r-1", SpaceID: financeTestSpaceID, Type: "expense", Amount: 50000000, AccountID: "acc-1", Frequency: "monthly", IntervalN: 1, DayOfMonth: &day,
 		StartAt: time.Date(2026, 11, 10, 0, 30, 0, 0, time.UTC), NextRunAt: time.Date(2026, 12, 10, 0, 30, 0, 0, time.UTC), EndAt: &end,
 		Paused: true, PauseReason: &reason, CreatedAt: financeTestOccurredAt, UpdatedAt: financeTestOccurredAt,
 	}
@@ -31,7 +31,7 @@ func TestFinanceRecurringCreateMapsInput(t *testing.T) {
 	}
 	assertFinanceActor(t, service)
 	in := service.recCreate
-	if in.Space != financeTestSpaceID || in.Type != "transfer" || in.Amount != 500000 || in.Account != "BCA" || in.ToAccount != "Cash" || in.Category != "Tabungan" ||
+	if in.Space != financeTestSpaceID || in.Type != "transfer" || in.Amount != 50000000 || in.Account != "BCA" || in.ToAccount != "Cash" || in.Category != "Tabungan" ||
 		in.Merchant != "Kos" || in.Note != "rent" || in.Frequency != "monthly" || in.IntervalN != 2 || in.DayOfMonth == nil || *in.DayOfMonth != 10 ||
 		!in.StartAt.Equal(financeTestOccurredAt) || in.EndAt == nil || !in.EndAt.Equal(time.Date(2027, 11, 9, 17, 0, 0, 0, time.UTC)) {
 		t.Fatalf("input = %+v", in)
@@ -120,7 +120,7 @@ func TestFinanceRecurringUpdateMapsInput(t *testing.T) {
 	}
 	assertFinanceActor(t, service)
 	in := service.recUpdate
-	if in.Space != financeTestSpaceID || in.ID != id || in.Type == nil || *in.Type != "income" || in.Amount == nil || *in.Amount != 750000 ||
+	if in.Space != financeTestSpaceID || in.ID != id || in.Type == nil || *in.Type != "income" || in.Amount == nil || *in.Amount != 75000000 ||
 		in.Account == nil || *in.Account != "Cash" || in.ToAccount == nil || *in.ToAccount != "" || in.Category == nil || *in.Category != "" ||
 		in.Merchant == nil || *in.Merchant != "Gaji" || in.Note == nil || *in.Note != "salary" || in.Frequency == nil || *in.Frequency != "weekly" ||
 		in.IntervalN == nil || *in.IntervalN != 3 || in.DayOfMonth == nil || *in.DayOfMonth != 5 ||

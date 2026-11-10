@@ -10,7 +10,7 @@ type AccountCreateInput struct {
 	Space          string
 	Name           string
 	Type           string
-	OpeningBalance int64
+	OpeningBalance domainfinance.Money
 }
 
 type AccountListInput struct {
@@ -54,7 +54,7 @@ type CategoryUpdateInput struct {
 type TransactionCreateInput struct {
 	Space      string
 	Type       string
-	Amount     int64
+	Amount     domainfinance.Money
 	Account    string
 	ToAccount  string
 	Category   string
@@ -80,7 +80,7 @@ type TransactionListInput struct {
 // for ToAccount or Category clears it.
 type TransactionUpdateInput struct {
 	Type       *string
-	Amount     *int64
+	Amount     *domainfinance.Money
 	Account    *string
 	ToAccount  *string
 	Category   *string
@@ -104,7 +104,7 @@ type BudgetSetInput struct {
 	Space    string
 	Category string
 	Month    string
-	Amount   int64
+	Amount   domainfinance.Money
 }
 
 // BudgetDeleteInput removes the budget of a category for a month.
@@ -124,7 +124,7 @@ type BudgetStatusView struct {
 // sum (credit card balances are negative and are included).
 type BalancesReport struct {
 	Accounts []domainfinance.AccountBalance `json:"accounts"`
-	Total    int64                          `json:"total"`
+	Total    domainfinance.Money            `json:"total"`
 }
 
 // SummaryInput selects a report period: today, week (ISO, Monday start),
@@ -145,11 +145,11 @@ type SummaryReport struct {
 	Period          string                        `json:"period"`
 	From            time.Time                     `json:"from"`
 	To              time.Time                     `json:"to"`
-	Income          int64                         `json:"income"`
-	Expense         int64                         `json:"expense"`
-	Net             int64                         `json:"net"`
-	PreviousIncome  int64                         `json:"previous_income"`
-	PreviousExpense int64                         `json:"previous_expense"`
+	Income          domainfinance.Money           `json:"income"`
+	Expense         domainfinance.Money           `json:"expense"`
+	Net             domainfinance.Money           `json:"net"`
+	PreviousIncome  domainfinance.Money           `json:"previous_income"`
+	PreviousExpense domainfinance.Money           `json:"previous_expense"`
 	ByCategory      []domainfinance.CategoryTotal `json:"by_category"`
 	ByAccount       []domainfinance.AccountTotal  `json:"by_account"`
 	TopMerchants    []domainfinance.MerchantTotal `json:"top_merchants"`
@@ -165,7 +165,7 @@ type SummaryReport struct {
 type RecurringCreateInput struct {
 	Space      string
 	Type       string
-	Amount     int64
+	Amount     domainfinance.Money
 	Account    string
 	ToAccount  string
 	Category   string
@@ -191,7 +191,7 @@ type RecurringUpdateInput struct {
 	Space      string
 	ID         string
 	Type       *string
-	Amount     *int64
+	Amount     *domainfinance.Money
 	Account    *string
 	ToAccount  *string
 	Category   *string
