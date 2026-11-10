@@ -1,0 +1,516 @@
+package servicefinance
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+
+	domainaudit "family-assistant/internal/domain/audit"
+	domainfinance "family-assistant/internal/domain/finance"
+	domainidentity "family-assistant/internal/domain/identity"
+	domainspace "family-assistant/internal/domain/space"
+	"family-assistant/internal/dto"
+	interfacefinance "family-assistant/internal/interfaces/finance"
+	interfacespace "family-assistant/internal/interfaces/space"
+	"family-assistant/internal/services/authorization"
+	"gorm.io/gorm"
+)
+
+const (
+	spaceID  = "11111111-1111-4111-8111-111111111111"
+	otherID  = "22222222-2222-4222-8222-222222222222"
+	memberID = "33333333-3333-4333-8333-333333333333"
+	acctID   = "44444444-4444-4444-8444-444444444444"
+	foreign  = "99999999-9999-4999-8999-999999999999"
+)
+
+type repoFake struct {
+	interfacefinance.RepoFinanceInterface
+	mu         sync.Mutex
+	accounts   map[string]*domainfinance.Account
+	categories map[string]*domainfinance.Category
+	archiveCnt int
+	listDelay  time.Duration
+}
+
+func newRepo() *repoFake {
+	return &repoFake{accounts: map[string]*domainfinance.Account{}, categories: map[string]*domainfinance.Category{}}
+}
+
+func (r *repoFake) CreateAccount(_ context.Context, a *domainfinance.Account) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	c := *a
+	r.accounts[a.ID] = &c
+	return nil
+}
+
+func (r *repoFake) ListAccounts(_ context.Context, space string, includeArchived bool) ([]domainfinance.Account, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	var out []domainfinance.Account
+	for _, a := range r.accounts {
+		if a.SpaceID == space && (includeArchived || a.ArchivedAt == nil) {
+			out = append(out, *a)
+		}
+	}
+	return out, nil
+}
+
+func (r *repoFake) FindAccount(_ context.Context, space, id string) (*domainfinance.Account, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	a, ok := r.accounts[id]
+	if !ok || a.SpaceID != space {
+		return nil, gorm.ErrRecordNotFound
+	}
+	c := *a
+	return &c, nil
+}
+
+func (r *repoFake) UpdateAccount(_ context.Context, a *domainfinance.Account) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	cur, ok := r.accounts[a.ID]
+	if !ok || cur.SpaceID != a.SpaceID {
+		return gorm.ErrRecordNotFound
+	}
+	cur.Name, cur.Type, cur.OpeningBalance = a.Name, a.Type, a.OpeningBalance
+	return nil
+}
+
+func (r *repoFake) ArchiveAccount(_ context.Context, space, id string, at time.Time) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	a, ok := r.accounts[id]
+	if !ok || a.SpaceID != space {
+		return gorm.ErrRecordNotFound
+	}
+	a.ArchivedAt = &at
+	r.archiveCnt++
+	return nil
+}
+
+func (r *repoFake) CreateCategory(_ context.Context, c *domainfinance.Category) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	cp := *c
+	r.categories[c.ID] = &cp
+	return nil
+}
+
+func (r *repoFake) ListCategories(_ context.Context, space string, includeArchived bool) ([]domainfinance.Category, error) {
+	r.mu.Lock()
+	var out []domainfinance.Category
+	for _, c := range r.categories {
+		if c.SpaceID == space && (includeArchived || c.ArchivedAt == nil) {
+			out = append(out, *c)
+		}
+	}
+	d := r.listDelay
+	r.mu.Unlock()
+	time.Sleep(d)
+	return out, nil
+}
+
+func (r *repoFake) FindCategory(_ context.Context, space, id string) (*domainfinance.Category, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	c, ok := r.categories[id]
+	if !ok || c.SpaceID != space {
+		return nil, gorm.ErrRecordNotFound
+	}
+	cp := *c
+	return &cp, nil
+}
+
+func (r *repoFake) UpdateCategory(_ context.Context, c *domainfinance.Category) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	cur, ok := r.categories[c.ID]
+	if !ok || cur.SpaceID != c.SpaceID {
+		return gorm.ErrRecordNotFound
+	}
+	cur.Name, cur.Kind = c.Name, c.Kind
+	return nil
+}
+
+func (r *repoFake) ArchiveCategory(_ context.Context, space, id string, at time.Time) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	c, ok := r.categories[id]
+	if !ok || c.SpaceID != space {
+		return gorm.ErrRecordNotFound
+	}
+	c.ArchivedAt = &at
+	return nil
+}
+
+type spacesFake struct {
+	interfacespace.RepoSpaceInterface
+	members []domainspace.ResolvedMembership
+}
+
+func (s *spacesFake) ListActiveMembers(_ context.Context, id string) ([]domainspace.ResolvedMembership, error) {
+	var out []domainspace.ResolvedMembership
+	for _, m := range s.members {
+		if m.SpaceID == id && m.Status == domainspace.StatusActive {
+			out = append(out, m)
+		}
+	}
+	return out, nil
+}
+
+type auditFake struct {
+	mu     sync.Mutex
+	events []domainaudit.AuditEvent
+}
+
+func (a *auditFake) Store(_ context.Context, e domainaudit.AuditEvent) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.events = append(a.events, e)
+	return nil
+}
+
+func financeSpaces(category string) *spacesFake {
+	return &spacesFake{members: []domainspace.ResolvedMembership{
+		{ID: memberID, SpaceID: spaceID, UserID: "user-1", SpaceCategory: category, Status: domainspace.StatusActive},
+	}}
+}
+
+func actorWith(perms ...string) domainidentity.ActorContext {
+	set := map[string]struct{}{}
+	for _, p := range perms {
+		set[p] = struct{}{}
+	}
+	return domainidentity.ActorContext{UserID: "user-1", SpaceID: spaceID, MemberID: memberID, Permissions: set, Source: "mcp"}
+}
+
+func newSvc(repo *repoFake, spaces *spacesFake, audit *auditFake) interfacefinance.ServiceFinanceInterface {
+	return NewService(repo, spaces, authorization.NewAuthorizer(), audit)
+}
+
+func vErr(t *testing.T, err error, field string) {
+	t.Helper()
+	var ve *authorization.ValidationError
+	if !errors.As(err, &ve) || ve.Field != field {
+		t.Fatalf("err = %v, want ValidationError on %q", err, field)
+	}
+}
+
+func TestGuardRejectsNonFinanceSpace(t *testing.T) {
+	repo := newRepo()
+	svc := newSvc(repo, financeSpaces(domainspace.CategoryFamily), &auditFake{})
+	_, err := svc.AccountCreate(context.Background(), actorWith("finance:manage"), dto.AccountCreateInput{Name: "Kas", Type: "cash"})
+	if !errors.Is(err, authorization.ErrNotFound) {
+		t.Fatalf("err = %v, want ErrNotFound", err)
+	}
+	if _, err := svc.CategoryList(context.Background(), actorWith("finance:list"), dto.CategoryListInput{}); !errors.Is(err, authorization.ErrNotFound) {
+		t.Fatalf("list err = %v", err)
+	}
+	if len(repo.accounts) != 0 || len(repo.categories) != 0 {
+		t.Fatalf("nothing may be written: %d %d", len(repo.accounts), len(repo.categories))
+	}
+}
+
+func TestGuardRejectsNonMember(t *testing.T) {
+	repo := newRepo()
+	spaces := financeSpaces(domainspace.CategoryFinance)
+	spaces.members[0].ID = "someone-else"
+	svc := newSvc(repo, spaces, &auditFake{})
+	_, err := svc.AccountCreate(context.Background(), actorWith("finance:manage"), dto.AccountCreateInput{Name: "Kas", Type: "cash"})
+	if !errors.Is(err, authorization.ErrNotFound) {
+		t.Fatalf("err = %v, want ErrNotFound", err)
+	}
+	if len(repo.accounts) != 0 {
+		t.Fatal("nothing may be written")
+	}
+}
+
+func TestMemberCannotManageAccounts(t *testing.T) {
+	repo := newRepo()
+	repo.accounts[acctID] = &domainfinance.Account{ID: acctID, SpaceID: spaceID, Name: "Kas", Type: "cash"}
+	svc := newSvc(repo, financeSpaces(domainspace.CategoryFinance), &auditFake{})
+	member := actorWith("finance:list", "finance:create", "finance:update")
+	if _, err := svc.AccountCreate(context.Background(), member, dto.AccountCreateInput{Name: "Kas", Type: "cash"}); !errors.Is(err, authorization.ErrForbidden) {
+		t.Fatalf("create err = %v", err)
+	}
+	name := "Baru"
+	if _, err := svc.AccountUpdate(context.Background(), member, dto.AccountUpdateInput{ID: acctID, Name: &name}); !errors.Is(err, authorization.ErrForbidden) {
+		t.Fatalf("update err = %v", err)
+	}
+	if _, err := svc.CategoryCreate(context.Background(), member, dto.CategoryCreateInput{Name: "X", Kind: "expense"}); !errors.Is(err, authorization.ErrForbidden) {
+		t.Fatalf("category create err = %v", err)
+	}
+	if _, err := svc.CategoryUpdate(context.Background(), member, dto.CategoryUpdateInput{ID: acctID, Name: &name}); !errors.Is(err, authorization.ErrForbidden) {
+		t.Fatalf("category update err = %v", err)
+	}
+	if _, err := svc.AccountList(context.Background(), member, dto.AccountListInput{}); err != nil {
+		t.Fatalf("list should work with finance:list: %v", err)
+	}
+	if _, err := svc.AccountList(context.Background(), actorWith("finance:manage"), dto.AccountListInput{}); !errors.Is(err, authorization.ErrForbidden) {
+		t.Fatalf("list without finance:list err = %v", err)
+	}
+	if repo.accounts[acctID].Name != "Kas" || len(repo.accounts) != 1 || len(repo.categories) != 0 {
+		t.Fatal("repo changed")
+	}
+}
+
+func TestDefaultCategoriesCreatedOnce(t *testing.T) {
+	repo := newRepo()
+	svc := newSvc(repo, financeSpaces(domainspace.CategoryFinance), &auditFake{})
+	for i := 0; i < 3; i++ {
+		got, err := svc.CategoryList(context.Background(), actorWith("finance:list"), dto.CategoryListInput{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(got) != 11 {
+			t.Fatalf("call %d: %d categories, want 11", i, len(got))
+		}
+	}
+	expense, income := 0, 0
+	for _, c := range repo.categories {
+		switch c.Kind {
+		case "expense":
+			expense++
+		case "income":
+			income++
+		}
+	}
+	if expense != 8 || income != 3 {
+		t.Fatalf("expense=%d income=%d", expense, income)
+	}
+	if _, err := svc.CategoryCreate(context.Background(), actorWith("finance:manage"), dto.CategoryCreateInput{Name: " Hobi ", Kind: "expense"}); err != nil {
+		t.Fatal(err)
+	}
+	if len(repo.categories) != 12 {
+		t.Fatalf("categories = %d, want 12", len(repo.categories))
+	}
+}
+
+func TestDefaultCategoriesNotReseededWhenAllArchived(t *testing.T) {
+	repo := newRepo()
+	svc := newSvc(repo, financeSpaces(domainspace.CategoryFinance), &auditFake{})
+	if _, err := svc.CategoryList(context.Background(), actorWith("finance:list"), dto.CategoryListInput{}); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	for _, c := range repo.categories {
+		c.ArchivedAt = &now
+	}
+	got, err := svc.CategoryList(context.Background(), actorWith("finance:list"), dto.CategoryListInput{})
+	if err != nil || len(got) != 0 || len(repo.categories) != 11 {
+		t.Fatalf("got=%d total=%d err=%v", len(got), len(repo.categories), err)
+	}
+}
+
+func TestDefaultCategoriesConcurrentFirstCallsDoNotDuplicate(t *testing.T) {
+	repo := newRepo()
+	repo.listDelay = 20 * time.Millisecond
+	svc := newSvc(repo, financeSpaces(domainspace.CategoryFinance), &auditFake{})
+	var wg sync.WaitGroup
+	for i := 0; i < 8; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if _, err := svc.CategoryList(context.Background(), actorWith("finance:list"), dto.CategoryListInput{}); err != nil {
+				t.Error(err)
+			}
+		}()
+	}
+	wg.Wait()
+	if len(repo.categories) != 11 {
+		t.Fatalf("categories = %d, want 11", len(repo.categories))
+	}
+}
+
+func TestListLimitsAreClamped(t *testing.T) {
+	repo := newRepo()
+	for i := 0; i < 120; i++ {
+		id := fmt.Sprintf("acc-%d", i)
+		repo.accounts[id] = &domainfinance.Account{ID: id, SpaceID: spaceID, Name: "n", Type: "cash"}
+	}
+	svc := newSvc(repo, financeSpaces(domainspace.CategoryFinance), &auditFake{})
+	a := actorWith("finance:list")
+	for limit, want := range map[int]int{0: 50, 10: 10, 500: 100} {
+		got, err := svc.AccountList(context.Background(), a, dto.AccountListInput{Limit: limit})
+		if err != nil || len(got) != want {
+			t.Fatalf("limit %d: len=%d err=%v want %d", limit, len(got), err, want)
+		}
+	}
+	_, err := svc.AccountList(context.Background(), a, dto.AccountListInput{Limit: -1})
+	vErr(t, err, "limit")
+}
+
+func TestAccountOpeningBalanceMayBeNegativeOnlyForCreditCard(t *testing.T) {
+	repo := newRepo()
+	svc := newSvc(repo, financeSpaces(domainspace.CategoryFinance), &auditFake{})
+	a := actorWith("finance:manage")
+	ctx := context.Background()
+	for _, typ := range []string{"cash", "bank", "ewallet", "savings"} {
+		_, err := svc.AccountCreate(ctx, a, dto.AccountCreateInput{Name: "x", Type: typ, OpeningBalance: -1})
+		vErr(t, err, "opening_balance")
+	}
+	if len(repo.accounts) != 0 {
+		t.Fatal("rejected creates must not write")
+	}
+	cc, err := svc.AccountCreate(ctx, a, dto.AccountCreateInput{Name: " Kartu ", Type: "credit_card", OpeningBalance: -500000})
+	if err != nil || cc.OpeningBalance != -500000 || cc.Name != "Kartu" || cc.SpaceID != spaceID {
+		t.Fatalf("credit card: %+v %v", cc, err)
+	}
+	if _, err := svc.AccountCreate(ctx, a, dto.AccountCreateInput{Name: "Kas", Type: "cash", OpeningBalance: 0}); err != nil {
+		t.Fatal(err)
+	}
+	_, err = svc.AccountCreate(ctx, a, dto.AccountCreateInput{Name: "x", Type: "cash", OpeningBalance: domainfinance.MaxAmount + 1})
+	vErr(t, err, "opening_balance")
+	_, err = svc.AccountCreate(ctx, a, dto.AccountCreateInput{Name: "x", Type: "credit_card", OpeningBalance: -domainfinance.MaxAmount - 1})
+	vErr(t, err, "opening_balance")
+}
+
+func TestAccountCreateValidatesNameAndType(t *testing.T) {
+	svc := newSvc(newRepo(), financeSpaces(domainspace.CategoryFinance), &auditFake{})
+	a := actorWith("finance:manage")
+	_, err := svc.AccountCreate(context.Background(), a, dto.AccountCreateInput{Name: "   ", Type: "cash"})
+	vErr(t, err, "name")
+	_, err = svc.AccountCreate(context.Background(), a, dto.AccountCreateInput{Name: strings.Repeat("x", 129), Type: "cash"})
+	vErr(t, err, "name")
+	_, err = svc.AccountCreate(context.Background(), a, dto.AccountCreateInput{Name: "x", Type: "crypto"})
+	vErr(t, err, "type")
+}
+
+func TestArchiveAccountKeepsTransactions(t *testing.T) {
+	repo := newRepo()
+	repo.accounts[acctID] = &domainfinance.Account{ID: acctID, SpaceID: spaceID, Name: "Kas", Type: "cash"}
+	svc := newSvc(repo, financeSpaces(domainspace.CategoryFinance), &auditFake{})
+	yes := true
+	got, err := svc.AccountUpdate(context.Background(), actorWith("finance:manage"), dto.AccountUpdateInput{ID: acctID, Archived: &yes})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.ArchivedAt == nil || repo.accounts[acctID].ArchivedAt == nil {
+		t.Fatal("archived_at must be set")
+	}
+	if len(repo.accounts) != 1 || repo.archiveCnt != 1 {
+		t.Fatalf("archive only: accounts=%d archives=%d", len(repo.accounts), repo.archiveCnt)
+	}
+	first := *repo.accounts[acctID].ArchivedAt
+	if _, err := svc.AccountUpdate(context.Background(), actorWith("finance:manage"), dto.AccountUpdateInput{ID: acctID, Archived: &yes}); err != nil {
+		t.Fatal(err)
+	}
+	if !repo.accounts[acctID].ArchivedAt.Equal(first) || repo.archiveCnt != 1 {
+		t.Fatal("archiving twice must not restamp")
+	}
+	no := false
+	_, err = svc.AccountUpdate(context.Background(), actorWith("finance:manage"), dto.AccountUpdateInput{ID: acctID, Archived: &no})
+	vErr(t, err, "archived")
+}
+
+func TestAccountUpdateRenameAndScope(t *testing.T) {
+	repo := newRepo()
+	repo.accounts[acctID] = &domainfinance.Account{ID: acctID, SpaceID: spaceID, Name: "Kas", Type: "cash", OpeningBalance: 5}
+	repo.accounts[otherID] = &domainfinance.Account{ID: otherID, SpaceID: foreign, Name: "Orang", Type: "cash"}
+	svc := newSvc(repo, financeSpaces(domainspace.CategoryFinance), &auditFake{})
+	a := actorWith("finance:manage")
+	name := "  Dompet "
+	got, err := svc.AccountUpdate(context.Background(), a, dto.AccountUpdateInput{ID: acctID, Name: &name})
+	if err != nil || got.Name != "Dompet" || repo.accounts[acctID].OpeningBalance != 5 {
+		t.Fatalf("%+v %v", got, err)
+	}
+	if _, err := svc.AccountUpdate(context.Background(), a, dto.AccountUpdateInput{ID: otherID, Name: &name}); !errors.Is(err, authorization.ErrNotFound) {
+		t.Fatalf("foreign account err = %v", err)
+	}
+	if repo.accounts[otherID].Name != "Orang" {
+		t.Fatal("foreign account changed")
+	}
+	_, err = svc.AccountUpdate(context.Background(), a, dto.AccountUpdateInput{ID: "not-a-uuid", Name: &name})
+	vErr(t, err, "id")
+	_, err = svc.AccountUpdate(context.Background(), a, dto.AccountUpdateInput{ID: acctID})
+	vErr(t, err, "update")
+	empty := " "
+	_, err = svc.AccountUpdate(context.Background(), a, dto.AccountUpdateInput{ID: acctID, Name: &empty})
+	vErr(t, err, "name")
+}
+
+func TestCategoryCreateAndUpdate(t *testing.T) {
+	repo := newRepo()
+	svc := newSvc(repo, financeSpaces(domainspace.CategoryFinance), &auditFake{})
+	a := actorWith("finance:manage")
+	ctx := context.Background()
+	_, err := svc.CategoryCreate(ctx, a, dto.CategoryCreateInput{Name: "x", Kind: "transfer"})
+	vErr(t, err, "kind")
+	_, err = svc.CategoryCreate(ctx, a, dto.CategoryCreateInput{Name: " ", Kind: "expense"})
+	vErr(t, err, "name")
+	c, err := svc.CategoryCreate(ctx, a, dto.CategoryCreateInput{Name: " Hobi ", Kind: "expense"})
+	if err != nil || c.Name != "Hobi" {
+		t.Fatalf("%+v %v", c, err)
+	}
+	name := "Hobi Baru"
+	yes := true
+	got, err := svc.CategoryUpdate(ctx, a, dto.CategoryUpdateInput{ID: c.ID, Name: &name, Archived: &yes})
+	if err != nil || got.Name != "Hobi Baru" || got.ArchivedAt == nil {
+		t.Fatalf("%+v %v", got, err)
+	}
+	if _, err := svc.CategoryUpdate(ctx, a, dto.CategoryUpdateInput{ID: otherID, Name: &name}); !errors.Is(err, authorization.ErrNotFound) {
+		t.Fatalf("missing err = %v", err)
+	}
+}
+
+func TestWritesAreAudited(t *testing.T) {
+	repo := newRepo()
+	audit := &auditFake{}
+	svc := newSvc(repo, financeSpaces(domainspace.CategoryFinance), audit)
+	a := actorWith("finance:manage")
+	if _, err := svc.AccountCreate(context.Background(), a, dto.AccountCreateInput{Name: "Kas", Type: "cash"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.AccountCreate(context.Background(), a, dto.AccountCreateInput{Name: "", Type: "cash"}); err == nil {
+		t.Fatal("expected error")
+	}
+	if _, err := svc.AccountCreate(context.Background(), actorWith(), dto.AccountCreateInput{Name: "Kas", Type: "cash"}); err == nil {
+		t.Fatal("expected error")
+	}
+	var ok, validation, forbidden int
+	for _, e := range audit.events {
+		if e.Resource != "finance_account" || e.Action != domainaudit.ActionCreate {
+			continue
+		}
+		switch {
+		case e.Status == domainaudit.StatusSuccess:
+			ok++
+		case e.ErrorMessage == "validation":
+			validation++
+		case e.ErrorMessage == "forbidden":
+			forbidden++
+		}
+	}
+	if ok != 1 || validation != 1 || forbidden != 1 {
+		t.Fatalf("audit ok=%d validation=%d forbidden=%d events=%+v", ok, validation, forbidden, audit.events)
+	}
+}
+
+func TestMapDomainError(t *testing.T) {
+	cases := map[error]string{
+		domainfinance.ErrInvalidType:        "type",
+		domainfinance.ErrInvalidAmount:      "amount",
+		domainfinance.ErrAccountRequired:    "account_id",
+		domainfinance.ErrToAccountRequired:  "to_account_id",
+		domainfinance.ErrToAccountForbidden: "to_account_id",
+		domainfinance.ErrTransferSameAcct:   "to_account_id",
+		domainfinance.ErrTransferCategory:   "category_id",
+	}
+	for in, field := range cases {
+		vErr(t, mapDomainError(in), field)
+	}
+	unknown := errors.New("boom")
+	if got := mapDomainError(unknown); !errors.Is(got, unknown) {
+		t.Fatalf("unknown must pass through, got %v", got)
+	}
+	if mapDomainError(nil) != nil {
+		t.Fatal("nil must stay nil")
+	}
+}
