@@ -113,9 +113,9 @@ const (
 	SkipTransient         = "transient"         // rolled back, retried on the next run
 )
 
-// MaxConsecutiveFailures is how many runs in a row may fail a template with an
+// MaxConsecutiveFailures (30, about half an hour at one run a minute) is how many runs in a row may fail a template with an
 // unclassified (transient) error before it is paused with PauseRetryExhausted.
-const MaxConsecutiveFailures = 5
+const MaxConsecutiveFailures = 30
 
 // PauseError makes the scheduler pause a template with Reason. Any other error
 // from a build callback is treated as transient: the template is rolled back

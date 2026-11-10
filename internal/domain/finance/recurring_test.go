@@ -187,3 +187,11 @@ func TestFirstOccurrenceDailyAndWeeklyIsStart(t *testing.T) {
 		}
 	}
 }
+
+// A template that fails with a transient error every minute is retried for
+// about half an hour before it is paused; short outages must not pause it.
+func TestMaxConsecutiveFailuresAllowsHalfAnHourOfRetries(t *testing.T) {
+	if MaxConsecutiveFailures != 30 {
+		t.Fatalf("MaxConsecutiveFailures = %d, want 30", MaxConsecutiveFailures)
+	}
+}

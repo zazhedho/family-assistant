@@ -354,17 +354,17 @@ func TestPostDueRecurringTransientInsertErrorRecordsSQLState(t *testing.T) {
 	met(t, mock)
 }
 
-func TestPostDueRecurringFifthConsecutiveFailurePausesRetryExhausted(t *testing.T) {
+func TestPostDueRecurringLastAllowedFailurePausesRetryExhausted(t *testing.T) {
 	db, mock := newMockDB(t)
 	repo := &Repository{DB: db}
 
-	expectLockedDue(mock, 100, oneDaily(fixedNow, 4))
+	expectLockedDue(mock, 100, oneDaily(fixedNow, domainfinance.MaxConsecutiveFailures-1))
 	expectSavepoint(mock)
 	expectReferences(mock, nil)
 	expectRollbackToSavepoint(mock)
 	mock.ExpectExec(sqlRe(`UPDATE "finance_recurring" SET "failure_count"=$1,"last_failure_code"=$2,"pause_reason"=$3,"paused"=$4,"updated_at"=$5`,
 		`WHERE (id = $6 AND space_id = $7)`)).
-		WithArgs(5, "GO_errors.errorString", "retry_exhausted", true, fixedNow, recurringID, spaceID).WillReturnResult(sqlmock.NewResult(0, 1))
+		WithArgs(domainfinance.MaxConsecutiveFailures, "GO_errors.errorString", "retry_exhausted", true, fixedNow, recurringID, spaceID).WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectCommit()
 
 	res, err := repo.PostDueRecurring(context.Background(), fixedNow, 100, 12, transientBuild)

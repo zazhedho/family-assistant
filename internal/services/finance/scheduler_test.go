@@ -26,6 +26,8 @@ type postFake struct {
 	txs   []domainfinance.Transaction
 	calls atomic.Int32
 	panic bool
+	// canned, when set, is returned as is instead of simulating posting.
+	canned *domainfinance.PostResult
 }
 
 func (f *postFake) PostDueRecurring(_ context.Context, now time.Time, limit, maxPer int, build domainfinance.RecurringBuildFunc) (domainfinance.PostResult, error) {
@@ -35,6 +37,9 @@ func (f *postFake) PostDueRecurring(_ context.Context, now time.Time, limit, max
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.canned != nil {
+		return *f.canned, nil
+	}
 	res := domainfinance.PostResult{Dropped: map[string]int{}}
 	for _, rec := range f.recs {
 		if limit == 0 {
@@ -332,5 +337,29 @@ func TestRunReturnsAtOnceOnCanceledContext(t *testing.T) {
 	NewScheduler(repo, financeMembers(domainspace.CategoryFinance), &auditFake{}, time.Hour, nil).Run(ctx)
 	if repo.calls.Load() != 0 {
 		t.Fatal("a canceled scheduler must not tick")
+	}
+}
+
+func TestTickRetryExhaustedAuditCarriesTheSanitizedFailureCode(t *testing.T) {
+	issue := domainfinance.RecurringIssue{
+		RecurringID: recID, SpaceID: spaceID, MemberID: memberID,
+		Reason: domainfinance.PauseRetryExhausted, Code: "SQLSTATE_40001",
+	}
+	repo := &postFake{canned: &domainfinance.PostResult{Paused: []domainfinance.RecurringIssue{issue}}}
+	audit := &auditFake{}
+	if err := newSched(repo, financeMembers(domainspace.CategoryFinance), audit).Tick(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if len(audit.events) != 1 {
+		t.Fatalf("events = %+v", audit.events)
+	}
+	ev := audit.events[0]
+	if ev.ErrorMessage != "retry_exhausted" || ev.Metadata["reason"] != "retry_exhausted" || ev.Metadata["code"] != "SQLSTATE_40001" {
+		t.Fatalf("event = %+v", ev)
+	}
+	for k, v := range ev.Metadata {
+		if k != "space_id" && k != "reason" && k != "paused" && k != "code" {
+			t.Errorf("unexpected metadata %s=%v", k, v)
+		}
 	}
 }

@@ -189,6 +189,9 @@ func (s *Scheduler) auditRun(ctx context.Context, b *templateBuilder, result dom
 		event.ErrorMessage = issue.Reason
 		event.Message = "recurring template paused"
 		event.Metadata["reason"], event.Metadata["paused"] = issue.Reason, true
+		if issue.Code != "" {
+			event.Metadata["code"] = issue.Code // sanitized SQLSTATE or error class, never error text
+		}
 		s.store(ctx, event)
 	}
 	for recurringID, dropped := range result.Dropped {
