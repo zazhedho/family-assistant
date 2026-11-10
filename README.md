@@ -85,6 +85,7 @@ System modules currently included:
 - Personal and shared Spaces, memberships, and invitations
 - Activities (generic notes and event records), including creation with a reminder
 - Reminders and optional WhatsApp delivery scheduler, with a Redis due-time index
+- Finance: accounts, categories, transactions, budgets, reports, and recurring transactions in finance Spaces (see [Finance](#finance))
 
 ## Project Structure
 
@@ -1404,6 +1405,118 @@ Default health check:
 
 ```text
 GET /healthcheck
+```
+
+## Finance
+
+Finance tracks money for a household inside a Space whose `category` is `finance`.
+Any other Space (family, personal) answers every finance tool with "not found", the
+same as a non-member does. Everything is reachable through MCP tools only; there are
+no HTTP routes. Migration `000013_create_finance_tables` adds the schema and the
+`finance` permissions.
+
+- Single currency: IDR, stored as `int64` whole rupiah (`1` to `1_000_000_000_000`
+  per transaction). No decimals and no floats anywhere.
+- Balances and reports are computed in SQL from the rows; nothing is stored. Account
+  balance is the opening balance plus income and incoming transfers minus expense and
+  outgoing transfers. Credit card balances can be negative and count in the total.
+- Months and weeks are calendar periods in `Asia/Jakarta` (WIB, UTC+7). A transaction
+  at 23:30 WIB on 30 November belongs to November even though it is already December
+  in UTC. Weeks start on Monday.
+- Accounts, categories, transactions, budgets, and recurring templates are
+  soft-deleted. An account or category that has transactions can only be archived;
+  past balances and reports do not change. Every write records an audit event.
+- Receipts, photos, and voice notes are read by the bot only. The bot extracts the
+  amount, merchant, and date and calls the tools; no file or image is stored by
+  Finance.
+
+### Tables
+
+| Table | Purpose |
+| --- | --- |
+| `finance_accounts` | Cash, bank, e-wallet, savings, or credit card accounts with an opening balance. Names are unique per Space, case-insensitive. |
+| `finance_categories` | Income and expense categories. Defaults (for example Makan, Transport, Gaji, Bonus, Lainnya) are created on the first list. The same name may exist once per kind. |
+| `finance_transactions` | Income, expense, and transfer rows. A transfer has a destination account and no category. |
+| `finance_budgets` | One expense budget per category per WIB month. |
+| `finance_recurring` | Recurring templates (daily, weekly, monthly) that the scheduler turns into transactions. |
+
+Every referenced account or category must belong to the same Space: composite foreign
+keys `(space_id, id)` enforce it in the database, and the services check it first. A
+recurring occurrence is unique by `(recurring_id, occurred_at)`, so it can never be
+posted twice.
+
+### Permissions
+
+Resource `finance`, actions `list`, `create`, `update`, `delete`, `manage`.
+
+| Role | list | create | update | delete | manage |
+| --- | --- | --- | --- | --- | --- |
+| Space owner / admin | yes | yes | yes | yes | yes |
+| Space member | yes | yes | own transactions only | no | no |
+| Space viewer | yes | no | no | no | no |
+
+`manage` covers accounts, categories, budgets, and recurring templates. Members
+create and list transactions and edit only the ones they created.
+
+### MCP tools
+
+All tools take `space` (UUID or name), like the activity tools.
+
+| Group | Tools |
+| --- | --- |
+| Accounts | `finance_account_create`, `finance_account_list`, `finance_account_update` |
+| Categories | `finance_category_create`, `finance_category_list`, `finance_category_update` |
+| Transactions | `finance_transaction_create`, `finance_transaction_list`, `finance_transaction_update`, `finance_transaction_delete` |
+| Budgets | `finance_budget_set`, `finance_budget_list`, `finance_budget_delete` |
+| Reports | `finance_balances`, `finance_summary` |
+| Recurring | `finance_recurring_create`, `finance_recurring_list`, `finance_recurring_update`, `finance_recurring_delete` |
+
+An expense in a budgeted category returns `budget_status` (budget, spent, remaining,
+percent used). Two identical creates within two minutes are both stored and the second
+returns `possible_duplicate` as a warning. `finance_summary` accepts `today`, `week`,
+`month` (default), `last_month`, and `custom`; it returns income, expense, net, the
+previous period, totals by category and account, and top merchants. Transfers count in
+neither income nor expense. Lists default to 50 rows and cap at 100.
+
+### Recurring scheduler
+
+The scheduler posts due recurring transactions and runs in-process. It is on by
+default.
+
+| Variable | Default |
+| --- | --- |
+| `FINANCE_RECURRING_ENABLED` | `true` (set `false` to turn it off) |
+| `FINANCE_RECURRING_INTERVAL` | `60s` (`2m`, `60s`, or plain seconds; below one second falls back to `60s`) |
+
+Posting happens inside one database transaction with row locks, so overlapping ticks or
+several instances never post an occurrence twice. After downtime it posts at most 12
+missed occurrences per template and drops older ones. A template whose account or
+category was archived or removed, or whose Space is no longer a finance Space, is
+paused with reason `reference_invalid` while the other templates keep posting. A
+template cannot start more than 24 hours in the past.
+
+### Limits
+
+- A budget month must lie within 24 months before or after the current WIB month.
+- A recurring template `start_at` may be at most 24 hours in the past.
+- Amounts are whole rupiah from 1 up to 1,000,000,000,000; zero, negative, fractional,
+  and larger values are rejected with a field error and nothing is written.
+- A transfer needs two different accounts and no category; archived accounts and
+  categories cannot be used for new transactions.
+
+### Finance integration test
+
+`internal/integration/finance_test.go` drives the real services and repositories
+against PostgreSQL: accounts, budgets, expense/income/transfer with exact balances and
+summaries, duplicate warning, authorization, cross-Space isolation, the composite
+foreign key, the WIB month boundary, recurring posting, and soft delete. It skips when
+`FAMILY_ASSISTANT_TEST_DATABASE_URL` is unset, applies the migrations itself, and
+resets the `public` schema, so use only the throwaway local test database described in
+[Local PostgreSQL databases](#local-postgresql-databases).
+
+```sh
+FAMILY_ASSISTANT_TEST_DATABASE_URL='postgres://<user>:<pass>@127.0.0.1:5432/family_assistant_test?sslmode=disable' \
+  go test ./internal/integration -run Finance -v
 ```
 
 ## Main Routes
