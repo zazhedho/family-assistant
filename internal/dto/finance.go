@@ -13,8 +13,8 @@ type AccountListInput struct {
 	Limit           int
 }
 
-// AccountUpdateInput renames and/or archives an account. Archived true sets
-// archived_at; unarchiving is not supported.
+// AccountUpdateInput renames, archives (Archived true) or unarchives
+// (Archived false) an account; nil leaves the archive state unchanged.
 type AccountUpdateInput struct {
 	Space    string
 	ID       string

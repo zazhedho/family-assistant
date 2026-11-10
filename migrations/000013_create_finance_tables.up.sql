@@ -23,6 +23,12 @@ CREATE INDEX IF NOT EXISTS ix_finance_accounts_space
     ON finance_accounts (space_id, created_at)
     WHERE deleted_at IS NULL;
 
+-- Account names are unique per Space (case and padding insensitive) so that
+-- resolving an account by name is never ambiguous.
+CREATE UNIQUE INDEX IF NOT EXISTS uq_finance_accounts_space_name
+    ON finance_accounts (space_id, lower(btrim(name)))
+    WHERE deleted_at IS NULL;
+
 CREATE TABLE IF NOT EXISTS finance_categories (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     space_id UUID NOT NULL REFERENCES spaces(id) ON DELETE CASCADE,
@@ -39,6 +45,10 @@ CREATE TABLE IF NOT EXISTS finance_categories (
 
 CREATE INDEX IF NOT EXISTS ix_finance_categories_space
     ON finance_categories (space_id, kind)
+    WHERE deleted_at IS NULL;
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_finance_categories_space_kind_name
+    ON finance_categories (space_id, kind, lower(btrim(name)))
     WHERE deleted_at IS NULL;
 
 CREATE TABLE IF NOT EXISTS finance_transactions (

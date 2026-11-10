@@ -50,7 +50,7 @@ func (s *service) CategoryCreate(ctx context.Context, actor domainidentity.Actor
 	now := time.Now().UTC()
 	category := &domainfinance.Category{ID: utils.CreateUUID(), SpaceID: spaceID, Name: name, Kind: kind, CreatedAt: now, UpdatedAt: now}
 	if err := s.repo.CreateCategory(ctx, category); err != nil {
-		return nil, err
+		return nil, mapUniqueViolation(err)
 	}
 	return category, nil
 }
@@ -94,21 +94,30 @@ func (s *service) CategoryList(ctx context.Context, actor domainidentity.ActorCo
 	return categories, nil
 }
 
-// CategoryUpdate renames and/or archives a category; it never deletes one.
+// categoryOps wires updateRow to the category repository methods. The loaded
+// row is stored in *row.
+func (s *service) categoryOps(ctx context.Context, spaceID string, row **domainfinance.Category) rowOps {
+	return rowOps{
+		load: func(id string) (err error) {
+			*row, err = s.repo.FindCategory(ctx, spaceID, id)
+			return err
+		},
+		current: func() (string, bool) { return (*row).Name, (*row).ArchivedAt != nil },
+		rename: func(name string) error {
+			(*row).Name = name
+			return s.repo.UpdateCategory(ctx, *row)
+		},
+		archive:   func(id string, at time.Time) error { return s.repo.ArchiveCategory(ctx, spaceID, id, at) },
+		unarchive: func(id string) error { return s.repo.UnarchiveCategory(ctx, spaceID, id) },
+	}
+}
+
+// CategoryUpdate renames, archives or unarchives a category; it never deletes one.
 func (s *service) CategoryUpdate(ctx context.Context, actor domainidentity.ActorContext, input dto.CategoryUpdateInput) (*domainfinance.Category, error) {
 	spaceID := resolveSpace(actor, input.Space)
 	var category *domainfinance.Category
-	load := func(id string) (err error) { category, err = s.repo.FindCategory(ctx, spaceID, id); return err }
-	err := s.updateRow(ctx, actor, spaceID, resourceCategory, input.ID, input.Name, input.Archived, rowOps{
-		load:    load,
-		current: func() (string, bool) { return category.Name, category.ArchivedAt != nil },
-		rename: func(name string) error {
-			category.Name = name
-			return s.repo.UpdateCategory(ctx, category)
-		},
-		archive: func(id string, at time.Time) error { return s.repo.ArchiveCategory(ctx, spaceID, id, at) },
-	})
-	if err != nil {
+	ops := s.categoryOps(ctx, spaceID, &category)
+	if err := s.updateRow(ctx, actor, spaceID, resourceCategory, input.ID, input.Name, input.Archived, ops); err != nil {
 		return nil, err
 	}
 	return category, nil

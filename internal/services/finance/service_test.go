@@ -17,6 +17,7 @@ import (
 	interfacefinance "family-assistant/internal/interfaces/finance"
 	interfacespace "family-assistant/internal/interfaces/space"
 	"family-assistant/internal/services/authorization"
+	"github.com/jackc/pgx/v5/pgconn"
 	"gorm.io/gorm"
 )
 
@@ -30,11 +31,14 @@ const (
 
 type repoFake struct {
 	interfacefinance.RepoFinanceInterface
-	mu         sync.Mutex
-	accounts   map[string]*domainfinance.Account
-	categories map[string]*domainfinance.Category
-	archiveCnt int
-	listDelay  time.Duration
+	mu           sync.Mutex
+	accounts     map[string]*domainfinance.Account
+	categories   map[string]*domainfinance.Category
+	archiveCnt   int
+	unarchiveCnt int
+	seedCalls    int
+	createErr    error
+	updateErr    error
 }
 
 func newRepo() *repoFake {
@@ -44,6 +48,9 @@ func newRepo() *repoFake {
 func (r *repoFake) CreateAccount(_ context.Context, a *domainfinance.Account) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if r.createErr != nil {
+		return r.createErr
+	}
 	c := *a
 	r.accounts[a.ID] = &c
 	return nil
@@ -75,6 +82,9 @@ func (r *repoFake) FindAccount(_ context.Context, space, id string) (*domainfina
 func (r *repoFake) UpdateAccount(_ context.Context, a *domainfinance.Account) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if r.updateErr != nil {
+		return r.updateErr
+	}
 	cur, ok := r.accounts[a.ID]
 	if !ok || cur.SpaceID != a.SpaceID {
 		return gorm.ErrRecordNotFound
@@ -98,6 +108,9 @@ func (r *repoFake) ArchiveAccount(_ context.Context, space, id string, at time.T
 func (r *repoFake) CreateCategory(_ context.Context, c *domainfinance.Category) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if r.createErr != nil {
+		return r.createErr
+	}
 	cp := *c
 	r.categories[c.ID] = &cp
 	return nil
@@ -105,16 +118,58 @@ func (r *repoFake) CreateCategory(_ context.Context, c *domainfinance.Category) 
 
 func (r *repoFake) ListCategories(_ context.Context, space string, includeArchived bool) ([]domainfinance.Category, error) {
 	r.mu.Lock()
+	defer r.mu.Unlock()
 	var out []domainfinance.Category
 	for _, c := range r.categories {
 		if c.SpaceID == space && (includeArchived || c.ArchivedAt == nil) {
 			out = append(out, *c)
 		}
 	}
-	d := r.listDelay
-	r.mu.Unlock()
-	time.Sleep(d)
 	return out, nil
+}
+
+func (r *repoFake) UnarchiveAccount(_ context.Context, space, id string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	a, ok := r.accounts[id]
+	if !ok || a.SpaceID != space {
+		return gorm.ErrRecordNotFound
+	}
+	a.ArchivedAt = nil
+	r.unarchiveCnt++
+	return nil
+}
+
+func (r *repoFake) UnarchiveCategory(_ context.Context, space, id string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	c, ok := r.categories[id]
+	if !ok || c.SpaceID != space {
+		return gorm.ErrRecordNotFound
+	}
+	c.ArchivedAt = nil
+	r.unarchiveCnt++
+	return nil
+}
+
+// SeedDefaultCategories models the repository: atomic, and a no-op when the
+// Space already has a category row of any state.
+func (r *repoFake) SeedDefaultCategories(_ context.Context, space string, defaults []domainfinance.Category) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.seedCalls++
+	for _, c := range r.categories {
+		if c.SpaceID == space {
+			return nil
+		}
+	}
+	for i, d := range defaults {
+		d.SpaceID = space
+		d.ID = fmt.Sprintf("seed-%s-%d", space, i)
+		cp := d
+		r.categories[d.ID] = &cp
+	}
+	return nil
 }
 
 func (r *repoFake) FindCategory(_ context.Context, space, id string) (*domainfinance.Category, error) {
@@ -131,6 +186,9 @@ func (r *repoFake) FindCategory(_ context.Context, space, id string) (*domainfin
 func (r *repoFake) UpdateCategory(_ context.Context, c *domainfinance.Category) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if r.updateErr != nil {
+		return r.updateErr
+	}
 	cur, ok := r.categories[c.ID]
 	if !ok || cur.SpaceID != c.SpaceID {
 		return gorm.ErrRecordNotFound
@@ -311,7 +369,6 @@ func TestDefaultCategoriesNotReseededWhenAllArchived(t *testing.T) {
 
 func TestDefaultCategoriesConcurrentFirstCallsDoNotDuplicate(t *testing.T) {
 	repo := newRepo()
-	repo.listDelay = 20 * time.Millisecond
 	svc := newSvc(repo, financeSpaces(domainspace.CategoryFinance), &auditFake{})
 	var wg sync.WaitGroup
 	for i := 0; i < 8; i++ {
@@ -326,6 +383,9 @@ func TestDefaultCategoriesConcurrentFirstCallsDoNotDuplicate(t *testing.T) {
 	wg.Wait()
 	if len(repo.categories) != 11 {
 		t.Fatalf("categories = %d, want 11", len(repo.categories))
+	}
+	if repo.seedCalls == 0 {
+		t.Fatal("seeding must go through the repository")
 	}
 }
 
@@ -405,9 +465,115 @@ func TestArchiveAccountKeepsTransactions(t *testing.T) {
 	if !repo.accounts[acctID].ArchivedAt.Equal(first) || repo.archiveCnt != 1 {
 		t.Fatal("archiving twice must not restamp")
 	}
+}
+
+func TestUnarchiveClearsArchivedAtAndKeepsRow(t *testing.T) {
+	repo := newRepo()
+	repo.accounts[acctID] = &domainfinance.Account{ID: acctID, SpaceID: spaceID, Name: "Kas", Type: "cash"}
+	repo.categories[otherID] = &domainfinance.Category{ID: otherID, SpaceID: spaceID, Name: "Hobi", Kind: "expense"}
+	svc := newSvc(repo, financeSpaces(domainspace.CategoryFinance), &auditFake{})
+	a := actorWith("finance:manage")
+	ctx := context.Background()
+	yes, no := true, false
+
+	if _, err := svc.AccountUpdate(ctx, a, dto.AccountUpdateInput{ID: acctID, Archived: &yes}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := svc.AccountUpdate(ctx, a, dto.AccountUpdateInput{ID: acctID, Archived: &no})
+	if err != nil || got.ArchivedAt != nil || repo.accounts[acctID].ArchivedAt != nil || len(repo.accounts) != 1 {
+		t.Fatalf("account unarchive: %+v %v", got, err)
+	}
+	if _, err := svc.CategoryUpdate(ctx, a, dto.CategoryUpdateInput{ID: otherID, Archived: &yes}); err != nil {
+		t.Fatal(err)
+	}
+	gotCat, err := svc.CategoryUpdate(ctx, a, dto.CategoryUpdateInput{ID: otherID, Archived: &no})
+	if err != nil || gotCat.ArchivedAt != nil || repo.categories[otherID].ArchivedAt != nil {
+		t.Fatalf("category unarchive: %+v %v", gotCat, err)
+	}
+	if repo.unarchiveCnt != 2 {
+		t.Fatalf("unarchive calls = %d, want 2", repo.unarchiveCnt)
+	}
+}
+
+func TestUnarchiveOfNonArchivedRowIsNoOp(t *testing.T) {
+	repo := newRepo()
+	repo.accounts[acctID] = &domainfinance.Account{ID: acctID, SpaceID: spaceID, Name: "Kas", Type: "cash"}
+	repo.categories[otherID] = &domainfinance.Category{ID: otherID, SpaceID: spaceID, Name: "Hobi", Kind: "expense"}
+	svc := newSvc(repo, financeSpaces(domainspace.CategoryFinance), &auditFake{})
+	a := actorWith("finance:manage")
 	no := false
-	_, err = svc.AccountUpdate(context.Background(), actorWith("finance:manage"), dto.AccountUpdateInput{ID: acctID, Archived: &no})
-	vErr(t, err, "archived")
+	if _, err := svc.AccountUpdate(context.Background(), a, dto.AccountUpdateInput{ID: acctID, Archived: &no}); err != nil {
+		t.Fatalf("account: %v", err)
+	}
+	if _, err := svc.CategoryUpdate(context.Background(), a, dto.CategoryUpdateInput{ID: otherID, Archived: &no}); err != nil {
+		t.Fatalf("category: %v", err)
+	}
+	if repo.unarchiveCnt != 0 || repo.archiveCnt != 0 {
+		t.Fatalf("no-op must not write: unarchive=%d archive=%d", repo.unarchiveCnt, repo.archiveCnt)
+	}
+}
+
+func uniqueViolation() error { return &pgconn.PgError{Code: "23505"} }
+
+func TestUniqueViolationMapsToNameAlreadyExists(t *testing.T) {
+	repo := newRepo()
+	repo.accounts[acctID] = &domainfinance.Account{ID: acctID, SpaceID: spaceID, Name: "Kas", Type: "cash"}
+	repo.categories[otherID] = &domainfinance.Category{ID: otherID, SpaceID: spaceID, Name: "Hobi", Kind: "expense"}
+	svc := newSvc(repo, financeSpaces(domainspace.CategoryFinance), &auditFake{})
+	a := actorWith("finance:manage")
+	ctx := context.Background()
+	name := "Baru"
+
+	repo.updateErr = uniqueViolation()
+	_, err := svc.AccountUpdate(ctx, a, dto.AccountUpdateInput{ID: acctID, Name: &name})
+	vErr(t, err, "name")
+	_, err = svc.CategoryUpdate(ctx, a, dto.CategoryUpdateInput{ID: otherID, Name: &name})
+	vErr(t, err, "name")
+	repo.updateErr = nil
+
+	repo.createErr = uniqueViolation()
+	_, err = svc.AccountCreate(ctx, a, dto.AccountCreateInput{Name: "Kas", Type: "cash"})
+	vErr(t, err, "name")
+	_, err = svc.CategoryCreate(ctx, a, dto.CategoryCreateInput{Name: "Hobi", Kind: "expense"})
+	vErr(t, err, "name")
+	var ve *authorization.ValidationError
+	if errors.As(err, &ve) && ve.Reason != "already exists" {
+		t.Fatalf("reason = %q", ve.Reason)
+	}
+
+	repo.createErr = errors.New("other db error")
+	if _, err = svc.AccountCreate(ctx, a, dto.AccountCreateInput{Name: "Kas2", Type: "cash"}); err == nil || errors.As(err, &ve) {
+		t.Fatalf("non-unique errors must pass through, got %v", err)
+	}
+}
+
+func TestAuditDoesNotStoreUnvalidatedInput(t *testing.T) {
+	repo := newRepo()
+	audit := &auditFake{}
+	svc := newSvc(repo, financeSpaces(domainspace.CategoryFinance), audit)
+	a := actorWith("finance:manage")
+	junk := strings.Repeat("A", 5000)
+	name := "x"
+	_, _ = svc.AccountCreate(context.Background(), a, dto.AccountCreateInput{Space: junk, Name: "Kas", Type: "cash"})
+	_, _ = svc.AccountUpdate(context.Background(), a, dto.AccountUpdateInput{ID: junk, Name: &name})
+	_, _ = svc.CategoryUpdate(context.Background(), a, dto.CategoryUpdateInput{Space: junk, ID: junk, Name: &name})
+	if len(audit.events) != 3 {
+		t.Fatalf("events = %d", len(audit.events))
+	}
+	for _, e := range audit.events {
+		if len(e.ResourceID) > 36 || e.ResourceID != "" {
+			t.Errorf("resource id stored: %q", e.ResourceID)
+		}
+		if got, _ := e.Metadata["space_id"].(string); len(got) > 36 || (got != "" && got != spaceID) {
+			t.Errorf("space_id stored: %q", got)
+		}
+	}
+	// A valid UUID is kept.
+	audit.events = nil
+	_, _ = svc.AccountUpdate(context.Background(), a, dto.AccountUpdateInput{ID: acctID, Name: &name})
+	if len(audit.events) != 1 || audit.events[0].ResourceID != acctID {
+		t.Fatalf("valid id must be audited: %+v", audit.events)
+	}
 }
 
 func TestAccountUpdateRenameAndScope(t *testing.T) {

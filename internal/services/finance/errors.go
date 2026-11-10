@@ -8,6 +8,7 @@ import (
 	domainfinance "family-assistant/internal/domain/finance"
 	serviceauthorization "family-assistant/internal/services/authorization"
 	"family-assistant/utils"
+	"github.com/jackc/pgx/v5/pgconn"
 	"gorm.io/gorm"
 )
 
@@ -86,18 +87,35 @@ func validateUpdate(rawID string, name *string, archived *bool) (id, newName str
 	return id, newName, nil
 }
 
-// wantArchive reports whether an update must archive a row that is
-// (currentlyArchived) already archived or not. Unarchiving is not supported by
-// the repository, so asking for it on an archived row is a validation error.
-func wantArchive(archived *bool, currentlyArchived bool) (bool, error) {
-	if archived == nil {
-		return false, nil
+// archiveChange is what an update does to archived_at.
+type archiveChange int
+
+const (
+	archiveNoop archiveChange = iota
+	archiveSet
+	archiveClear
+)
+
+// wantArchive turns the tri-state Archived flag into an action. Both
+// directions are idempotent: archiving an archived row or unarchiving a live
+// one is a no-op, so archived_at is never re-stamped.
+func wantArchive(archived *bool, currentlyArchived bool) archiveChange {
+	switch {
+	case archived == nil, *archived == currentlyArchived:
+		return archiveNoop
+	case *archived:
+		return archiveSet
+	default:
+		return archiveClear
 	}
-	if !*archived {
-		if currentlyArchived {
-			return false, validationError("archived", "unarchiving is not supported")
-		}
-		return false, nil
+}
+
+// mapUniqueViolation maps a Postgres unique violation (23505) to a name
+// ValidationError; other errors pass through.
+func mapUniqueViolation(err error) error {
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+		return validationError("name", "already exists")
 	}
-	return !currentlyArchived, nil
+	return err
 }

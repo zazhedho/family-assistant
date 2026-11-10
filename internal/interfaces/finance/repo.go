@@ -18,6 +18,8 @@ type RepoFinanceInterface interface {
 	// UpdateAccount writes name, type and opening balance of account.ID.
 	UpdateAccount(ctx context.Context, account *domainfinance.Account) error
 	ArchiveAccount(ctx context.Context, spaceID, id string, at time.Time) error
+	// UnarchiveAccount clears archived_at (writes NULL).
+	UnarchiveAccount(ctx context.Context, spaceID, id string) error
 
 	CreateCategory(ctx context.Context, category *domainfinance.Category) error
 	ListCategories(ctx context.Context, spaceID string, includeArchived bool) ([]domainfinance.Category, error)
@@ -25,6 +27,13 @@ type RepoFinanceInterface interface {
 	// UpdateCategory writes name and kind of category.ID.
 	UpdateCategory(ctx context.Context, category *domainfinance.Category) error
 	ArchiveCategory(ctx context.Context, spaceID, id string, at time.Time) error
+	// UnarchiveCategory clears archived_at (writes NULL).
+	UnarchiveCategory(ctx context.Context, spaceID, id string) error
+	// SeedDefaultCategories inserts defaults in one transaction guarded by a
+	// per-Space advisory lock, and only when the Space has no category row of
+	// any state (archived and soft-deleted included). It is idempotent and safe
+	// across app instances; each default gets SpaceID and, when empty, an id.
+	SeedDefaultCategories(ctx context.Context, spaceID string, defaults []domainfinance.Category) error
 
 	CreateTransaction(ctx context.Context, tx *domainfinance.Transaction) error
 	FindTransaction(ctx context.Context, spaceID, id string) (*domainfinance.Transaction, error)

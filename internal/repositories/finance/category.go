@@ -7,6 +7,9 @@ import (
 
 	domainfinance "family-assistant/internal/domain/finance"
 	"family-assistant/utils"
+
+	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 func (r *Repository) CreateCategory(ctx context.Context, category *domainfinance.Category) error {
@@ -65,4 +68,40 @@ func (r *Repository) ArchiveCategory(ctx context.Context, spaceID, id string, at
 		return err
 	}
 	return updateScoped(r.db(ctx), &domainfinance.Category{}, spaceID, id, stamp("archived_at", at))
+}
+
+func (r *Repository) UnarchiveCategory(ctx context.Context, spaceID, id string) error {
+	if err := requireSpaceAndID(spaceID, id); err != nil {
+		return err
+	}
+	return updateScoped(r.db(ctx), &domainfinance.Category{}, spaceID, id, clearArchive(time.Now().UTC()))
+}
+
+func (r *Repository) SeedDefaultCategories(ctx context.Context, spaceID string, defaults []domainfinance.Category) error {
+	if err := requireSpace(spaceID); err != nil {
+		return err
+	}
+	return r.db(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Exec("SELECT pg_advisory_xact_lock(hashtext(?))", spaceID).Error; err != nil {
+			return err
+		}
+		// Unscoped: a row of any state (archived, soft-deleted) means the Space
+		// was already seeded.
+		var existing int64
+		if err := tx.Unscoped().Model(&domainfinance.Category{}).Where("space_id = ?", spaceID).Count(&existing).Error; err != nil {
+			return err
+		}
+		if existing > 0 || len(defaults) == 0 {
+			return nil
+		}
+		rows := make([]domainfinance.Category, len(defaults))
+		for i, def := range defaults {
+			def.SpaceID = spaceID
+			if strings.TrimSpace(def.ID) == "" {
+				def.ID = utils.CreateUUID()
+			}
+			rows[i] = def
+		}
+		return tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&rows).Error
+	})
 }

@@ -66,3 +66,10 @@ func (r *Repository) ArchiveAccount(ctx context.Context, spaceID, id string, at 
 	}
 	return updateScoped(r.db(ctx), &domainfinance.Account{}, spaceID, id, stamp("archived_at", at))
 }
+
+func (r *Repository) UnarchiveAccount(ctx context.Context, spaceID, id string) error {
+	if err := requireSpaceAndID(spaceID, id); err != nil {
+		return err
+	}
+	return updateScoped(r.db(ctx), &domainfinance.Account{}, spaceID, id, clearArchive(time.Now().UTC()))
+}

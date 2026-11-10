@@ -56,6 +56,11 @@ func stamp(column string, at time.Time) map[string]any {
 	return map[string]any{column: at, "updated_at": at}
 }
 
+// clearArchive writes NULL to archived_at (a nil map value is written as NULL).
+func clearArchive(at time.Time) map[string]any {
+	return map[string]any{"archived_at": nil, "updated_at": at}
+}
+
 func checkAffected(result *gorm.DB) error {
 	if result.Error != nil {
 		return result.Error

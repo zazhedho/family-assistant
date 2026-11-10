@@ -13,10 +13,11 @@ import (
 // row into the caller's variable (and is called again to refresh it after the
 // writes), current reports its name and archived state.
 type rowOps struct {
-	load    func(id string) error
-	current func() (name string, archived bool)
-	rename  func(name string) error
-	archive func(id string, at time.Time) error
+	load      func(id string) error
+	current   func() (name string, archived bool)
+	rename    func(name string) error
+	archive   func(id string, at time.Time) error
+	unarchive func(id string) error
 }
 
 // updateRow is the shared update flow of accounts and categories: validate,
@@ -40,19 +41,20 @@ func (s *service) updateRow(ctx context.Context, actor domainidentity.ActorConte
 		return notFound(err)
 	}
 	currentName, isArchived := ops.current()
-	archive, err := wantArchive(archived, isArchived)
-	if err != nil {
-		return err
-	}
+	change := wantArchive(archived, isArchived)
 	if name != nil && newName != currentName {
 		if err = ops.rename(newName); err != nil {
-			return notFound(err)
+			return notFound(mapUniqueViolation(err))
 		}
 	}
-	if archive {
-		if err = ops.archive(id, time.Now().UTC()); err != nil {
-			return notFound(err)
-		}
+	switch change {
+	case archiveSet:
+		err = ops.archive(id, time.Now().UTC())
+	case archiveClear:
+		err = ops.unarchive(id)
+	}
+	if err != nil {
+		return notFound(err)
 	}
 	return notFound(ops.load(id))
 }

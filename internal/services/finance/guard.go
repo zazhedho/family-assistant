@@ -3,7 +3,6 @@ package servicefinance
 import (
 	"context"
 	"strings"
-	"sync"
 	"time"
 
 	domainauthorization "family-assistant/internal/domain/authorization"
@@ -50,32 +49,15 @@ var defaultCategories = []defaultCategory{
 	{"Gaji", domainfinance.TypeIncome}, {"Bonus", domainfinance.TypeIncome}, {"Lainnya", domainfinance.TypeIncome},
 }
 
-// ensureDefaultCategories seeds the default categories when the Space has no
-// category at all (archived ones count, so archiving every default never
-// re-seeds). It is idempotent. The migration has no unique index on category
-// names, so concurrent first calls are serialized per Space with an in-process
-// lock around check-then-create; this does not cover several app instances.
+// ensureDefaultCategories seeds the default categories through the repository,
+// which does it in one transaction under a per-Space advisory lock and only
+// when the Space has no category row of any state. It is idempotent and safe
+// for concurrent first calls, also across app instances.
 func (s *service) ensureDefaultCategories(ctx context.Context, spaceID string) error {
-	lock, _ := s.seedLocks.LoadOrStore(spaceID, &sync.Mutex{})
-	mu := lock.(*sync.Mutex)
-	mu.Lock()
-	defer mu.Unlock()
-
-	existing, err := s.repo.ListCategories(ctx, spaceID, true)
-	if err != nil {
-		return err
-	}
-	if len(existing) > 0 {
-		return nil
-	}
+	defaults := make([]domainfinance.Category, len(defaultCategories))
 	now := time.Now().UTC()
-	for _, def := range defaultCategories {
-		category := &domainfinance.Category{
-			ID: utils.CreateUUID(), SpaceID: spaceID, Name: def.name, Kind: def.kind, CreatedAt: now, UpdatedAt: now,
-		}
-		if err := s.repo.CreateCategory(ctx, category); err != nil {
-			return err
-		}
+	for i, def := range defaultCategories {
+		defaults[i] = domainfinance.Category{ID: utils.CreateUUID(), SpaceID: spaceID, Name: def.name, Kind: def.kind, CreatedAt: now, UpdatedAt: now}
 	}
-	return nil
+	return s.repo.SeedDefaultCategories(ctx, spaceID, defaults)
 }

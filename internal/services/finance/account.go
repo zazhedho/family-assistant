@@ -54,7 +54,7 @@ func (s *service) AccountCreate(ctx context.Context, actor domainidentity.ActorC
 		CreatedAt: now, UpdatedAt: now,
 	}
 	if err := s.repo.CreateAccount(ctx, account); err != nil {
-		return nil, err
+		return nil, mapUniqueViolation(err)
 	}
 	return account, nil
 }
@@ -83,8 +83,8 @@ func (s *service) AccountList(ctx context.Context, actor domainidentity.ActorCon
 	return accounts, nil
 }
 
-// AccountUpdate renames and/or archives an account. Archiving only sets
-// archived_at; the account and its transactions are never deleted.
+// AccountUpdate renames, archives or unarchives an account. Archiving only
+// sets archived_at; the account and its transactions are never deleted.
 func (s *service) AccountUpdate(ctx context.Context, actor domainidentity.ActorContext, input dto.AccountUpdateInput) (*domainfinance.Account, error) {
 	spaceID := resolveSpace(actor, input.Space)
 	var account *domainfinance.Account
@@ -96,7 +96,8 @@ func (s *service) AccountUpdate(ctx context.Context, actor domainidentity.ActorC
 			account.Name = name
 			return s.repo.UpdateAccount(ctx, account)
 		},
-		archive: func(id string, at time.Time) error { return s.repo.ArchiveAccount(ctx, spaceID, id, at) },
+		archive:   func(id string, at time.Time) error { return s.repo.ArchiveAccount(ctx, spaceID, id, at) },
+		unarchive: func(id string) error { return s.repo.UnarchiveAccount(ctx, spaceID, id) },
 	})
 	if err != nil {
 		return nil, err

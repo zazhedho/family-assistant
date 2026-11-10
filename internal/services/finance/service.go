@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"strings"
-	"sync"
 
 	domainaudit "family-assistant/internal/domain/audit"
 	domainidentity "family-assistant/internal/domain/identity"
@@ -12,6 +11,8 @@ import (
 	interfacefinance "family-assistant/internal/interfaces/finance"
 	interfacespace "family-assistant/internal/interfaces/space"
 	serviceauthorization "family-assistant/internal/services/authorization"
+
+	"github.com/google/uuid"
 )
 
 const (
@@ -37,10 +38,6 @@ type service struct {
 	spaces    interfacespace.RepoSpaceInterface
 	authorize interfaceauthorization.Authorizer
 	audit     auditStore
-
-	// seedLocks serializes default-category seeding per Space inside this
-	// process; the schema has no unique (space, kind, name) index to rely on.
-	seedLocks sync.Map
 }
 
 func NewService(repo interfacefinance.RepoFinanceInterface, spaces interfacespace.RepoSpaceInterface, authorize interfaceauthorization.Authorizer, audit auditStore) interfacefinance.ServiceFinanceInterface {
@@ -80,7 +77,8 @@ func clampLimit(limit int) (int, error) {
 func financeAuditEvent(actor domainidentity.ActorContext, action, resource, spaceID, resourceID, status string) domainaudit.AuditEvent {
 	actorUserID := strings.TrimSpace(actor.UserID)
 	actorRole := strings.TrimSpace(actor.RoleName)
-	metadata := map[string]any{"space_id": strings.TrimSpace(spaceID)}
+	spaceID, resourceID = auditID(spaceID), auditID(resourceID)
+	metadata := map[string]any{"space_id": spaceID}
 	if initiator := strings.TrimSpace(actor.InitiatorUserID); initiator != "" {
 		actorUserID = initiator
 		if actor.UserID != initiator {
@@ -93,7 +91,7 @@ func financeAuditEvent(actor domainidentity.ActorContext, action, resource, spac
 	return domainaudit.AuditEvent{
 		ActorUserID: actorUserID, ActorMemberID: strings.TrimSpace(actor.MemberID), ActorRole: actorRole,
 		Source: auditSource(actor.Source), Channel: strings.TrimSpace(actor.Channel), AgentProfile: strings.TrimSpace(actor.ExternalID),
-		Action: action, Resource: resource, ResourceID: strings.TrimSpace(resourceID), Status: status, Metadata: metadata,
+		Action: action, Resource: resource, ResourceID: resourceID, Status: status, Metadata: metadata,
 	}
 }
 
@@ -106,6 +104,16 @@ func (s *service) auditResult(ctx context.Context, actor domainidentity.ActorCon
 	event := financeAuditEvent(actor, action, resource, spaceID, resourceID, domainaudit.StatusFailed)
 	event.ErrorMessage = failureCategory(err)
 	s.writeAudit(ctx, event)
+}
+
+// auditID returns v only when it is a UUID. Caller input is unvalidated when a
+// failed request is audited, so anything else is dropped rather than stored.
+func auditID(v string) string {
+	v = strings.TrimSpace(v)
+	if _, err := uuid.Parse(v); err != nil {
+		return ""
+	}
+	return v
 }
 
 func (s *service) writeAudit(ctx context.Context, event domainaudit.AuditEvent) {
