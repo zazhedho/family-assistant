@@ -282,8 +282,8 @@ func TestFinanceEndToEnd(t *testing.T) {
 			res := must(t, got(env.svc.TransactionCreate(ctx, f.owner, dto.TransactionCreateInput{
 				Space: f.id, Type: kind, Amount: 1_000, Account: "Kas", Category: "Lainnya",
 			})))
-			if got := kindOf[*res.Transaction.CategoryID]; got != kind {
-				t.Fatalf("%s transaction resolved Lainnya of kind %q", kind, got)
+			if resolved := kindOf[*res.Transaction.CategoryID]; resolved != kind {
+				t.Fatalf("%s transaction resolved Lainnya of kind %q", kind, resolved)
 			}
 		}
 		_, err := env.svc.TransactionList(ctx, f.owner, dto.TransactionListInput{Space: f.id, Category: "Lainnya"})
@@ -324,8 +324,8 @@ func testFinanceAuthorization(t *testing.T, env *financeEnv) {
 	// A member creates, lists and edits their own rows only.
 	own := must(t, got(env.svc.TransactionCreate(ctx, f.member, create))).Transaction
 	ownerTx := must(t, got(env.svc.TransactionCreate(ctx, f.owner, dto.TransactionCreateInput{Space: f.id, Type: "expense", Amount: 7_000, Account: "Kas", Category: "Makan"}))).Transaction
-	if got := must(t, got(env.svc.TransactionList(ctx, f.member, dto.TransactionListInput{Space: f.id}))); len(got) != 2 {
-		t.Fatalf("member list = %d rows, want 2", len(got))
+	if rows := must(t, got(env.svc.TransactionList(ctx, f.member, dto.TransactionListInput{Space: f.id}))); len(rows) != 2 {
+		t.Fatalf("member list = %d rows, want 2", len(rows))
 	}
 	note := "edited"
 	must(t, got(env.svc.TransactionUpdate(ctx, f.member, f.id, own.ID, dto.TransactionUpdateInput{Note: &note})))
@@ -416,23 +416,56 @@ func testFinanceConstraints(t *testing.T, env *financeEnv) {
 	}
 }
 
+// testFinanceWIBBoundary pins the service's own month derivation: budgets are
+// keyed by the WIB month of the transaction, so a service that used UTC months
+// would attach the 23:30 WIB expense to December (or the 00:30 WIB one to
+// November) and the exact budget_status values below would differ.
 func testFinanceWIBBoundary(t *testing.T, env *financeEnv) {
 	ctx := context.Background()
 	f := env.newSpace(t, "finance")
 	env.account(t, f, "Kas", "cash", 0)
+	for _, month := range []string{"2026-11", "2026-12"} {
+		must(t, got(env.svc.BudgetSet(ctx, f.owner, dto.BudgetSetInput{Space: f.id, Category: "Makan", Month: month, Amount: 100_000})))
+	}
 	novLast := time.Date(2026, 11, 30, 16, 30, 0, 0, time.UTC)  // 23:30 WIB on 30 Nov
 	decFirst := time.Date(2026, 11, 30, 17, 30, 0, 0, time.UTC) // 00:30 WIB on 1 Dec
-	for amount, at := range map[int64]time.Time{1_000: novLast, 2_000: decFirst} {
-		must(t, got(env.svc.TransactionCreate(ctx, f.owner, dto.TransactionCreateInput{
+	spent := func(month string) int64 {
+		list := must(t, got(env.svc.BudgetList(ctx, f.owner, f.id, month)))
+		if len(list) != 1 {
+			t.Fatalf("budgets of %s = %+v, want one", month, list)
+		}
+		return list[0].Spent
+	}
+	expense := func(amount int64, at time.Time) *dto.TransactionResult {
+		return must(t, got(env.svc.TransactionCreate(ctx, f.owner, dto.TransactionCreateInput{
 			Space: f.id, Type: "expense", Amount: amount, Account: "Kas", Category: "Makan", OccurredAt: at,
 		})))
 	}
+
+	first := expense(1_000, novLast)
+	if first.BudgetStatus == nil {
+		t.Fatal("23:30 WIB expense returned no budget_status")
+	}
+	wantInt(t, "November budget spent after the 23:30 WIB expense", first.BudgetStatus.Spent, 1_000)
+	wantInt(t, "November budget remaining", first.BudgetStatus.Remaining, 99_000)
+	wantInt(t, "December budget spent before any December expense", spent("2026-12"), 0)
+
+	second := expense(2_000, decFirst)
+	if second.BudgetStatus == nil {
+		t.Fatal("00:30 WIB expense returned no budget_status")
+	}
+	wantInt(t, "December budget spent by the 00:30 WIB expense alone", second.BudgetStatus.Spent, 2_000)
+	wantInt(t, "December budget remaining", second.BudgetStatus.Remaining, 98_000)
+	wantInt(t, "November budget spent", spent("2026-11"), 1_000)
+	wantInt(t, "December budget spent", spent("2026-12"), 2_000)
+
+	// Report ranges built from the same instants (SQL range filtering).
 	novFrom, decFrom := time.Date(2026, 10, 31, 17, 0, 0, 0, time.UTC), time.Date(2026, 11, 30, 17, 0, 0, 0, time.UTC)
 	janFrom := time.Date(2026, 12, 31, 17, 0, 0, 0, time.UTC)
 	nov := must(t, got(env.svc.Summary(ctx, f.owner, dto.SummaryInput{Space: f.id, Period: "custom", From: &novFrom, To: &decFrom})))
 	dec := must(t, got(env.svc.Summary(ctx, f.owner, dto.SummaryInput{Space: f.id, Period: "custom", From: &decFrom, To: &janFrom})))
-	wantInt(t, "November expense (WIB)", nov.Expense, 1_000)
-	wantInt(t, "December expense (WIB)", dec.Expense, 2_000)
+	wantInt(t, "November expense (WIB range)", nov.Expense, 1_000)
+	wantInt(t, "December expense (WIB range)", dec.Expense, 2_000)
 }
 
 func testFinanceRecurring(t *testing.T, env *financeEnv) {
