@@ -158,3 +158,49 @@ CREATE TABLE IF NOT EXISTS finance_recurring (
 CREATE INDEX IF NOT EXISTS ix_finance_recurring_due
     ON finance_recurring (next_run_at)
     WHERE deleted_at IS NULL AND paused = FALSE;
+
+INSERT INTO menu_items (id, name, display_name, path, icon, order_index, is_active)
+VALUES
+    ('22222222-2222-4222-8222-000000000006', 'finance', 'Finance', '/finance', 'bi-wallet2', 910, TRUE)
+ON CONFLICT (name) DO UPDATE SET
+    display_name = EXCLUDED.display_name,
+    path = EXCLUDED.path,
+    icon = EXCLUDED.icon,
+    order_index = EXCLUDED.order_index,
+    is_active = EXCLUDED.is_active,
+    deleted_at = NULL,
+    updated_at = CURRENT_TIMESTAMP;
+
+INSERT INTO permissions (id, name, display_name, resource, action) VALUES
+    ('33333333-3333-4333-8333-000000000029', 'list_finance', 'List Finance', 'finance', 'list'),
+    ('33333333-3333-4333-8333-000000000030', 'create_finance', 'Create Finance', 'finance', 'create'),
+    ('33333333-3333-4333-8333-000000000031', 'update_finance', 'Update Finance', 'finance', 'update'),
+    ('33333333-3333-4333-8333-000000000032', 'delete_finance', 'Delete Finance', 'finance', 'delete'),
+    ('33333333-3333-4333-8333-000000000033', 'manage_finance', 'Manage Finance', 'finance', 'manage')
+ON CONFLICT (name) DO UPDATE SET
+    display_name = EXCLUDED.display_name,
+    resource = EXCLUDED.resource,
+    action = EXCLUDED.action,
+    deleted_at = NULL,
+    updated_at = CURRENT_TIMESTAMP;
+
+INSERT INTO role_permissions (id, role_id, permission_id)
+SELECT md5('space-rbac:' || r.name || ':' || p.name)::uuid, r.id, p.id
+FROM roles r
+JOIN permissions p ON p.resource = 'finance' AND p.name IN ('list_finance', 'create_finance', 'update_finance', 'delete_finance', 'manage_finance') AND p.deleted_at IS NULL
+WHERE r.name IN ('space_owner', 'space_admin') AND r.deleted_at IS NULL
+ON CONFLICT DO NOTHING;
+
+INSERT INTO role_permissions (id, role_id, permission_id)
+SELECT md5('space-rbac:' || r.name || ':' || p.name)::uuid, r.id, p.id
+FROM roles r
+JOIN permissions p ON p.resource = 'finance' AND p.name IN ('list_finance', 'create_finance', 'update_finance') AND p.deleted_at IS NULL
+WHERE r.name = 'space_member' AND r.deleted_at IS NULL
+ON CONFLICT DO NOTHING;
+
+INSERT INTO role_permissions (id, role_id, permission_id)
+SELECT md5('space-rbac:' || r.name || ':' || p.name)::uuid, r.id, p.id
+FROM roles r
+JOIN permissions p ON p.resource = 'finance' AND p.name IN ('list_finance') AND p.deleted_at IS NULL
+WHERE r.name = 'space_viewer' AND r.deleted_at IS NULL
+ON CONFLICT DO NOTHING;

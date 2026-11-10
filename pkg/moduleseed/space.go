@@ -12,6 +12,7 @@ var spaceGrants = map[string]map[string][]string{
 		"invitations": {"create", "list", "delete"},
 		"reminders":   {"list", "view", "create", "update", "delete"},
 		"activities":  {"list", "create", "update", "delete"},
+		"finance":     {"list", "create", "update", "delete", "manage"},
 	},
 	"space_admin": {
 		"spaces":      {"list", "view", "update", "delete"},
@@ -19,23 +20,26 @@ var spaceGrants = map[string]map[string][]string{
 		"invitations": {"create", "list", "delete"},
 		"reminders":   {"list", "view", "create", "update", "delete"},
 		"activities":  {"list", "create", "update", "delete"},
+		"finance":     {"list", "create", "update", "delete", "manage"},
 	},
 	"space_member": {
 		"spaces":     {"list", "view"},
 		"members":    {"list", "view"},
 		"reminders":  {"list", "view", "create", "update", "delete"},
 		"activities": {"list", "create", "update", "delete"},
+		"finance":    {"list", "create", "update"},
 	},
 	"space_viewer": {
 		"spaces":     {"list", "view"},
 		"members":    {"list", "view"},
 		"reminders":  {"list", "view"},
 		"activities": {"list"},
+		"finance":    {"list"},
 	},
 }
 
 var spaceRoleOrder = []string{"space_owner", "space_admin", "space_member", "space_viewer"}
-var spaceResourceOrder = []string{"spaces", "members", "invitations", "reminders", "activities"}
+var spaceResourceOrder = []string{"spaces", "members", "invitations", "reminders", "activities", "finance"}
 
 type spaceRole struct {
 	ID, Name, DisplayName, Description string
@@ -105,18 +109,41 @@ var spaceModules = []spaceModule{
 			"create": "33333333-3333-4333-8333-000000000012",
 		},
 	},
+	{
+		ID: "22222222-2222-4222-8222-000000000006", Name: "finance", DisplayName: "Finance", Path: "/finance", Icon: "bi-wallet2", OrderIndex: 910,
+		Actions: []string{"list", "create", "update", "delete", "manage"},
+		PermissionIDs: map[string]string{
+			"list":   "33333333-3333-4333-8333-000000000029",
+			"create": "33333333-3333-4333-8333-000000000030",
+			"update": "33333333-3333-4333-8333-000000000031",
+			"delete": "33333333-3333-4333-8333-000000000032",
+			"manage": "33333333-3333-4333-8333-000000000033",
+		},
+	},
 }
 
 // RenderSpaceSQL returns the idempotent role, menu, permission, and grant seed
 // for the Space modules. Seed-owned rows use stable IDs for exact rollback.
 func RenderSpaceSQL() (string, error) {
+	return renderSpaceSQL(nil)
+}
+
+// renderSpaceSQL renders the seed, omitting the resources in skip. Migration
+// 000008 is frozen and predates later resources, so its test skips them.
+func renderSpaceSQL(skip map[string]bool) (string, error) {
 	sections := []string{renderSpaceRoles()}
 	for _, module := range spaceModules {
+		if skip[module.Name] {
+			continue
+		}
 		sections = append(sections, renderSpaceMenu(module), renderSpacePermissions(module))
 	}
 
 	for _, roleName := range spaceRoleOrder {
 		for _, resource := range spaceResourceOrder {
+			if skip[resource] {
+				continue
+			}
 			actions := spaceGrants[roleName][resource]
 			if len(actions) == 0 {
 				continue

@@ -95,8 +95,8 @@ func TestRenderSpaceSQLUsesExactGrantMatrix(t *testing.T) {
 			"activities": {"list"},
 		},
 	}
-	if got := strings.Count(sql, "INSERT INTO role_permissions"); got != 18 {
-		t.Fatalf("grant statements: got %d, want 18", got)
+	if got := strings.Count(sql, "INSERT INTO role_permissions"); got != 22 {
+		t.Fatalf("grant statements: got %d, want 22", got)
 	}
 
 	for role, resources := range want {
@@ -117,7 +117,8 @@ func TestRenderSpaceSQLUsesExactGrantMatrix(t *testing.T) {
 }
 
 func TestSpaceSeedMigrationUsesRenderedSeed(t *testing.T) {
-	want, err := RenderSpaceSQL()
+	// Migration 000008 is applied and frozen; finance is seeded by 000013.
+	want, err := renderSpaceSQL(map[string]bool{"finance": true})
 	if err != nil {
 		t.Fatalf("render space seed: %v", err)
 	}
@@ -132,5 +133,39 @@ func TestSpaceSeedMigrationUsesRenderedSeed(t *testing.T) {
 	got = strings.TrimPrefix(got, "-- Space roles and module permissions are rendered through pkg/moduleseed.\n")
 	if got != want {
 		t.Fatalf("migration differs from rendered seed")
+	}
+}
+
+func TestFinanceGrantsMatchPolicy(t *testing.T) {
+	sql, err := RenderSpaceSQL()
+	if err != nil {
+		t.Fatalf("render space seed: %v", err)
+	}
+	want := map[string][]string{
+		"space_owner":  {"list", "create", "update", "delete", "manage"},
+		"space_admin":  {"list", "create", "update", "delete", "manage"},
+		"space_member": {"list", "create", "update"},
+		"space_viewer": {"list"},
+	}
+	for role, actions := range want {
+		names := make([]string, len(actions))
+		for i, action := range actions {
+			names[i] = "'" + action + "_finance'"
+		}
+		fragment := fmt.Sprintf(
+			"JOIN permissions p ON p.resource = 'finance' AND p.name IN (%s) AND p.deleted_at IS NULL\nWHERE r.name IN ('%s')",
+			strings.Join(names, ", "), role,
+		)
+		if !strings.Contains(sql, fragment) {
+			t.Errorf("missing exact finance grant for %s", role)
+		}
+	}
+	for _, fragment := range []string{
+		"'finance', 'Finance', '/finance', 'bi-wallet2', 910, TRUE",
+		"'manage_finance'",
+	} {
+		if !strings.Contains(sql, fragment) {
+			t.Errorf("seed missing %q", fragment)
+		}
 	}
 }
