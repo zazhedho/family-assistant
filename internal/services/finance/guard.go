@@ -17,12 +17,19 @@ import (
 // member of spaceID and the Space to be a finance Space. A non-member and a
 // non-finance Space return the same ErrNotFound as a missing Space.
 func (s *service) guard(ctx context.Context, actor domainidentity.ActorContext, spaceID, permission string) error {
+	_, err := s.guardMember(ctx, actor, spaceID, permission)
+	return err
+}
+
+// guardMember is guard that also returns the id of the actor's active member
+// row, which is what created_by_member_id must hold.
+func (s *service) guardMember(ctx context.Context, actor domainidentity.ActorContext, spaceID, permission string) (string, error) {
 	if err := s.authorize.Authorize(ctx, actor, permission, domainauthorization.Resource{SpaceID: spaceID}); err != nil {
-		return err
+		return "", err
 	}
 	members, err := s.spaces.ListActiveMembers(ctx, spaceID)
 	if err != nil {
-		return err
+		return "", err
 	}
 	memberID := strings.TrimSpace(actor.MemberID)
 	userID := strings.TrimSpace(actor.UserID)
@@ -32,12 +39,12 @@ func (s *service) guard(ctx context.Context, actor domainidentity.ActorContext, 
 		}
 		if (memberID != "" && strings.TrimSpace(member.ID) == memberID) || (memberID == "" && strings.TrimSpace(member.UserID) == userID) {
 			if strings.TrimSpace(member.SpaceCategory) != domainspace.CategoryFinance {
-				return serviceauthorization.ErrNotFound
+				return "", serviceauthorization.ErrNotFound
 			}
-			return nil
+			return strings.TrimSpace(member.ID), nil
 		}
 	}
-	return serviceauthorization.ErrNotFound
+	return "", serviceauthorization.ErrNotFound
 }
 
 type defaultCategory struct{ name, kind string }
