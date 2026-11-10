@@ -24,9 +24,10 @@ const (
 )
 
 var (
-	ErrMoneyFormat    = errors.New("amount must be a plain decimal number such as 25000 or 1005422.44 (digits with an optional '.' and 1 or 2 decimals; no thousands separators, commas, spaces, '+' or exponent)")
-	ErrMoneyPrecision = errors.New("amount has at most 2 decimal places, no rounding is done")
-	ErrAmountTooLarge = errors.New("amount exceeds the limit of 10000000000 rupiah")
+	// The messages read after the field name ("invalid input: amount <message>").
+	ErrMoneyFormat    = errors.New("is not a valid amount: use a plain decimal like 1005422.44, without thousands separators, commas, spaces, '+' or exponent")
+	ErrMoneyPrecision = errors.New("has too many decimals: at most 2 decimal places, no rounding is done")
+	ErrAmountTooLarge = errors.New("is too large: it exceeds the maximum of 10000000000.00")
 )
 
 // ParseMoney parses strict decimal text into sen: an optional leading '-'
@@ -103,9 +104,12 @@ func (m Money) String() string {
 	return fmt.Sprintf("%s%d.%02d", sign, whole, frac)
 }
 
-// MarshalJSON renders the amount as a JSON number with the String text.
+// MarshalJSON renders the amount as a JSON string with the String text, e.g.
+// "1005422.44". It is a string, not a number, because the MCP SDK passes
+// structured output through float64, which would change the text (0.50 would
+// become 0.5); strings pass through untouched.
 func (m Money) MarshalJSON() ([]byte, error) {
-	return []byte(m.String()), nil
+	return []byte(`"` + m.String() + `"`), nil
 }
 
 // UnmarshalJSON accepts a JSON number or a JSON string holding the decimal

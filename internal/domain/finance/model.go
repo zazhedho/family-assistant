@@ -173,7 +173,7 @@ type BudgetStatus struct {
 // NewBudgetStatus computes remaining (negative when over budget) and the
 // integer percent used, floor(spent*100/budget), 0 when budget is 0. The
 // percent is computed without multiplying spent by 100 first, so it cannot
-// overflow int64 for any input.
+// overflow for amounts within MaxAmount (sen).
 func NewBudgetStatus(categoryID string, budget, spent Money) BudgetStatus {
 	s := BudgetStatus{CategoryID: categoryID, Budget: budget, Spent: spent, Remaining: budget - spent}
 	if budget > 0 && spent > 0 {

@@ -23,7 +23,7 @@ func TestFinanceRecurringCreateMapsInput(t *testing.T) {
 	service := &mcpFinanceServiceStub{recResult: financeTestRecurring()}
 	day := 10
 	got, err := FinanceRecurringCreate(mcpExternalContext(), financeResolver(), service, FinanceRecurringCreateInput{
-		Space: "Family", Type: "transfer", Amount: 500000, Account: "BCA", ToAccount: "Cash", Category: "Tabungan", Merchant: "Kos", Note: "rent",
+		Space: "Family", Type: "transfer", Amount: "500000", Account: "BCA", ToAccount: "Cash", Category: "Tabungan", Merchant: "Kos", Note: "rent",
 		Frequency: "monthly", IntervalN: 2, DayOfMonth: &day, StartAt: "2026-11-10T07:30:00+07:00", EndAt: "2027-11-10T00:00:00+07:00",
 	})
 	if err != nil {
@@ -39,7 +39,7 @@ func TestFinanceRecurringCreateMapsInput(t *testing.T) {
 	out := encodeToMap(t, got)
 	if out["start_at"] != "2026-11-10T07:30:00+07:00" || out["next_run_at"] != "2026-12-10T07:30:00+07:00" || out["end_at"] != "2027-11-10T00:00:00+07:00" ||
 		out["created_at"] != "2026-11-10T00:30:00Z" || out["pause_reason"] != "account archived" || out["paused"] != true || out["day_of_month"] != float64(10) ||
-		out["amount"] != float64(500000) || out["frequency"] != "monthly" {
+		out["amount"] != "500000" || out["frequency"] != "monthly" {
 		t.Fatalf("output = %v", out)
 	}
 }
@@ -48,7 +48,7 @@ func TestFinanceRecurringCreateNilOptionals(t *testing.T) {
 	r := financeTestRecurring()
 	r.EndAt, r.DayOfMonth, r.PauseReason, r.Paused = nil, nil, nil, false
 	service := &mcpFinanceServiceStub{recResult: r}
-	got, err := FinanceRecurringCreate(mcpExternalContext(), financeResolver(), service, FinanceRecurringCreateInput{Space: "Family", StartAt: "2026-11-10T07:30:00+07:00"})
+	got, err := FinanceRecurringCreate(mcpExternalContext(), financeResolver(), service, FinanceRecurringCreateInput{Space: "Family", Amount: "1", StartAt: "2026-11-10T07:30:00+07:00"})
 	if err != nil {
 		t.Fatalf("finance_recurring_create: %v", err)
 	}
@@ -67,9 +67,9 @@ func TestFinanceRecurringRejectsBadInputBeforeService(t *testing.T) {
 	service := &mcpFinanceServiceStub{}
 	ctx := mcpExternalContext()
 	id := "00000000-0000-0000-0000-000000000042"
-	_, err := FinanceRecurringCreate(ctx, financeResolver(), service, FinanceRecurringCreateInput{Space: "Family", StartAt: ""})
+	_, err := FinanceRecurringCreate(ctx, financeResolver(), service, FinanceRecurringCreateInput{Space: "Family", Amount: "1", StartAt: ""})
 	assertMCPCode(t, err, "invalid_input")
-	_, err = FinanceRecurringCreate(ctx, financeResolver(), service, FinanceRecurringCreateInput{Space: "Family", StartAt: "2026-11-10T07:30:00+07:00", EndAt: "tomorrow"})
+	_, err = FinanceRecurringCreate(ctx, financeResolver(), service, FinanceRecurringCreateInput{Space: "Family", Amount: "1", StartAt: "2026-11-10T07:30:00+07:00", EndAt: "tomorrow"})
 	assertMCPCode(t, err, "invalid_input")
 	bad := "tomorrow"
 	_, err = FinanceRecurringUpdate(ctx, financeResolver(), service, FinanceRecurringUpdateInput{Space: "Family", ID: id, StartAt: &bad})
@@ -108,7 +108,7 @@ func TestFinanceRecurringListMapsInputAndEncodes(t *testing.T) {
 func TestFinanceRecurringUpdateMapsInput(t *testing.T) {
 	id := "00000000-0000-0000-0000-000000000042"
 	service := &mcpFinanceServiceStub{recResult: financeTestRecurring()}
-	typ, amount, account, toAccount, category, merchant, note, freq := "income", int64(750000), "Cash", "", "", "Gaji", "salary", "weekly"
+	typ, amount, account, toAccount, category, merchant, note, freq := "income", MoneyInput("750000"), "Cash", "", "", "Gaji", "salary", "weekly"
 	interval, day, paused := 3, 5, false
 	start, end := "2026-11-10T08:00:00+07:00", "2027-01-01T00:00:00+07:00"
 	_, err := FinanceRecurringUpdate(mcpExternalContext(), financeResolver(), service, FinanceRecurringUpdateInput{

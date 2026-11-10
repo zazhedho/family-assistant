@@ -60,7 +60,7 @@ func assertDescriptionHas(t *testing.T, descriptions map[string]string, tool str
 func TestFinanceTransactionCreateMapsInput(t *testing.T) {
 	service := &mcpFinanceServiceStub{txResult: &dto.TransactionResult{Transaction: financeTestTransaction()}}
 	_, err := FinanceTransactionCreate(mcpExternalContext(), financeResolver(), service, FinanceTransactionCreateInput{
-		Space: "Family", Type: "transfer", Amount: 25000, Account: "BCA", ToAccount: "Cash", Category: "Makan",
+		Space: "Family", Type: "transfer", Amount: "25000", Account: "BCA", ToAccount: "Cash", Category: "Makan",
 		Merchant: "Warung", Note: "lunch", OccurredAt: "2026-11-10T07:30:00+07:00",
 	})
 	if err != nil {
@@ -76,7 +76,7 @@ func TestFinanceTransactionCreateMapsInput(t *testing.T) {
 
 func TestFinanceTransactionCreateBlankOccurredAtMeansNow(t *testing.T) {
 	service := &mcpFinanceServiceStub{txResult: &dto.TransactionResult{Transaction: financeTestTransaction()}}
-	if _, err := FinanceTransactionCreate(mcpExternalContext(), financeResolver(), service, FinanceTransactionCreateInput{Space: "Family", Type: "expense", Amount: 1}); err != nil {
+	if _, err := FinanceTransactionCreate(mcpExternalContext(), financeResolver(), service, FinanceTransactionCreateInput{Space: "Family", Type: "expense", Amount: "1"}); err != nil {
 		t.Fatalf("finance_transaction_create: %v", err)
 	}
 	if !service.txCreate.OccurredAt.IsZero() {
@@ -118,12 +118,12 @@ func TestCreateOutputCarriesDuplicateAndBudget(t *testing.T) {
 	dup.ID = "tx-0"
 	budget := domainfinance.BudgetStatus{CategoryID: "cat-1", Budget: 10000000, Spent: 8500000, Remaining: 1500000, PercentUsed: 85}
 	service := &mcpFinanceServiceStub{txResult: &dto.TransactionResult{Transaction: tx, PossibleDuplicate: &dup, BudgetStatus: &budget}}
-	got, err := FinanceTransactionCreate(mcpExternalContext(), financeResolver(), service, FinanceTransactionCreateInput{Space: "Family"})
+	got, err := FinanceTransactionCreate(mcpExternalContext(), financeResolver(), service, FinanceTransactionCreateInput{Space: "Family", Amount: "1"})
 	if err != nil || got == nil {
 		t.Fatalf("finance_transaction_create: %v", err)
 	}
 	out := encodeToMap(t, got)
-	if out["id"] != "tx-1" || out["amount"] != float64(25000) || out["type"] != "expense" || out["account_id"] != "acc-1" || out["category_id"] != "cat-1" ||
+	if out["id"] != "tx-1" || out["amount"] != "25000" || out["type"] != "expense" || out["account_id"] != "acc-1" || out["category_id"] != "cat-1" ||
 		out["merchant"] != "Warung" || out["note"] != "lunch" || out["space_id"] != financeTestSpaceID {
 		t.Fatalf("transaction fields = %v", out)
 	}
@@ -132,14 +132,14 @@ func TestCreateOutputCarriesDuplicateAndBudget(t *testing.T) {
 		t.Fatalf("possible_duplicate = %v", out["possible_duplicate"])
 	}
 	status, _ := out["budget_status"].(map[string]any)
-	if status["percent_used"] != float64(85) || status["spent"] != float64(85000) || status["remaining"] != float64(15000) || status["budget"] != float64(100000) {
+	if status["percent_used"] != float64(85) || status["spent"] != "85000" || status["remaining"] != "15000" || status["budget"] != "100000" {
 		t.Fatalf("budget_status = %v", out["budget_status"])
 	}
 }
 
 func TestCreateOutputOmitsAbsentDuplicateAndBudgetAndRendersWIB(t *testing.T) {
 	service := &mcpFinanceServiceStub{txResult: &dto.TransactionResult{Transaction: financeTestTransaction()}}
-	got, err := FinanceTransactionCreate(mcpExternalContext(), financeResolver(), service, FinanceTransactionCreateInput{Space: "Family"})
+	got, err := FinanceTransactionCreate(mcpExternalContext(), financeResolver(), service, FinanceTransactionCreateInput{Space: "Family", Amount: "1"})
 	if err != nil {
 		t.Fatalf("finance_transaction_create: %v", err)
 	}
@@ -196,7 +196,7 @@ func TestFinanceTransactionListNilBoundsAndOutput(t *testing.T) {
 func TestFinanceTransactionUpdateMapsInput(t *testing.T) {
 	id := "00000000-0000-0000-0000-000000000042"
 	service := &mcpFinanceServiceStub{txResult: &dto.TransactionResult{Transaction: financeTestTransaction()}}
-	typ, amount, account, toAccount, category, merchant, note, at := "expense", int64(30000), "Cash", "", "", "Kantin", "snack", "2026-11-10T08:00:00+07:00"
+	typ, amount, account, toAccount, category, merchant, note, at := "expense", MoneyInput("30000"), "Cash", "", "", "Kantin", "snack", "2026-11-10T08:00:00+07:00"
 	got, err := FinanceTransactionUpdate(mcpExternalContext(), financeResolver(), service, FinanceTransactionUpdateInput{
 		Space: "Family", ID: " " + id + " ", Type: &typ, Amount: &amount, Account: &account, ToAccount: &toAccount,
 		Category: &category, Merchant: &merchant, Note: &note, OccurredAt: &at,

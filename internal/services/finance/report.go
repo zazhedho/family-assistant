@@ -18,7 +18,7 @@ var errBalanceOverflow = errors.New("balance total overflows int64")
 // Balances returns the balance of every non-archived account, sorted by name,
 // and their sum. The repository computes balances in SQL and also returns
 // archived accounts, which are filtered here. One balance is bounded by
-// opening +/- 1e12 per transaction, so the sum cannot realistically overflow;
+// opening +/- MaxAmount (1e12 sen) per transaction, so the sum cannot realistically overflow;
 // it is still checked so a wrapped total can never be shown as truth.
 func (s *service) Balances(ctx context.Context, actor domainidentity.ActorContext, spaceArg string) (report *dto.BalancesReport, err error) {
 	spaceID := resolveSpace(actor, spaceArg)

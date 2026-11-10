@@ -19,6 +19,8 @@ func TestParseMoneyTable(t *testing.T) {
 		{"0", false, 0},
 		{"-0.01", true, -1},
 		{"-5", true, -500},
+		{"00012", false, 1200},
+		{"-0", true, 0},
 	}
 	for _, c := range valid {
 		got, err := ParseMoney(c.in, c.neg)
@@ -42,6 +44,13 @@ func TestParseMoneyTable(t *testing.T) {
 		{"5.123", false, ErrMoneyPrecision},
 		{"abc", false, ErrMoneyFormat},
 		{"-5", false, ErrMoneyFormat},
+		{"-0", false, ErrMoneyFormat},
+		{"\u0661\u0662", false, ErrMoneyFormat}, // Arabic-Indic digits
+		{"\uff11\uff12", false, ErrMoneyFormat}, // full-width digits
+		{"1..2", false, ErrMoneyFormat},
+		{"0x10", false, ErrMoneyFormat},
+		{"1_000", false, ErrMoneyFormat},
+		{"5\n", false, ErrMoneyFormat},
 		{"-", true, ErrMoneyFormat},
 		{"10000000000.01", false, ErrAmountTooLarge},
 		{"99999999999999999999", false, ErrAmountTooLarge},
@@ -91,7 +100,7 @@ func TestMoneyJSONRoundTrip(t *testing.T) {
 	marshal := []struct {
 		m    Money
 		want string
-	}{{2500000, "25000"}, {100542244, "1005422.44"}, {50, "0.50"}, {-1, "-0.01"}}
+	}{{2500000, `"25000"`}, {100542244, `"1005422.44"`}, {50, `"0.50"`}, {-1, `"-0.01"`}, {0, `"0"`}, {-MaxAmount, `"-10000000000"`}}
 	for _, c := range marshal {
 		b, err := json.Marshal(c.m)
 		if err != nil || string(b) != c.want {

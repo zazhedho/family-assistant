@@ -77,14 +77,14 @@ func FinanceBalances(ctx context.Context, resolver interfaceidentity.Resolver, s
 }
 
 func registerFinanceReportTools(server *mcpsdk.Server, resolver interfaceidentity.Resolver, service interfacefinance.ServiceFinanceInterface) {
-	addTool(server, &mcpsdk.Tool{
+	addFinanceTool(server, &mcpsdk.Tool{
 		Name: "finance_summary",
 		Description: "Income, expense and net for a period with the previous period, plus by_category and top_merchants (EXPENSE only) and by_account (income and expense per account). period is today, week (Monday start), month, last_month or custom, all in WIB; blank means month. from (inclusive) and to (exclusive), RFC3339 with offset, at most 366 days apart, apply to custom only: with a blank period they imply custom (both are then required), with any other period they are rejected. from and to in the result are WIB. Transfers count in neither income nor expense. Answer spending questions only from this tool's output." +
 			financeNoMathRules + " Any member can read." + financeRules,
 	}, func(ctx context.Context, input FinanceSummaryInput) (*FinanceSummaryOutput, error) {
 		return FinanceSummary(ctx, resolver, service, input)
 	})
-	addTool(server, &mcpsdk.Tool{
+	addFinanceTool(server, &mcpsdk.Tool{
 		Name: "finance_balances",
 		Description: "Current balance of every non-archived money account and their total (opening balance plus all transactions). A credit card balance is negative (money owed) and is included in the total. Answer balance questions only from this tool's output." +
 			financeNoMathRules + " Any member can read." + financeRules,

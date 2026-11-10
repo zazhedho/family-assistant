@@ -6,7 +6,7 @@ import (
 	"time"
 )
 
-var ErrInvalidAmount = errors.New("amount must be between 0.01 and 10000000000 rupiah")
+var ErrInvalidAmount = errors.New("must be greater than 0 and at most 10000000000.00 rupiah")
 
 // ValidateAmount checks 1 <= v <= MaxAmount (sen).
 func ValidateAmount(v Money) error {

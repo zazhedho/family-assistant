@@ -12,7 +12,7 @@ import (
 func TestFinanceBudgetSetMapsInput(t *testing.T) {
 	budget := &domainfinance.Budget{ID: "b-1", SpaceID: financeTestSpaceID, CategoryID: "cat-1", Month: time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC), Amount: 200000000}
 	service := &mcpFinanceServiceStub{budgetResult: budget}
-	got, err := FinanceBudgetSet(mcpExternalContext(), financeResolver(), service, FinanceBudgetSetInput{Space: "Family", Category: "Makan", Month: "2026-11", Amount: 2000000})
+	got, err := FinanceBudgetSet(mcpExternalContext(), financeResolver(), service, FinanceBudgetSetInput{Space: "Family", Category: "Makan", Month: "2026-11", Amount: "2000000"})
 	if err != nil {
 		t.Fatalf("finance_budget_set: %v", err)
 	}
@@ -21,7 +21,7 @@ func TestFinanceBudgetSetMapsInput(t *testing.T) {
 		t.Fatalf("input = %+v", service.budgetSet)
 	}
 	out := encodeToMap(t, got)
-	if out["id"] != "b-1" || out["category_id"] != "cat-1" || out["month"] != "2026-11" || out["amount"] != float64(2000000) || out["space_id"] != financeTestSpaceID {
+	if out["id"] != "b-1" || out["category_id"] != "cat-1" || out["month"] != "2026-11" || out["amount"] != "2000000" || out["space_id"] != financeTestSpaceID {
 		t.Fatalf("output = %v", out)
 	}
 }
@@ -53,7 +53,7 @@ func TestFinanceBudgetListReturnsStatuses(t *testing.T) {
 		t.Fatalf("month = %q, want blank (current month)", service.budgetMonth)
 	}
 	out := mustJSON(t, got)
-	for _, want := range []string{`"category_name":"Makan"`, `"percent_used":85`, `"spent":85000`, `"remaining":15000`, `"budget":100000`} {
+	for _, want := range []string{`"category_name":"Makan"`, `"percent_used":85`, `"spent":"85000"`, `"remaining":"15000"`, `"budget":"100000"`} {
 		if !strings.Contains(out, want) {
 			t.Errorf("output lacks %s: %s", want, out)
 		}

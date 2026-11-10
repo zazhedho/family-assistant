@@ -32,12 +32,12 @@ func TestFinanceSummaryMapsInputAndRendersWIB(t *testing.T) {
 	}
 	out := encodeToMap(t, got)
 	if out["from"] != "2026-11-10T00:00:00+07:00" || out["to"] != "2026-12-01T00:00:00+07:00" || out["period"] != "custom" ||
-		out["income"] != float64(5000000) || out["expense"] != float64(1250000) || out["net"] != float64(3750000) ||
-		out["previous_income"] != float64(4000000) || out["previous_expense"] != float64(900000) {
+		out["income"] != "5000000" || out["expense"] != "1250000" || out["net"] != "3750000" ||
+		out["previous_income"] != "4000000" || out["previous_expense"] != "900000" {
 		t.Fatalf("output = %v", out)
 	}
 	encoded := mustJSON(t, got)
-	for _, want := range []string{`"by_category":[{"category_id":"cat-1","name":"Makan","total":1250000}]`, `"top_merchants":[{"merchant":"Warung","total":250000,"count":4}]`, `"by_account":[{"account_id":"acc-1"`} {
+	for _, want := range []string{`"by_category":[{"category_id":"cat-1","name":"Makan","total":"1250000"}]`, `"top_merchants":[{"merchant":"Warung","total":"250000","count":4}]`, `"by_account":[{"account_id":"acc-1"`} {
 		if !strings.Contains(encoded, want) {
 			t.Errorf("output lacks %s: %s", want, encoded)
 		}
@@ -86,7 +86,7 @@ func TestFinanceBalancesMapsInput(t *testing.T) {
 		t.Fatalf("space = %s", service.balancesSpace)
 	}
 	encoded := mustJSON(t, got)
-	if !strings.Contains(encoded, `"balance":-200000`) || !strings.Contains(encoded, `"total":1300000`) || !strings.Contains(encoded, `"name":"BCA"`) {
+	if !strings.Contains(encoded, `"balance":"-200000"`) || !strings.Contains(encoded, `"total":"1300000"`) || !strings.Contains(encoded, `"name":"BCA"`) {
 		t.Fatalf("output = %s", encoded)
 	}
 }
@@ -94,7 +94,7 @@ func TestFinanceBalancesMapsInput(t *testing.T) {
 func TestFinanceBalancesEmptyEncodesAsArray(t *testing.T) {
 	service := &mcpFinanceServiceStub{balances: &dto.BalancesReport{}}
 	got, err := FinanceBalances(mcpExternalContext(), financeResolver(), service, FinanceBalancesInput{Space: "Family"})
-	if err != nil || mustJSON(t, got) != `{"accounts":[],"total":0}` {
+	if err != nil || mustJSON(t, got) != `{"accounts":[],"total":"0"}` {
 		t.Fatalf("output = %s, %v", mustJSON(t, got), err)
 	}
 }
@@ -111,7 +111,7 @@ func TestFinanceNewToolsMapServiceErrors(t *testing.T) {
 	space := "Family"
 	calls := map[string]func(*mcpFinanceServiceStub) error{
 		"transaction_create": func(s *mcpFinanceServiceStub) error {
-			_, err := FinanceTransactionCreate(ctx, financeResolver(), s, FinanceTransactionCreateInput{Space: space})
+			_, err := FinanceTransactionCreate(ctx, financeResolver(), s, FinanceTransactionCreateInput{Space: space, Amount: "1"})
 			return err
 		},
 		"transaction_list": func(s *mcpFinanceServiceStub) error {
@@ -127,7 +127,7 @@ func TestFinanceNewToolsMapServiceErrors(t *testing.T) {
 			return err
 		},
 		"budget_set": func(s *mcpFinanceServiceStub) error {
-			_, err := FinanceBudgetSet(ctx, financeResolver(), s, FinanceBudgetSetInput{Space: space})
+			_, err := FinanceBudgetSet(ctx, financeResolver(), s, FinanceBudgetSetInput{Space: space, Amount: "1"})
 			return err
 		},
 		"budget_list": func(s *mcpFinanceServiceStub) error {
@@ -139,7 +139,7 @@ func TestFinanceNewToolsMapServiceErrors(t *testing.T) {
 			return err
 		},
 		"recurring_create": func(s *mcpFinanceServiceStub) error {
-			_, err := FinanceRecurringCreate(ctx, financeResolver(), s, FinanceRecurringCreateInput{Space: space, StartAt: "2026-11-10T07:30:00+07:00"})
+			_, err := FinanceRecurringCreate(ctx, financeResolver(), s, FinanceRecurringCreateInput{Space: space, Amount: "1", StartAt: "2026-11-10T07:30:00+07:00"})
 			return err
 		},
 		"recurring_list": func(s *mcpFinanceServiceStub) error {

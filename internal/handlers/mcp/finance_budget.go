@@ -14,10 +14,10 @@ import (
 )
 
 type FinanceBudgetSetInput struct {
-	Space    string `json:"space,omitempty" jsonschema:"finance Space UUID or exact user-facing name. In a private chat always name the finance Space: a blank value selects the Personal Space, which is never a finance Space (not found). In a group or other shared chat blank selects the bound Space"`
-	Category string `json:"category" jsonschema:"expense category UUID or exact name, from finance_category_list"`
-	Month    string `json:"month" jsonschema:"calendar month in WIB as YYYY-MM, e.g. 2026-11"`
-	Amount   int64  `json:"amount" jsonschema:"monthly budget as a positive integer in whole rupiah, e.g. 2000000 for Rp 2.000.000"`
+	Space    string     `json:"space,omitempty" jsonschema:"finance Space UUID or exact user-facing name. In a private chat always name the finance Space: a blank value selects the Personal Space, which is never a finance Space (not found). In a group or other shared chat blank selects the bound Space"`
+	Category string     `json:"category" jsonschema:"expense category UUID or exact name, from finance_category_list"`
+	Month    string     `json:"month" jsonschema:"calendar month in WIB as YYYY-MM, e.g. 2026-11"`
+	Amount   MoneyInput `json:"amount" jsonschema:"monthly budget in rupiah, positive, with up to two decimals, e.g. 2000000 or 1005422.44 (also 25000), as a number or a string ('.' decimal separator, no thousands separators)"`
 }
 
 type FinanceBudgetListInput struct {
@@ -47,8 +47,12 @@ type FinanceBudgetListOutput struct {
 }
 
 func FinanceBudgetSet(ctx context.Context, resolver interfaceidentity.Resolver, service interfacefinance.ServiceFinanceInterface, input FinanceBudgetSetInput) (*FinanceBudgetOutput, error) {
+	amount, err := financeAmount(input.Amount, "amount")
+	if err != nil {
+		return nil, err
+	}
 	return financeCall(ctx, resolver, service, input.Space, func(actor domainidentity.ActorContext, spaceID string) (*FinanceBudgetOutput, error) {
-		budget, err := service.BudgetSet(ctx, actor, dto.BudgetSetInput{Space: spaceID, Category: input.Category, Month: input.Month, Amount: wholeRupiah(input.Amount)})
+		budget, err := service.BudgetSet(ctx, actor, dto.BudgetSetInput{Space: spaceID, Category: input.Category, Month: input.Month, Amount: amount})
 		if err != nil {
 			return nil, err
 		}
@@ -77,21 +81,21 @@ func FinanceBudgetDelete(ctx context.Context, resolver interfaceidentity.Resolve
 }
 
 func registerFinanceBudgetTools(server *mcpsdk.Server, resolver interfaceidentity.Resolver, service interfacefinance.ServiceFinanceInterface) {
-	addTool(server, &mcpsdk.Tool{
+	addFinanceTool(server, &mcpsdk.Tool{
 		Name: "finance_budget_set",
-		Description: "Set (or replace) the monthly budget of one expense category for a month. month is YYYY-MM (WIB calendar month), within +-24 months of the current month. Budgets exist only for expense categories, not income. amount is whole rupiah (2000000 = Rp 2.000.000). category is a UUID or exact name from finance_category_list." +
+		Description: "Set (or replace) the monthly budget of one expense category for a month. month is YYYY-MM (WIB calendar month), within +-24 months of the current month. Budgets exist only for expense categories, not income. amount is rupiah with up to two decimals (2000000 = Rp 2.000.000; 25000; 1005422.44). category is a UUID or exact name from finance_category_list." +
 			financeAdminOnly + financeRules,
 	}, func(ctx context.Context, input FinanceBudgetSetInput) (*FinanceBudgetOutput, error) {
 		return FinanceBudgetSet(ctx, resolver, service, input)
 	})
-	addTool(server, &mcpsdk.Tool{
+	addFinanceTool(server, &mcpsdk.Tool{
 		Name: "finance_budget_list",
-		Description: "List every budget of a month with its status: category_name, budget, spent, remaining and percent_used. month is YYYY-MM (WIB) within 24 months of the current month; blank means the current month. Any member can list. If percent_used is 80 or more, mention it." +
+		Description: "List every budget of a month with its status: category_name, budget, spent, remaining and percent_used. budget, spent and remaining are decimal strings (rupiah with up to two decimals, e.g. \"25000\" or \"1005422.44\"); remaining is negative (starts with '-') when spending exceeds the budget. month is YYYY-MM (WIB) within 24 months of the current month; blank means the current month. Any member can list. If percent_used is 80 or more, mention it." +
 			financeNoMathRules + financeRules,
 	}, func(ctx context.Context, input FinanceBudgetListInput) (FinanceBudgetListOutput, error) {
 		return FinanceBudgetList(ctx, resolver, service, input)
 	})
-	addTool(server, &mcpsdk.Tool{
+	addFinanceTool(server, &mcpsdk.Tool{
 		Name: "finance_budget_delete",
 		Description: "Remove the budget of an expense category for a month (month is YYYY-MM, WIB, within 24 months of the current month). Past transactions are not affected. Confirm with the user before deleting." +
 			financeAdminOnly + financeRules,

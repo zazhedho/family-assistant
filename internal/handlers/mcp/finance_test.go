@@ -211,7 +211,7 @@ func assertMCPCode(t *testing.T, err error, code string) {
 func TestFinanceAccountCreateMapsInput(t *testing.T) {
 	service := &mcpFinanceServiceStub{}
 	got, err := FinanceAccountCreate(mcpExternalContext(), financeResolver(), service, FinanceAccountCreateInput{
-		Space: " family ", Name: "BCA", Type: "bank", OpeningBalance: 1500000,
+		Space: " family ", Name: "BCA", Type: "bank", OpeningBalance: "1500000",
 	})
 	if err != nil {
 		t.Fatalf("finance_account_create: %v", err)
@@ -246,8 +246,8 @@ func TestFinanceAccountListReturnsServiceOutput(t *testing.T) {
 		t.Fatalf("got %+v, %v", got, err)
 	}
 	encoded, _ := json.Marshal(got[0])
-	if !strings.Contains(string(encoded), `"opening_balance":25000`) {
-		t.Fatalf("money is not a JSON integer: %s", encoded)
+	if !strings.Contains(string(encoded), `"opening_balance":"25000"`) {
+		t.Fatalf("money is not a JSON decimal string: %s", encoded)
 	}
 }
 
@@ -390,7 +390,7 @@ func TestFinanceToolsAreSkippedWithoutService(t *testing.T) {
 
 func TestFinanceToolDescriptionsCarryRules(t *testing.T) {
 	for _, tool := range financeTools(t, ToolServices{Finance: &mcpFinanceServiceStub{}}) {
-		for _, want := range []string{"finance Space", "list tool", "Never invent ids", "integers in whole rupiah"} {
+		for _, want := range []string{"finance Space", "list tool", "Never invent ids", "rupiah with up to two decimals"} {
 			if !strings.Contains(tool.Description, want) {
 				t.Errorf("%s description lacks %q", tool.Name, want)
 			}

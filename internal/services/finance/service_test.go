@@ -696,9 +696,11 @@ func TestMapMoneyErrorUsesTheGivenField(t *testing.T) {
 	if MapMoneyError("amount", nil) != nil {
 		t.Fatal("nil must stay nil")
 	}
-	if _, err := domainfinance.ParseMoney("5.123", false); err != nil {
-		vErr(t, MapMoneyError("opening_balance", err), "opening_balance")
+	_, parseErr := domainfinance.ParseMoney("5.123", false)
+	if parseErr == nil {
+		t.Fatal("ParseMoney(5.123) must be rejected (no rounding)")
 	}
+	vErr(t, MapMoneyError("opening_balance", parseErr), "opening_balance")
 }
 
 func TestAccountUpdateByName(t *testing.T) {

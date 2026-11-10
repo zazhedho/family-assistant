@@ -9,7 +9,24 @@ import (
 )
 
 func addTool[In, Out any](server *mcpsdk.Server, tool *mcpsdk.Tool, handler func(context.Context, In) (Out, error)) {
-	schema, err := jsonschema.For[In](nil)
+	addToolWithSchemas(server, tool, nil, handler)
+}
+
+// addFinanceTool is addTool for the finance tools, whose money fields need
+// schemas the SDK cannot infer for named types: money inputs accept a number
+// or a string, money outputs are decimal strings. The SDK would infer integer
+// for both, so the output schema is set explicitly.
+func addFinanceTool[In, Out any](server *mcpsdk.Server, tool *mcpsdk.Tool, handler func(context.Context, In) (Out, error)) {
+	outputSchema, err := financeOutputSchema[Out]()
+	if err != nil {
+		panic("mcp: infer finance tool output schema: " + err.Error())
+	}
+	tool.OutputSchema = outputSchema
+	addToolWithSchemas(server, tool, financeSchemaOptions(), handler)
+}
+
+func addToolWithSchemas[In, Out any](server *mcpsdk.Server, tool *mcpsdk.Tool, options *jsonschema.ForOptions, handler func(context.Context, In) (Out, error)) {
+	schema, err := jsonschema.For[In](options)
 	if err != nil {
 		panic("mcp: infer tool input schema: " + err.Error())
 	}

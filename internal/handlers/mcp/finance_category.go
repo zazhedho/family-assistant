@@ -56,20 +56,20 @@ func FinanceCategoryUpdate(ctx context.Context, resolver interfaceidentity.Resol
 }
 
 func registerFinanceCategoryTools(server *mcpsdk.Server, resolver interfaceidentity.Resolver, service interfacefinance.ServiceFinanceInterface) {
-	addTool(server, &mcpsdk.Tool{
+	addFinanceTool(server, &mcpsdk.Tool{
 		Name:        "finance_category_create",
 		Description: "Create an income or expense category in a finance Space (kind is income or expense)." + financeAdminRules + financeRules + " Check finance_category_list first to avoid duplicates.",
 	}, func(ctx context.Context, input FinanceCategoryCreateInput) (*domainfinance.Category, error) {
 		return FinanceCategoryCreate(ctx, resolver, service, input)
 	})
-	addTool(server, &mcpsdk.Tool{
+	addFinanceTool(server, &mcpsdk.Tool{
 		Name:        "finance_category_list",
 		Description: "List the categories of a finance Space (id, name, kind; archived ones only with include_archived), optionally filtered by kind. This is the list tool to use for category ids and names. Any member can list." + financeRules,
 	}, func(ctx context.Context, input FinanceCategoryListInput) (FinanceCategoryListOutput, error) {
 		categories, err := FinanceCategoryList(ctx, resolver, service, input)
 		return FinanceCategoryListOutput{Categories: categories}, err
 	})
-	addTool(server, &mcpsdk.Tool{
+	addFinanceTool(server, &mcpsdk.Tool{
 		Name:        "finance_category_update",
 		Description: "Rename or archive/unarchive a category in a finance Space. The category is its UUID or exact name; get it from finance_category_list. The kind cannot be changed." + financeAdminRules + financeRules,
 	}, func(ctx context.Context, input FinanceCategoryUpdateInput) (*domainfinance.Category, error) {

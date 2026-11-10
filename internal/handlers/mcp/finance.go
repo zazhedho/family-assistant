@@ -18,7 +18,7 @@ import (
 
 // financeRules is appended to the description of every finance tool: it is the
 // bot's only manual for the rules the backend enforces.
-const financeRules = " A finance Space is required (a Space whose category is finance); other Spaces are rejected. Amounts are integers in whole rupiah (Rp 1.500.000 is 1500000), never decimals. Never invent ids: use the list tool first, or pass the exact name."
+const financeRules = " A finance Space is required (a Space whose category is finance); other Spaces are rejected. Amounts are rupiah with up to two decimals (25000 is Rp 25.000; 1005422.44 is Rp 1.005.422,44): send an amount as a plain number or, preferably, a string, with '.' as the decimal separator and no thousands separators; more than two decimals is rejected, never rounded. Every amount in a result is an exact decimal string such as \"25000\" or \"1005422.44\" (two decimals unless whole, negative with '-'): relay it as is. Never invent ids: use the list tool first, or pass the exact name."
 
 // financeAdminRules is added to tools that change accounts or categories.
 const financeAdminRules = " Members can list but only an owner or admin can create or change accounts and categories; if the result is forbidden, tell the user to ask an admin. Names are unique per Space (case-insensitive). There is no delete: archive via the update tool (archived=true), which keeps past transactions and reports intact."
@@ -166,10 +166,10 @@ func registerFinanceTools(server *mcpsdk.Server, resolver interfaceidentity.Reso
 }
 
 type FinanceAccountCreateInput struct {
-	Space          string `json:"space,omitempty" jsonschema:"finance Space UUID or exact user-facing name. In a private chat always name the finance Space: a blank value selects the Personal Space, which is never a finance Space (not found). In a group or other shared chat blank selects the bound Space"`
-	Name           string `json:"name" jsonschema:"account name, unique per Space (case-insensitive), e.g. BCA, Cash, GoPay"`
-	Type           string `json:"type" jsonschema:"one of cash, bank, ewallet, savings, credit_card"`
-	OpeningBalance int64  `json:"opening_balance,omitempty" jsonschema:"starting balance as an integer in whole rupiah, e.g. 1500000 for Rp 1.500.000; omit or 0 for none. May be negative only for credit_card"`
+	Space          string     `json:"space,omitempty" jsonschema:"finance Space UUID or exact user-facing name. In a private chat always name the finance Space: a blank value selects the Personal Space, which is never a finance Space (not found). In a group or other shared chat blank selects the bound Space"`
+	Name           string     `json:"name" jsonschema:"account name, unique per Space (case-insensitive), e.g. BCA, Cash, GoPay"`
+	Type           string     `json:"type" jsonschema:"one of cash, bank, ewallet, savings, credit_card"`
+	OpeningBalance MoneyInput `json:"opening_balance,omitempty" jsonschema:"starting balance in rupiah with up to two decimals, e.g. 25000 or 1005422.44, as a number or a string ('.' decimal separator, no thousands separators); omit or 0 for none. May be negative only for credit_card"`
 }
 
 type FinanceAccountListInput struct {
@@ -190,8 +190,12 @@ type FinanceAccountListOutput struct {
 }
 
 func FinanceAccountCreate(ctx context.Context, resolver interfaceidentity.Resolver, service interfacefinance.ServiceFinanceInterface, input FinanceAccountCreateInput) (*domainfinance.Account, error) {
+	openingBalance, err := financeOpeningBalance(input.OpeningBalance)
+	if err != nil {
+		return nil, err
+	}
 	return financeCall(ctx, resolver, service, input.Space, func(actor domainidentity.ActorContext, spaceID string) (*domainfinance.Account, error) {
-		return service.AccountCreate(ctx, actor, dto.AccountCreateInput{Space: spaceID, Name: input.Name, Type: input.Type, OpeningBalance: wholeRupiah(input.OpeningBalance)})
+		return service.AccountCreate(ctx, actor, dto.AccountCreateInput{Space: spaceID, Name: input.Name, Type: input.Type, OpeningBalance: openingBalance})
 	})
 }
 
@@ -209,46 +213,23 @@ func FinanceAccountUpdate(ctx context.Context, resolver interfaceidentity.Resolv
 }
 
 func registerFinanceAccountTools(server *mcpsdk.Server, resolver interfaceidentity.Resolver, service interfacefinance.ServiceFinanceInterface) {
-	addTool(server, &mcpsdk.Tool{
+	addFinanceTool(server, &mcpsdk.Tool{
 		Name:        "finance_account_create",
-		Description: "Create a money account (cash, bank, e-wallet, savings or credit card) in a finance Space. opening_balance is the starting balance in whole rupiah." + financeAdminRules + financeRules + " Check finance_account_list first to avoid duplicates.",
+		Description: "Create a money account (cash, bank, e-wallet, savings or credit card) in a finance Space. opening_balance is the starting balance in rupiah with up to two decimals (e.g. 1005422.44)." + financeAdminRules + financeRules + " Check finance_account_list first to avoid duplicates.",
 	}, func(ctx context.Context, input FinanceAccountCreateInput) (*domainfinance.Account, error) {
 		return FinanceAccountCreate(ctx, resolver, service, input)
 	})
-	addTool(server, &mcpsdk.Tool{
+	addFinanceTool(server, &mcpsdk.Tool{
 		Name:        "finance_account_list",
 		Description: "List the money accounts of a finance Space (id, name, type, opening_balance; archived ones only with include_archived). This is the list tool to use for account ids and names; it does not compute current balances. Any member can list." + financeRules,
 	}, func(ctx context.Context, input FinanceAccountListInput) (FinanceAccountListOutput, error) {
 		accounts, err := FinanceAccountList(ctx, resolver, service, input)
 		return FinanceAccountListOutput{Accounts: accounts}, err
 	})
-	addTool(server, &mcpsdk.Tool{
+	addFinanceTool(server, &mcpsdk.Tool{
 		Name:        "finance_account_update",
 		Description: "Rename or archive/unarchive a money account in a finance Space. The account is its UUID or exact name; get it from finance_account_list. Type and opening balance cannot be changed here." + financeAdminRules + financeRules,
 	}, func(ctx context.Context, input FinanceAccountUpdateInput) (*domainfinance.Account, error) {
 		return FinanceAccountUpdate(ctx, resolver, service, input)
 	})
-}
-
-// wholeRupiah converts a tool's whole-rupiah integer input to Money (sen).
-// It is a stopgap until the tools accept decimal amounts: a value beyond the
-// range is saturated to just outside MaxAmount (instead of overflowing) so the
-// service validators reject it.
-func wholeRupiah(v int64) domainfinance.Money {
-	limit := int64(domainfinance.MaxAmount) / 100
-	switch {
-	case v > limit:
-		return domainfinance.MaxAmount + 1
-	case v < -limit:
-		return -domainfinance.MaxAmount - 1
-	}
-	return domainfinance.Money(v) * 100
-}
-
-func wholeRupiahPtr(v *int64) *domainfinance.Money {
-	if v == nil {
-		return nil
-	}
-	m := wholeRupiah(*v)
-	return &m
 }
