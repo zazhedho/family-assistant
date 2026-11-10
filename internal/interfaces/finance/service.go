@@ -19,4 +19,10 @@ type ServiceFinanceInterface interface {
 	TransactionList(context.Context, domainidentity.ActorContext, dto.TransactionListInput) ([]domainfinance.Transaction, error)
 	TransactionUpdate(ctx context.Context, actor domainidentity.ActorContext, spaceID, id string, input dto.TransactionUpdateInput) (*dto.TransactionResult, error)
 	TransactionDelete(ctx context.Context, actor domainidentity.ActorContext, spaceID, id string) error
+	BudgetSet(context.Context, domainidentity.ActorContext, dto.BudgetSetInput) (*domainfinance.Budget, error)
+	// BudgetList reports every budget of month ("YYYY-MM", "" = current WIB month).
+	BudgetList(ctx context.Context, actor domainidentity.ActorContext, spaceID, month string) ([]dto.BudgetStatusView, error)
+	BudgetDelete(context.Context, domainidentity.ActorContext, dto.BudgetDeleteInput) error
+	Balances(ctx context.Context, actor domainidentity.ActorContext, spaceID string) (*dto.BalancesReport, error)
+	Summary(context.Context, domainidentity.ActorContext, dto.SummaryInput) (*dto.SummaryReport, error)
 }

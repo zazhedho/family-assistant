@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"time"
 
 	domainaudit "family-assistant/internal/domain/audit"
 	domainidentity "family-assistant/internal/domain/identity"
@@ -38,10 +39,11 @@ type service struct {
 	spaces    interfacespace.RepoSpaceInterface
 	authorize interfaceauthorization.Authorizer
 	audit     auditStore
+	now       func() time.Time // the clock; tests replace it
 }
 
 func NewService(repo interfacefinance.RepoFinanceInterface, spaces interfacespace.RepoSpaceInterface, authorize interfaceauthorization.Authorizer, audit auditStore) interfacefinance.ServiceFinanceInterface {
-	return &service{repo: repo, spaces: spaces, authorize: authorize, audit: audit}
+	return &service{repo: repo, spaces: spaces, authorize: authorize, audit: audit, now: time.Now}
 }
 
 func (s *service) configured() error {
