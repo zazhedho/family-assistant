@@ -1435,8 +1435,22 @@ same as a non-member does. Everything is reachable through MCP tools only; there
 no HTTP routes. Migration `000013_create_finance_tables` adds the schema and the
 `finance` permissions.
 
-- Single currency: IDR, stored as `int64` whole rupiah (`1` to `1_000_000_000_000`
-  per transaction). No decimals and no floats anywhere.
+- Single currency: IDR. Amounts are rupiah with up to two decimals, stored as an
+  `int64` count of sen (1/100 rupiah): `1005422.44` is stored as `100542244`. No
+  rounding is ever done (a third decimal is rejected) and no floats are used anywhere:
+  amounts are parsed from text and printed with integer arithmetic. The maximum is
+  Rp10.000.000.000 (`10000000000.00`) per transaction. The database bound
+  `1_000_000_000_000` of migration 000013 is unchanged and now simply means sen, so no
+  migration was needed.
+- Tool inputs accept an amount as a decimal string (preferred, always exact) or a
+  number: `25000`, `"1005422.44"`. Use `.` as the decimal separator, with no thousands
+  separators, no exponent and no `+`. Only an opening balance of a credit card may be
+  negative. Outputs (balances, summaries, budgets, transactions) are exact decimal
+  strings: whole amounts without decimals (`"25000"`), others with two (`"1005422.44"`,
+  `"0.50"`, negative `"-12.34"`). A JSON number with more than 15 significant digits may
+  be shortened by the MCP SDK, which decodes numbers as floats; strings are always exact.
+  Percentages such as `percent_used` are unchanged: an integer, the floor of
+  spent * 100 / budget.
 - Balances and reports are computed in SQL from the rows; nothing is stored. Account
   balance is the opening balance plus income and incoming transfers minus expense and
   outgoing transfers. Credit card balances can be negative and count in the total.
@@ -1536,8 +1550,9 @@ cannot start more than 24 hours in the past.
 
 - A budget month must lie within 24 months before or after the current WIB month.
 - A recurring template `start_at` may be at most 24 hours in the past.
-- Amounts are whole rupiah from 1 up to 1,000,000,000,000; zero, negative, fractional,
-  and larger values are rejected with a field error and nothing is written.
+- Amounts are rupiah with at most two decimals, from `0.01` up to `10000000000.00`
+  (Rp10.000.000.000); zero, negative, more than two decimals (never rounded), and larger
+  values are rejected with a field error and nothing is written.
 - A transfer needs two different accounts and no category; archived accounts and
   categories cannot be used for new transactions.
 
@@ -1545,7 +1560,8 @@ cannot start more than 24 hours in the past.
 
 `internal/integration/finance_test.go` drives the real services and repositories
 against PostgreSQL: accounts, budgets, expense/income/transfer with exact balances and
-summaries, duplicate warning, authorization, cross-Space isolation, the composite
+summaries, decimal rupiah (sen) end to end including the database amount bound,
+duplicate warning, authorization, cross-Space isolation, the composite
 foreign key, the WIB month boundary, recurring posting, and soft delete. It skips when
 `FAMILY_ASSISTANT_TEST_DATABASE_URL` is unset, applies the migrations itself, and
 resets the `public` schema, so use only the throwaway local test database described in

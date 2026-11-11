@@ -19,9 +19,10 @@ import (
 //
 // The MCP SDK decodes tool arguments into float64 before the handler sees
 // them, so a number arrives as its shortest float text: exact for every value
-// within the bound, and an exponent form such as 1e2 can no longer be told
-// apart from 100 (accepted as 100). A string keeps its exact text, so the
-// tools tell the model to prefer strings for amounts.
+// up to 15 significant digits; a longer number token may be shortened by the
+// SDK's float decode, and an exponent form such as 1e2 can no longer be told
+// apart from 100 (accepted as 100). A string keeps its exact text and is
+// always exact, so the tools tell the model to prefer strings for amounts.
 type MoneyInput string
 
 func (m *MoneyInput) UnmarshalJSON(b []byte) error {

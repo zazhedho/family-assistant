@@ -3,6 +3,7 @@ package integration
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"os"
 	"strings"
@@ -190,10 +191,13 @@ func TestFinanceEndToEnd(t *testing.T) {
 	ctx := context.Background()
 
 	t.Run("core flow: accounts, categories, budget, transactions, balances, summary", func(t *testing.T) {
+		// Amounts are in sen (1/100 rupiah): 1_000_000 sen is Rp10.000,00,
+		// 125_000 sen is Rp1.250,00, 500_000 sen is Rp5.000,00. The numbers
+		// stayed from the whole-rupiah days; only their meaning changed.
 		now, month := currentMonthOrSkip(t)
 		f := env.newSpace(t, "finance")
 		env.account(t, f, "Kas", "cash", 0)
-		env.account(t, f, "BCA", "bank", 1_000_000)
+		env.account(t, f, "BCA", "bank", 1_000_000) // Rp10.000,00
 
 		cats := must(t, got(env.svc.CategoryList(ctx, f.owner, dto.CategoryListInput{Space: f.id})))
 		names := map[string]bool{}
@@ -294,11 +298,196 @@ func TestFinanceEndToEnd(t *testing.T) {
 		}
 	})
 
+	t.Run("decimal rupiah", func(t *testing.T) { testFinanceDecimal(t, env) })
 	t.Run("authorization", func(t *testing.T) { testFinanceAuthorization(t, env) })
 	t.Run("database constraints", func(t *testing.T) { testFinanceConstraints(t, env) })
 	t.Run("WIB month boundary", func(t *testing.T) { testFinanceWIBBoundary(t, env) })
 	t.Run("recurring posting", func(t *testing.T) { testFinanceRecurring(t, env) })
 	t.Run("soft delete leaves balances and summaries", func(t *testing.T) { testFinanceSoftDelete(t, env) })
+}
+
+// testFinanceDecimal drives decimal rupiah through the real services and the
+// real database: every amount is written as the text a tool caller would send,
+// parsed by ParseMoney into sen, and every result is checked as exact sen and
+// as the exact decimal string the MCP layer renders. The MCP HTTP tools/call
+// layer itself is covered with a stub service in internal/handlers/mcp
+// (finance_money_test.go); the harness types there are unexported, so this
+// test stops at the service boundary and marshals the DTOs the handlers return.
+func testFinanceDecimal(t *testing.T, env *financeEnv) {
+	ctx := context.Background()
+	money := func(text string) domainfinance.Money {
+		t.Helper()
+		m, err := domainfinance.ParseMoney(text, true)
+		if err != nil {
+			t.Fatalf("ParseMoney(%q): %v", text, err)
+		}
+		return m
+	}
+	wantInt(t, "1005422.44 in sen", money("1005422.44"), 100_542_244)
+
+	t.Run("books, budget, summary and balances in exact sen", func(t *testing.T) {
+		now, month := currentMonthOrSkip(t)
+		f := env.newSpace(t, "finance")
+		env.account(t, f, "blu", "bank", money("1005422.44"))
+		env.account(t, f, "Kas", "cash", 0)
+		must(t, got(env.svc.BudgetSet(ctx, f.owner, dto.BudgetSetInput{Space: f.id, Category: "Makan", Month: month, Amount: money("12.34")})))
+		must(t, got(env.svc.BudgetSet(ctx, f.owner, dto.BudgetSetInput{Space: f.id, Category: "Transport", Month: month, Amount: money("1000")})))
+
+		over := must(t, got(env.svc.TransactionCreate(ctx, f.owner, dto.TransactionCreateInput{
+			Space: f.id, Type: "expense", Amount: money("25000.50"), Account: "blu", Category: "Makan", Merchant: "Warung", OccurredAt: now,
+		})))
+		wantInt(t, "stored expense", over.Transaction.Amount, 2_500_050)
+		// budget 1234 sen, spent 2500050 sen: remaining is negative and the
+		// percent is floor(2500050*100/1234) = 202597.
+		wantInt(t, "Makan budget", over.BudgetStatus.Budget, 1_234)
+		wantInt(t, "Makan spent", over.BudgetStatus.Spent, 2_500_050)
+		wantInt(t, "Makan remaining (over budget)", over.BudgetStatus.Remaining, -2_498_816)
+		wantInt(t, "Makan percent_used", int64(over.BudgetStatus.PercentUsed), 202_597)
+
+		within := must(t, got(env.svc.TransactionCreate(ctx, f.owner, dto.TransactionCreateInput{
+			Space: f.id, Type: "expense", Amount: money("250.25"), Account: "blu", Category: "Transport", OccurredAt: now,
+		})))
+		wantInt(t, "Transport spent", within.BudgetStatus.Spent, 25_025)
+		wantInt(t, "Transport remaining", within.BudgetStatus.Remaining, 74_975)
+		wantInt(t, "Transport percent_used", int64(within.BudgetStatus.PercentUsed), 25)
+
+		must(t, got(env.svc.TransactionCreate(ctx, f.owner, dto.TransactionCreateInput{
+			Space: f.id, Type: "income", Amount: money("100.25"), Account: "blu", Category: "Gaji", OccurredAt: now,
+		})))
+		must(t, got(env.svc.TransactionCreate(ctx, f.owner, dto.TransactionCreateInput{
+			Space: f.id, Type: "transfer", Amount: money("0.01"), Account: "blu", ToAccount: "Kas", OccurredAt: now,
+		})))
+
+		// 100542244 - 2500050 - 25025 + 10025 - 1 = 98027193; Kas got 1 sen.
+		balances, total := env.balance(t, f)
+		wantInt(t, "blu balance", balances["blu"], 98_027_193)
+		wantInt(t, "Kas balance", balances["Kas"], 1)
+		wantInt(t, "total", total, 98_027_194)
+
+		sum := must(t, got(env.svc.Summary(ctx, f.owner, dto.SummaryInput{Space: f.id, Period: "month"})))
+		wantInt(t, "income", sum.Income, 10_025)
+		wantInt(t, "expense", sum.Expense, 2_525_075)
+		wantInt(t, "net", sum.Net, -2_515_050)
+		byCategory := map[string]domainfinance.Money{}
+		for _, c := range sum.ByCategory {
+			byCategory[c.Name] = c.Total
+		}
+		if len(byCategory) != 2 {
+			t.Fatalf("by_category = %+v, want Makan and Transport", sum.ByCategory)
+		}
+		wantInt(t, "Makan total", byCategory["Makan"], 2_500_050)
+		wantInt(t, "Transport total", byCategory["Transport"], 25_025)
+		if len(sum.ByAccount) != 1 || sum.ByAccount[0].Name != "blu" {
+			t.Fatalf("by_account = %+v, want only blu (transfers are neither income nor expense)", sum.ByAccount)
+		}
+		wantInt(t, "blu income", sum.ByAccount[0].Income, 10_025)
+		wantInt(t, "blu expense", sum.ByAccount[0].Expense, 2_525_075)
+
+		budgets := must(t, got(env.svc.BudgetList(ctx, f.owner, f.id, month)))
+		status := map[string]dto.BudgetStatusView{}
+		for _, b := range budgets {
+			status[b.CategoryName] = b
+		}
+		wantInt(t, "listed Makan remaining", status["Makan"].Remaining, -2_498_816)
+		wantInt(t, "listed Transport remaining", status["Transport"].Remaining, 74_975)
+
+		// The exact decimal strings the MCP tools return (Money marshals to a
+		// JSON string, so no float ever touches the text).
+		report := must(t, got(env.svc.Balances(ctx, f.owner, f.id)))
+		raw, err := json.Marshal(report)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, want := range []string{`"balance":"980271.93"`, `"balance":"0.01"`, `"total":"980271.94"`} {
+			if !strings.Contains(string(raw), want) {
+				t.Fatalf("balances JSON %s lacks %s", raw, want)
+			}
+		}
+		rawSummary, err := json.Marshal(sum)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, want := range []string{`"income":"100.25"`, `"expense":"25250.75"`, `"net":"-25150.50"`} {
+			if !strings.Contains(string(rawSummary), want) {
+				t.Fatalf("summary JSON %s lacks %s", rawSummary, want)
+			}
+		}
+		rawBudget, err := json.Marshal(over.BudgetStatus)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, want := range []string{`"budget":"12.34"`, `"spent":"25000.50"`, `"remaining":"-24988.16"`} {
+			if !strings.Contains(string(rawBudget), want) {
+				t.Fatalf("budget status JSON %s lacks %s", rawBudget, want)
+			}
+		}
+	})
+
+	t.Run("recurring template of 12.34 posts exactly 1234 sen", func(t *testing.T) {
+		f := env.newSpace(t, "finance")
+		env.account(t, f, "blu", "bank", money("1005422.44"))
+		start := time.Now().Add(-23 * time.Hour).Truncate(time.Second)
+		rec := must(t, got(env.svc.RecurringCreate(ctx, f.owner, dto.RecurringCreateInput{
+			Space: f.id, Type: "expense", Amount: money("12.34"), Account: "blu", Category: "Makan", Frequency: "daily", StartAt: start,
+		})))
+		wantInt(t, "stored template amount", rec.Amount, 1_234)
+		// One occurrence is due (start); the next is start+1d, 1h away.
+		if err := env.sched(start.Add(time.Hour)).Tick(ctx); err != nil {
+			t.Fatalf("tick: %v", err)
+		}
+		var posted []int64
+		if err := env.db.Raw(`SELECT amount FROM finance_transactions WHERE recurring_id = ? AND deleted_at IS NULL`, rec.ID).Scan(&posted).Error; err != nil {
+			t.Fatal(err)
+		}
+		if len(posted) != 1 {
+			t.Fatalf("posted amounts = %v, want exactly one", posted)
+		}
+		wantInt(t, "posted amount", posted[0], 1_234)
+		balances, _ := env.balance(t, f)
+		wantInt(t, "blu balance after posting", balances["blu"], 100_542_244-1_234)
+	})
+
+	t.Run("input bounds", func(t *testing.T) {
+		if _, err := domainfinance.ParseMoney("10000000000.01", false); !errors.Is(err, domainfinance.ErrAmountTooLarge) {
+			t.Fatalf("10000000000.01: error = %v, want ErrAmountTooLarge", err)
+		}
+		if _, err := domainfinance.ParseMoney("0.005", false); !errors.Is(err, domainfinance.ErrMoneyPrecision) {
+			t.Fatalf("0.005: error = %v, want ErrMoneyPrecision", err)
+		}
+		wantInt(t, "10000000000.00", money("10000000000.00"), domainfinance.MaxAmount)
+
+		// The service rejects the same too-large amount if a caller bypasses
+		// the parser (Money is an int64): nothing is written.
+		f := env.newSpace(t, "finance")
+		env.account(t, f, "blu", "bank", 0)
+		_, err := env.svc.TransactionCreate(ctx, f.owner, dto.TransactionCreateInput{
+			Space: f.id, Type: "income", Amount: domainfinance.MaxAmount + 1, Account: "blu", Category: "Gaji",
+		})
+		wantFieldErr(t, "amount over the maximum", err, "amount", "")
+		if n := env.countRows(t, "finance_transactions", f.id); n != 0 {
+			t.Fatalf("rejected amount left %d rows", n)
+		}
+	})
+
+	t.Run("database CHECK bound is exactly 1_000_000_000_000 sen", func(t *testing.T) {
+		f := env.newSpace(t, "finance")
+		acc := env.account(t, f, "blu", "bank", 0)
+		insert := `INSERT INTO finance_transactions (id, space_id, type, amount, account_id, occurred_at, created_by_member_id)
+			VALUES ($1, $2, 'income', $3, $4, $5, $6)`
+		at := time.Date(2026, 11, 1, 3, 0, 0, 0, time.UTC)
+
+		_, err := env.sqlDB.ExecContext(ctx, insert, utils.CreateUUID(), f.id, int64(1_000_000_000_001), acc, at, f.ownerMemberID)
+		var pgErr *pgconn.PgError
+		if !errors.As(err, &pgErr) || pgErr.Code != "23514" || pgErr.ConstraintName != "ck_finance_transactions_amount" {
+			t.Fatalf("amount 1000000000001: error = %v, want check violation ck_finance_transactions_amount", err)
+		}
+		if _, err := env.sqlDB.ExecContext(ctx, insert, utils.CreateUUID(), f.id, int64(1_000_000_000_000), acc, at, f.ownerMemberID); err != nil {
+			t.Fatalf("amount 1000000000000 must be accepted: %v", err)
+		}
+		if n := env.countRows(t, "finance_transactions", f.id); n != 1 {
+			t.Fatalf("rows = %d, want only the accepted one", n)
+		}
+	})
 }
 
 func testFinanceAuthorization(t *testing.T, env *financeEnv) {
