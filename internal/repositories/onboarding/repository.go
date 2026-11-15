@@ -3,7 +3,9 @@ package repositoryonboarding
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
+	"time"
 
 	domainidentity "family-assistant/internal/domain/identity"
 	domainonboarding "family-assistant/internal/domain/onboarding"
@@ -109,6 +111,74 @@ func (r *Repository) Create(ctx context.Context, registration domainonboarding.R
 		return identityErr
 	})
 	return err
+}
+
+func (r *Repository) FindAccountForRename(ctx context.Context, provider, externalID string) (domainonboarding.UserRef, error) {
+	provider = domainidentity.NormalizeProvider(provider)
+	externalID = strings.TrimSpace(externalID)
+	if provider == "" || externalID == "" {
+		return domainonboarding.UserRef{}, domainidentity.ErrIdentityNotFound
+	}
+
+	var user domainonboarding.UserRef
+	err := r.DB.WithContext(ctx).
+		Table("external_identities ei").
+		Select("u.id::text AS id, u.name AS name").
+		Joins("JOIN users u ON u.id = ei.user_id").
+		Where("ei.provider = ? AND ei.external_id = ? AND ei.status = 'ACTIVE' AND ei.deleted_at IS NULL AND u.deleted_at IS NULL", provider, externalID).
+		Take(&user).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return domainonboarding.UserRef{}, domainidentity.ErrIdentityNotFound
+	}
+	return user, err
+}
+
+// nameTakenSQL reports whether another active member of any Space the caller belongs to already
+// uses the name. Stored names are compared case-insensitively with invisible characters removed and
+// whitespace collapsed, so legacy names cannot be imitated by formatting tricks.
+const nameTakenSQL = `SELECT EXISTS (
+	SELECT 1
+	FROM space_members mine
+	JOIN space_members theirs ON theirs.space_id = mine.space_id
+	JOIN users u ON u.id = theirs.user_id
+	JOIN spaces s ON s.id = mine.space_id
+	WHERE mine.user_id = ? AND mine.status = 'ACTIVE' AND mine.deleted_at IS NULL
+	  AND theirs.user_id <> mine.user_id AND theirs.status = 'ACTIVE' AND theirs.deleted_at IS NULL
+	  AND u.deleted_at IS NULL AND s.deleted_at IS NULL
+	  AND lower(btrim(regexp_replace(regexp_replace(u.name, '[\u200B-\u200F\u202A-\u202E\u2060-\u2064\uFEFF]', '', 'g'), '\s+', ' ', 'g'))) = lower(?)
+) AS taken`
+
+func (r *Repository) NameTakenInSharedSpaces(ctx context.Context, userID, normalizedName string) (bool, error) {
+	userID = strings.TrimSpace(userID)
+	normalizedName = strings.TrimSpace(normalizedName)
+	if userID == "" || normalizedName == "" {
+		return false, errors.New("user id and name are required")
+	}
+	var taken bool
+	if err := r.DB.WithContext(ctx).Raw(nameTakenSQL, userID, normalizedName).Scan(&taken).Error; err != nil {
+		return false, err
+	}
+	return taken, nil
+}
+
+// UpdateUserName sets users.name and users.updated_at and nothing else, for exactly one live user.
+func (r *Repository) UpdateUserName(ctx context.Context, userID, name string, now time.Time) error {
+	userID = strings.TrimSpace(userID)
+	name = strings.TrimSpace(name)
+	if userID == "" || name == "" {
+		return errors.New("user id and name are required")
+	}
+	result := r.DB.WithContext(ctx).
+		Table("users").
+		Where("id = ? AND deleted_at IS NULL", userID).
+		Updates(map[string]any{"name": name, "updated_at": now})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected != 1 {
+		return fmt.Errorf("rename affected %d rows, want 1", result.RowsAffected)
+	}
+	return nil
 }
 
 // usersPhoneUniqueIndex is the partial unique index on users.phone.

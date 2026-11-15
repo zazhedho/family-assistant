@@ -33,6 +33,10 @@ func (s *registrarStub) LinkExisting(_ context.Context, input dto.AccountLinkInp
 	return s.result, s.err
 }
 
+func (s *registrarStub) Rename(context.Context, dto.AccountRenameInput) (dto.AccountRenameResult, error) {
+	return dto.AccountRenameResult{}, s.err
+}
+
 func TestAccountRegisterUsesOnlyTrustedExternalRequest(t *testing.T) {
 	service := &registrarStub{result: dto.AccountRegistrationResult{Status: "created", UserID: "user-1", SpaceID: "space-1"}}
 	ctx := WithExternalRequest(context.Background(), ExternalRequest{

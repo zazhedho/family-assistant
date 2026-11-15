@@ -11,6 +11,12 @@ type AccountRef struct {
 	SpaceID string
 }
 
+// UserRef is the caller's own account as resolved from a signed external identity.
+type UserRef struct {
+	ID   string
+	Name string
+}
+
 type Registration struct {
 	User     domainuser.Users
 	Space    domainspace.Space

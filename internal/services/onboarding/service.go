@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"strings"
 	"time"
-	"unicode/utf8"
 
 	domainaudit "family-assistant/internal/domain/audit"
 	domainidentity "family-assistant/internal/domain/identity"
@@ -52,9 +51,9 @@ func (s *Service) Register(ctx context.Context, input dto.AccountRegistrationInp
 		return dto.AccountRegistrationResult{}, s.fail(ctx, channel, provider, &serviceidentity.ValidationError{Field: "consent", Reason: "is required"})
 	}
 
-	name := utils.TitleCase(utils.StripHTML(input.Name))
-	if count := utf8.RuneCountInString(name); count < 3 || count > 100 {
-		return dto.AccountRegistrationResult{}, s.fail(ctx, channel, provider, &serviceidentity.ValidationError{Field: "name", Reason: "must contain 3 to 100 characters"})
+	name, err := normalizeAccountName(input.Name)
+	if err != nil {
+		return dto.AccountRegistrationResult{}, s.fail(ctx, channel, provider, err)
 	}
 	birthDate, err := parseBirthDate(input.BirthDate, s.now().UTC())
 	if err != nil {
@@ -269,7 +268,10 @@ func whatsappPhone(provider, channel, externalID string) string {
 }
 
 func (s *Service) success(ctx context.Context, channel, provider, userID string) {
-	event := s.auditEvent(channel, provider, domainaudit.StatusSuccess, userID)
+	s.store(ctx, s.auditEvent(channel, provider, domainaudit.StatusSuccess, userID))
+}
+
+func (s *Service) store(ctx context.Context, event domainaudit.AuditEvent) {
 	if s.audit != nil {
 		_ = s.audit.Store(ctx, event)
 	}
@@ -278,9 +280,7 @@ func (s *Service) success(ctx context.Context, channel, provider, userID string)
 func (s *Service) fail(ctx context.Context, channel, provider string, err error) error {
 	event := s.auditEvent(channel, provider, domainaudit.StatusFailed, "")
 	event.ErrorMessage = failureCategory(err)
-	if s.audit != nil {
-		_ = s.audit.Store(ctx, event)
-	}
+	s.store(ctx, event)
 	return err
 }
 
@@ -310,6 +310,8 @@ func failureCategory(err error) string {
 		return "unauthenticated"
 	case errors.Is(err, domainidentity.ErrIdentityConflict):
 		return "conflict"
+	case errors.Is(err, domainidentity.ErrIdentityNotFound):
+		return "not_linked"
 	case errors.Is(err, domainidentity.ErrPhoneAlreadyRegistered):
 		return "phone_already_registered"
 	default:

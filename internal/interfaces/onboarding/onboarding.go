@@ -11,6 +11,7 @@ import (
 type ServiceOnboardingInterface interface {
 	Register(context.Context, dto.AccountRegistrationInput) (dto.AccountRegistrationResult, error)
 	LinkExisting(context.Context, dto.AccountLinkInput) (dto.AccountRegistrationResult, error)
+	Rename(context.Context, dto.AccountRenameInput) (dto.AccountRenameResult, error)
 }
 
 type RoleFinder interface {
