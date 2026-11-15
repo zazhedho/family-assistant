@@ -41,9 +41,20 @@ func AccountRegister(ctx context.Context, registrar interfaceonboarding.ServiceO
 		Provider: request.Provider, ExternalID: request.ExternalID, Channel: request.Channel,
 	})
 	if err != nil {
-		return AccountRegisterOutput{}, MapToolError(err)
+		return AccountRegisterOutput{}, mapOnboardingError(err)
 	}
 	return AccountRegisterOutput{Status: result.Status, UserID: result.UserID, SpaceID: result.SpaceID}, nil
+}
+
+// mapOnboardingError keeps the reason of an onboarding ValidationError on the `name` field, which
+// MapToolError would reduce to a bare "invalid input". Those reasons are server-written constants
+// (never the attempted name), so field and reason are shown so the bot can ask for another name.
+// Other fields (consent, birth_date) keep the existing bare mapping.
+func mapOnboardingError(err error) error {
+	if validation, ok := errors.AsType[*serviceidentity.ValidationError](err); ok && validation.Field == "name" {
+		return &MCPError{Code: "invalid_input", Message: invalidInputMessage(validation.Field, validation.Reason), cause: err}
+	}
+	return MapToolError(err)
 }
 
 func AccountLink(ctx context.Context, registrar interfaceonboarding.ServiceOnboardingInterface) (AccountRegisterOutput, error) {
@@ -92,13 +103,7 @@ func AccountRename(ctx context.Context, registrar interfaceonboarding.ServiceOnb
 		if errors.Is(err, domainidentity.ErrIdentityNotFound) {
 			return AccountRenameOutput{}, MapToolError(serviceidentity.ErrUnauthenticated)
 		}
-		// Rename returns the identity ValidationError, which MapToolError reduces to a
-		// bare "invalid input". Its reasons are server-written constants (never the
-		// attempted name), so show field and reason so the bot can ask for another name.
-		if validation, ok := errors.AsType[*serviceidentity.ValidationError](err); ok {
-			return AccountRenameOutput{}, &MCPError{Code: "invalid_input", Message: invalidInputMessage(validation.Field, validation.Reason), cause: err}
-		}
-		return AccountRenameOutput{}, MapToolError(err)
+		return AccountRenameOutput{}, mapOnboardingError(err)
 	}
 	return AccountRenameOutput{Status: result.Status, Name: result.Name}, nil
 }

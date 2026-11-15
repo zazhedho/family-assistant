@@ -15,6 +15,7 @@ import (
 	interfaceonboarding "family-assistant/internal/interfaces/onboarding"
 	serviceauthorization "family-assistant/internal/services/authorization"
 	serviceidentity "family-assistant/internal/services/identity"
+	serviceonboarding "family-assistant/internal/services/onboarding"
 	"family-assistant/pkg/config"
 )
 
@@ -158,13 +159,11 @@ func TestAccountRenameThroughSDKUnlinkedCaller(t *testing.T) {
 	}
 }
 
-// The reasons below are copied verbatim from internal/services/onboarding/rename.go,
-// which returns them as *serviceidentity.ValidationError (not the authorization type).
-// If the service wording changes, update them here.
+// The service returns these reasons as *serviceidentity.ValidationError (not the authorization type).
 var renameServiceReasons = []string{
-	"is already used by another member of your Spaces",
-	"must contain 3 to 100 characters",
-	"contains characters that are not allowed",
+	serviceonboarding.ReasonNameTaken,
+	serviceonboarding.ReasonNameLength,
+	serviceonboarding.ReasonNameCharacters,
 }
 
 func TestAccountRenameValidationErrorNamesFieldAndNeverTheName(t *testing.T) {
@@ -330,5 +329,32 @@ func TestAccountRenameLogsNeverContainTheName(t *testing.T) {
 		if strings.HasSuffix(key, "_name") && key != "tool_name" {
 			t.Fatalf("name-like key logged: %s", key)
 		}
+	}
+}
+
+func TestAccountRegisterValidationReasonsReachTheBot(t *testing.T) {
+	for i, reason := range []string{serviceonboarding.ReasonNameLength, serviceonboarding.ReasonNameCharacters} {
+		t.Run(reason, func(t *testing.T) {
+			service := &registrarStub{err: &serviceidentity.ValidationError{Field: "name", Reason: reason}}
+			server := newAccountRenameServer(t, service)
+			resp := callScheduledTool(t, server.URL, "account_register", map[string]any{"name": renameAttemptedName, "birth_date": "1990-05-20", "consent": true}, directIdentity(fmt.Sprintf("nonce-register-invalid-%d", i)))
+			if resp.Result == nil || !resp.Result.IsError {
+				t.Fatalf("response = %+v", resp)
+			}
+			text := toolText(resp)
+			if text != "invalid input: name "+reason {
+				t.Fatalf("text = %q", text)
+			}
+			if strings.Contains(text, "Zorblax") || strings.Contains(text, "Quimby") {
+				t.Fatalf("error echoes the attempted name: %q", text)
+			}
+		})
+	}
+}
+
+func TestAccountRegisterKeepsOtherErrorsMapped(t *testing.T) {
+	_, err := AccountRegister(renameTestContext(), &registrarStub{err: errors.New("db password=hunter2")}, AccountRegisterInput{Name: "Jane Doe"})
+	if err == nil || strings.Contains(err.Error(), "hunter2") {
+		t.Fatalf("err = %v", err)
 	}
 }
