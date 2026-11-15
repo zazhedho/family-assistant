@@ -24,6 +24,14 @@ const (
 	auditResourceUser = "user"
 )
 
+// Validation reasons for the `name` field. They are fixed server-written text (never the attempted
+// name or the owner of a clashing name) and are shown to the bot by the MCP layer.
+const (
+	ReasonNameTaken      = "is already used by another member of your Spaces"
+	ReasonNameLength     = "must contain 3 to 100 characters"
+	ReasonNameCharacters = "contains characters that are not allowed"
+)
+
 // Rename changes the display name of the account linked to the caller's signed external identity.
 // The target account is never an input: it is resolved from the identity alone.
 //
@@ -64,7 +72,7 @@ func (s *Service) Rename(ctx context.Context, input dto.AccountRenameInput) (dto
 	}
 	for _, other := range others {
 		if accountNameKey(other) == key {
-			return dto.AccountRenameResult{}, s.failRename(ctx, channel, provider, userID, &serviceidentity.ValidationError{Field: "name", Reason: "is already used by another member of your Spaces"})
+			return dto.AccountRenameResult{}, s.failRename(ctx, channel, provider, userID, &serviceidentity.ValidationError{Field: "name", Reason: ReasonNameTaken})
 		}
 	}
 
@@ -96,10 +104,11 @@ func (s *Service) failRename(ctx context.Context, channel, provider, userID stri
 // normalizeAccountName is the single place that turns a requested display name into the stored
 // form (NFC, collapsed spaces), for registration and rename alike. Forbidden characters are rejected
 // both before and after HTML stripping so entity-encoded control or invisible characters cannot slip
-// through. Format characters (Cf) include the zero width joiner, so ZWJ emoji and flag sequences are
-// rejected in registration as well.
+// through. Format characters (Cf) include the zero width joiner and the tag characters, so ZWJ
+// sequences (family, couple, rainbow flag) and tag-sequence flags are rejected in registration as
+// well; plain country flags (regional indicator pairs) and single emoji are accepted.
 func normalizeAccountName(raw string) (string, error) {
-	invalid := &serviceidentity.ValidationError{Field: "name", Reason: "contains characters that are not allowed"}
+	invalid := &serviceidentity.ValidationError{Field: "name", Reason: ReasonNameCharacters}
 	raw = strings.TrimSpace(raw)
 	if !utf8.ValidString(raw) || strings.ContainsFunc(raw, isForbiddenNameRune) {
 		return "", invalid
@@ -109,7 +118,7 @@ func normalizeAccountName(raw string) (string, error) {
 		return "", invalid
 	}
 	if count := utf8.RuneCountInString(name); count < 3 || count > 100 {
-		return "", &serviceidentity.ValidationError{Field: "name", Reason: "must contain 3 to 100 characters"}
+		return "", &serviceidentity.ValidationError{Field: "name", Reason: ReasonNameLength}
 	}
 	return name, nil
 }
@@ -143,14 +152,39 @@ func isInvisibleNameRune(r rune) bool {
 }
 
 // accountNameKey is the identity of a display name for impersonation checks: compatibility
-// normalization (full-width forms, NBSP and other spaces), invisible characters dropped, THEN spaces
-// collapsed (so a stored "a <ZWSP> b" equals "a b"), case folded. Both sides of every comparison must go through it.
+// normalization (full-width forms, NBSP and other spaces), invisible characters dropped, then
+// decomposition with combining marks dropped after LATIN base letters and dotless i/j mapped to i/j,
+// THEN spaces collapsed (so a stored "a <ZWSP> b" equals "a b"), case folded. It deliberately
+// over-matches within Latin ("Jose" and "José", "Zoe" and "Zoë" are the same name for a household);
+// marks after non-Latin bases (Arabic, Devanagari, Hebrew, Thai, ...) are kept so those names do not
+// collapse (consequence: names differing only by Arabic harakat are not detected). Cross-script
+// look-alikes (a Cyrillic letter for a Latin one) are not detected. Only the comparison uses the key;
+// the stored name is never changed by it. Both sides of every comparison must go through it.
 func accountNameKey(name string) string {
-	name = strings.Map(func(r rune) rune {
+	var key strings.Builder
+	afterLatin := false
+	for _, r := range norm.NFD.String(strings.Map(func(r rune) rune {
 		if isInvisibleNameRune(r) {
 			return -1
 		}
 		return r
-	}, norm.NFKC.String(name))
-	return cases.Fold().String(strings.Join(strings.Fields(name), " "))
+	}, norm.NFKC.String(name))) {
+		if unicode.In(r, unicode.Mn, unicode.Me) {
+			if !afterLatin {
+				key.WriteRune(r)
+			}
+			continue
+		}
+		if !unicode.IsSpace(r) { // a mark stranded after a space still belongs to the preceding script
+			afterLatin = unicode.Is(unicode.Latin, r)
+		}
+		switch r {
+		case 0x0131:
+			r = 'i'
+		case 0x0237:
+			r = 'j'
+		}
+		key.WriteRune(r)
+	}
+	return cases.Fold().String(strings.Join(strings.Fields(key.String()), " "))
 }

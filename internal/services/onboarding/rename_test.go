@@ -167,7 +167,7 @@ func TestRenameRejectsInvalidNamesWithoutWriting(t *testing.T) {
 	}
 }
 
-const collisionReason = "is already used by another member of your Spaces"
+const collisionReason = ReasonNameTaken
 
 func sharedNames() []string {
 	return []string{
@@ -445,5 +445,95 @@ func TestRenameFullWidthStoredNameCollidesWithPlainName(t *testing.T) {
 	var validation *serviceidentity.ValidationError
 	if !errors.As(err, &validation) || validation.Reason != collisionReason || h.repository.namesCalls != 1 {
 		t.Fatalf("err = %v, names calls = %d", err, h.repository.namesCalls)
+	}
+}
+
+func TestNameReasonsArePinned(t *testing.T) {
+	if ReasonNameTaken != "is already used by another member of your Spaces" ||
+		ReasonNameLength != "must contain 3 to 100 characters" ||
+		ReasonNameCharacters != "contains characters that are not allowed" {
+		t.Fatalf("reasons changed: %q / %q / %q", ReasonNameTaken, ReasonNameLength, ReasonNameCharacters)
+	}
+}
+
+func TestNormalizeAccountNameReportsLengthAndCharacterReasons(t *testing.T) {
+	for raw, reason := range map[string]string{"ab": ReasonNameLength, strings.Repeat("a", 101): ReasonNameLength, "Jane\nDoe": ReasonNameCharacters, "Jane<Doe": ReasonNameCharacters} {
+		_, err := normalizeAccountName(raw)
+		var validation *serviceidentity.ValidationError
+		if !errors.As(err, &validation) || validation.Field != "name" || validation.Reason != reason {
+			t.Fatalf("%q: err = %v, want reason %q", raw, err, reason)
+		}
+	}
+}
+
+func TestNormalizeAccountNameAcceptsCountryFlag(t *testing.T) {
+	got, err := normalizeAccountName("Budi \U0001F1EE\U0001F1E9")
+	if err != nil || got != "Budi \U0001F1EE\U0001F1E9" {
+		t.Fatalf("got %+q, err %v", got, err)
+	}
+}
+
+func TestAccountNameKeyTreatsLatinLookAlikesAsTheSameName(t *testing.T) {
+	groups := [][]string{
+		{"Budi", "Bud\u0131", "Budi\u0307", "Bud\u0131\u0307", "BUDI", "Bud\u00ed", "Budi\u0301"},
+		{"Raj", "Ra\u0237", "Raj\u0307", "Ra\u0237\u0307", "Ra\u0135"},
+		{"Budi", "Budi \u0307"},
+		{"Jose Zeia", "Jos\u00e9 Zeia", "Jose\u0301 Zeia", "JOS\u00c9 ZEIA"},
+		{"Zoe Putri", "Zo\u00eb Putri", "Zoe\u0308 Putri"},
+		{"Daddy Zeia", "\uff24\uff41\uff44\uff44\uff59 \uff3a\uff45\uff49\uff41", "Daddy\u00a0Zeia", "Daddy \u200b Zeia", "Daddy Zeia\ufe0f"},
+	}
+	for _, group := range groups {
+		want := accountNameKey(group[0])
+		for _, v := range group[1:] {
+			if got := accountNameKey(v); got != want {
+				t.Fatalf("%+q key = %+q, want %+q (same as %+q)", v, got, want, group[0])
+			}
+		}
+	}
+}
+
+func TestAccountNameKeyKeepsMarksOnNonLatinBases(t *testing.T) {
+	// Devanagari and Arabic marks (including Arabic harakat, an accepted limitation: harakat-only
+	// variants of an Arabic name are NOT detected as the same name) must keep names distinct.
+	pairs := [][2]string{
+		{"\u0915\u093f", "\u0915"},                         // Devanagari ki vs ka
+		{"\u0915\u0902", "\u0915"},                         // Devanagari anusvara (Mn)
+		{"\u0643\u062a\u0628", "\u0643\u064e\u062a\u0628"}, // Arabic with fatha
+		{"Budi", "Budi \u0915"},
+	}
+	for _, p := range pairs {
+		if accountNameKey(p[0]) == accountNameKey(p[1]) {
+			t.Fatalf("%+q and %+q share a key", p[0], p[1])
+		}
+	}
+}
+
+func TestRenameLatinLookAlikesCollideBothDirections(t *testing.T) {
+	lookAlikes := []string{"Bud\u0131", "Budi\u0307", "Bud\u0131\u0307", "Bud\u00ed"}
+	check := func(stored, candidate string) {
+		h := renameHarness(t)
+		h.repository.otherNames = []string{stored}
+		_, err := h.service.Rename(context.Background(), renameInput(candidate))
+		var validation *serviceidentity.ValidationError
+		if !errors.As(err, &validation) || validation.Reason != ReasonNameTaken || h.repository.namesCalls != 1 {
+			t.Fatalf("stored %+q vs %+q: err = %v, names calls = %d", stored, candidate, err, h.repository.namesCalls)
+		}
+		assertNoWrites(t, h)
+	}
+	for _, v := range lookAlikes {
+		check("Budi", v)
+		check(v, "Budi")
+	}
+	check("Jose", "Jos\u00e9")
+	check("Jos\u00e9", "Jose")
+	check("Zo\u00eb Putri", "Zoe Putri")
+}
+
+func TestRenameStoresTheNameAsTypedNotTheComparisonKey(t *testing.T) {
+	h := renameHarness(t)
+	h.repository.otherNames = []string{"Somebody Else"}
+	got, err := h.service.Rename(context.Background(), renameInput("bud\u0131 jos\u00e9"))
+	if err != nil || h.repository.updatedName != "Bud\u0131 Jos\u00e9" || got.Name != h.repository.updatedName {
+		t.Fatalf("result = %+v, err = %v, stored %+q", got, err, h.repository.updatedName)
 	}
 }
