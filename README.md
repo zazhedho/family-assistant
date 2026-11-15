@@ -287,8 +287,8 @@ X-Hermes-Channel: whatsapp
 ```
 
 The endpoint is `http://127.0.0.1:8081/mcp` by default. With scheduled messages
-disabled, it exposes these **26 tools**; enabling the feature adds six
-more, for 32 total. Hermes adds its MCP server prefix to tool names:
+disabled, it exposes these **27 tools**; enabling the feature adds six
+more, for 33 total. Hermes adds its MCP server prefix to tool names:
 
 | Tool | Purpose |
 | --- | --- |
@@ -305,6 +305,7 @@ more, for 32 total. Hermes adds its MCP server prefix to tool names:
 | `member_update_role` | Change a shared Space member's role. |
 | `member_remove` | Remove a shared Space member. |
 | `invitation_create` | Issue an expiring invitation. Private chat only. |
+| `member_add_by_phone` | Add an already-registered person to a shared Space by phone, with a two-step name confirmation. Private chat only. |
 | `invitation_accept` | Accept an invitation using its token. |
 | `invitation_list` | List pending invitations without exposing their tokens. |
 | `invitation_revoke` | Revoke a pending invitation. |
@@ -319,10 +320,46 @@ more, for 32 total. Hermes adds its MCP server prefix to tool names:
 | `reminder_update` | Update a pending reminder's details, schedule, or assignee. |
 | `reminder_delete` | Cancel and soft-delete a reminder. |
 
+### Adding a member by phone
+
+`member_add_by_phone` adds a person who already has an account to a shared
+Space immediately, without an invitation to accept. Only an active owner or
+admin of that Space may use it, and only in a private chat (a group chat is
+refused with `dm_required`).
+
+- The person must already be registered: after the owner approves them in
+  Hermes they DM the bot and answer the registration questions
+  (`account_register`). The number is matched only against a verified phone of
+  a live account. No migration and no token are involved.
+- Two steps, enforced by the backend. A call without `confirm_name` only
+  previews: nothing is written and it returns the person's display name, the
+  Space, the role, and the last three digits of the number. The assistant shows
+  that to the owner; after an explicit yes it calls again with `confirm_name`
+  set to exactly that display name (trimmed, case-insensitive). A missing or
+  mismatched name is a validation error and adds nobody.
+- `role_name` is `space_member` (default), `space_viewer`, or `space_admin`;
+  never `space_owner`.
+- In a private chat always pass `space` (the shared Space's name or UUID). A
+  blank `space` selects the sender's Personal Space, which is never shared, and
+  fails with `not found`, so `not found` with a blank `space` does not mean the
+  person is unregistered.
+- Audit rows hold ids only (Space, actor, target user, role). Successful
+  previews are audited too. The phone number and display name are never
+  stored in audit rows or logs.
+- Accepted exposure: any user who owns a shared Space can resolve a verified
+  phone number to a display name. This is accepted for a household deployment
+  gated by the Hermes allowlist, and previews are audited.
+- Failures: `not found` means a wrong number, a person who has not registered
+  yet, or a blank `space` in a private chat; `conflict` means the person is
+  already a member of the Space.
+
+Bearer invitations (`invitation_create`, `invitation_accept`) still exist for
+people who have no account yet.
+
 ### Scheduled messages: opt-in rollout
 
 `SCHEDULED_MESSAGES_ENABLED` defaults to `false`. While disabled, the scheduled-message
-worker and six tools below are absent; the existing 26 tools (including
+worker and six tools below are absent; the existing 27 tools (including
 `space_channel_bind`) and reminder lane are unaffected. Apply migration 12 before enabling the feature. Fixed messages do not need
 an AI generator; AI-generated content does.
 
@@ -546,12 +583,12 @@ The request's `model` value does not select or isolate a profile.
    hermes mcp test family_assistant
    ```
 
-   Verify the MCP catalog now has all 32 tools and the scheduled-message worker
+   Verify the MCP catalog now has all 33 tools and the scheduled-message worker
    started. Use your configured MCP server name if it differs from `family_assistant`.
-   The Hermes connection test must succeed: raw `tools/list` returning 32 entries
+   The Hermes connection test must succeed: raw `tools/list` returning 33 entries
    does not prove the client accepts their schemas. If discovery fails, disable
-   the lane and restore the 26-tool catalog before investigating the reported error.
-   Restart/reconnect Hermes if it cached the earlier 26-tool catalog, then repeat
+   the lane and restore the 27-tool catalog before investigating the reported error.
+   Restart/reconnect Hermes if it cached the earlier 27-tool catalog, then repeat
    the connection test.
    To disable the lane, set the flag back to `false` and recreate the backend;
    retain migration 12 and its history tables.
@@ -730,7 +767,8 @@ Shared chats (groups, threads, and channels) differ from DMs in several ways:
   assistant should ask which Space to use. Explicit selectors, including
   Personal, are honored. Activities recorded in a group before this change live
   in the members' Personal Spaces.
-- `account_register`, `identity_link`, and `invitation_create` are refused in
+- `account_register`, `identity_link`, `invitation_create`, and
+  `member_add_by_phone` are refused in
   non-DM chats with code `dm_required` ("must be done in a private chat"),
   because their input or output (such as an invitation token) must not enter a
   shared session.
