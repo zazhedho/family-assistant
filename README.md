@@ -779,9 +779,13 @@ can rename someone else. An unlinked sender gets `authentication required`.
   emojis) are not.
 - Impersonation guard: a name equal to the name of another active member of any
   Space the person shares is refused. The comparison ignores case, spacing,
-  invisible characters, and Unicode look-alike forms such as full-width letters
-  or accent encodings. Cross-script look-alikes (for example a Cyrillic letter
-  that resembles a Latin one) are not detected.
+  invisible characters, Unicode compatibility forms (such as full-width
+  letters), and diacritics and dotless-i look-alikes on Latin letters, so `Jose`
+  and `José` count as the same name. Cross-script look-alikes (for example a
+  Cyrillic letter that resembles a Latin one) are not detected.
+- The character rules and the impersonation guard apply to `account_rename` and
+  to registration only. They do not apply to the REST user update
+  (`PUT /api/user`), which only strips HTML and applies Title Case.
 - A name equal to the current name returns status `unchanged` and writes nothing;
   a successful change returns `renamed`.
 - Validation failures reach the bot with their reason (`invalid input: name ...`)
