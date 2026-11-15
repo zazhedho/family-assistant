@@ -38,6 +38,12 @@ type mcpInvitationServiceStub struct {
 	revokeSpace  string
 	revokeID     string
 	revokeErr    error
+
+	memberAddResult *dto.MemberAddResult
+	memberAddErr    error
+	memberAddUserID string
+	memberAddInput  dto.MemberAddByPhoneInput
+	memberAddCalls  int
 }
 
 func (s *mcpInvitationServiceStub) Create(_ context.Context, userID string, input dto.InvitationCreateInput) (*domaininvitation.Invitation, string, error) {
@@ -179,8 +185,10 @@ func TestInvitationToolsRequireLinkedActor(t *testing.T) {
 	}
 }
 
-func (s *mcpInvitationServiceStub) AddMemberByPhone(context.Context, string, dto.MemberAddByPhoneInput) (*dto.MemberAddResult, error) {
-	return nil, nil
+func (s *mcpInvitationServiceStub) AddMemberByPhone(_ context.Context, userID string, input dto.MemberAddByPhoneInput) (*dto.MemberAddResult, error) {
+	s.memberAddCalls++
+	s.memberAddUserID, s.memberAddInput = userID, input
+	return s.memberAddResult, s.memberAddErr
 }
 
 var _ interfaceinvitation.ServiceInvitationInterface = (*mcpInvitationServiceStub)(nil)
