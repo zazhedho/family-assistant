@@ -167,6 +167,8 @@ func TestRenameRejectsInvalidNamesWithoutWriting(t *testing.T) {
 	}
 }
 
+const collisionReason = "is already used by another member of your Spaces"
+
 func sharedNames() []string {
 	return []string{
 		"Daddy Zeia",
@@ -184,7 +186,7 @@ func TestRenameRejectsAdversarialSpellingsOfSharedMemberNames(t *testing.T) {
 		"\uff24\uff41\uff44\uff44\uff59 \uff3a\uff45\uff49\uff41",
 		"Jos\u00e9 Zeia", "Jose\u0301 Zeia", "JOSE\u0301 ZEIA",
 		"Zo\u00eb Putri", "Zoe\u0308 Putri", "zo\u00cb putri",
-		"MommyZeia", "Mommy Zeia\u00ad",
+		"MommyZeia", "Daddy Zeia\ufe0f", "Daddy\ufe0f Zeia", "Daddy Zeia\ufe00",
 		"Double Spaced Name", "double  spaced   name",
 	}
 	for _, attempt := range attempts {
@@ -192,8 +194,8 @@ func TestRenameRejectsAdversarialSpellingsOfSharedMemberNames(t *testing.T) {
 		h.repository.otherNames = sharedNames()
 		_, err := h.service.Rename(context.Background(), renameInput(attempt))
 		var validation *serviceidentity.ValidationError
-		if !errors.As(err, &validation) || validation.Field != "name" {
-			t.Fatalf("%+q: err = %v, want ValidationError on name", attempt, err)
+		if !errors.As(err, &validation) || validation.Field != "name" || validation.Reason != collisionReason || h.repository.namesCalls != 1 {
+			t.Fatalf("%+q: err = %v, names calls = %d, want the collision error", attempt, err, h.repository.namesCalls)
 		}
 		if strings.Contains(strings.ToLower(validation.Reason), "daddy") {
 			t.Fatalf("reason echoes name: %q", validation.Reason)
@@ -349,7 +351,7 @@ func TestRegisterStoresNFCName(t *testing.T) {
 }
 
 func TestNormalizeAccountNameKeepsValidSpecialNames(t *testing.T) {
-	for raw, want := range map[string]string{"rheina\U0001f98b": "Rheina\U0001f98b", "o'neil": "O'neil", "\u00f1andu\u0301": "\u00d1and\u00fa", "mcdonald": "Mcdonald"} {
+	for raw, want := range map[string]string{"rheina\U0001f98b": "Rheina\U0001f98b", "o'neil": "O'neil", "\u00f1andu\u0301": "\u00d1and\u00fa", "mcdonald": "Mcdonald", "rheina\u2764\ufe0f": "Rheina\u2764\ufe0f", "plane\u2708\ufe0f x": "Plane\u2708\ufe0f X"} {
 		got, err := normalizeAccountName(raw)
 		if err != nil || got != want {
 			t.Fatalf("%+q: got %+q, err %v, want %+q", raw, got, err, want)
@@ -365,5 +367,83 @@ func TestLinkExistingFailureAuditCategoryNotLinked(t *testing.T) {
 	}
 	if len(h.audit.events) != 1 || h.audit.events[0].ErrorMessage != "not_linked" {
 		t.Fatalf("audit = %#v", h.audit.events)
+	}
+}
+
+func TestRenameRejectsFakeSpaceCharactersAsNewNames(t *testing.T) {
+	for _, r := range []rune{0x034f, 0x115f, 0x1160, 0x17b4, 0x17b5, 0x180b, 0x180c, 0x180d, 0x180e, 0x180f, 0x2800, 0x3164, 0xffa0} {
+		h := renameHarness(t)
+		h.repository.otherNames = sharedNames()
+		_, err := h.service.Rename(context.Background(), renameInput("Daddy"+string(r)+"Zeia"))
+		var validation *serviceidentity.ValidationError
+		if !errors.As(err, &validation) || validation.Field != "name" || h.repository.namesCalls != 0 {
+			t.Fatalf("U+%04X: err = %v, names calls = %d, want the character rule", r, err, h.repository.namesCalls)
+		}
+		assertNoWrites(t, h)
+	}
+}
+
+func TestRenameCollidesWithStoredNamesContainingInvisibleOrWideCharacters(t *testing.T) {
+	spaced := []string{"Daddy \u200b Zeia", "Daddy\ufe0f Zeia", "Daddy Zeia\ufe0f", "Daddy  \u2060 Zeia", "\uff24\uff41\uff44\uff44\uff59 \uff3a\uff45\uff49\uff41"}
+	glued := []string{
+		"Daddy\ufe00Zeia", "Daddy\u034fZeia", "Daddy\u3164Zeia", "Daddy\u2800Zeia", "Daddy\u115fZeia", "Daddy\u1160Zeia", "Daddy\uffa0Zeia",
+		"Daddy\u17b4Zeia", "Daddy\u17b5Zeia", "Daddy\u180bZeia", "Daddy\u180eZeia", "Daddy\u00adZeia", "Daddy\U000e0001Zeia", "Daddy\u200bZeia",
+	}
+	check := func(stored, candidate string) {
+		h := renameHarness(t)
+		h.repository.otherNames = []string{stored}
+		_, err := h.service.Rename(context.Background(), renameInput(candidate))
+		var validation *serviceidentity.ValidationError
+		if !errors.As(err, &validation) || validation.Reason != collisionReason || h.repository.namesCalls != 1 {
+			t.Fatalf("stored %+q vs %q: err = %v, names calls = %d", stored, candidate, err, h.repository.namesCalls)
+		}
+		assertNoWrites(t, h)
+	}
+	for _, stored := range spaced {
+		check(stored, "Daddy Zeia")
+	}
+	for _, stored := range glued {
+		check(stored, "DaddyZeia")
+	}
+}
+
+func TestAccountNameKeyDropsInvisiblesBeforeCollapsingSpaces(t *testing.T) {
+	if got, want := accountNameKey("Daddy \u200b Zeia"), accountNameKey("Daddy Zeia"); got != want {
+		t.Fatalf("key = %q, want %q", got, want)
+	}
+}
+
+func TestAccountNameKeyDropsEveryDefaultIgnorableCodePoint(t *testing.T) {
+	// Unicode DerivedCoreProperties Default_Ignorable_Code_Point (Unicode 15/16), written out by hand
+	// because the data file is not available offline; plus U+2800 by controller decision.
+	ranges := [][2]rune{
+		{0x00ad, 0x00ad}, {0x034f, 0x034f}, {0x061c, 0x061c}, {0x115f, 0x1160}, {0x17b4, 0x17b5}, {0x180b, 0x180f},
+		{0x200b, 0x200f}, {0x202a, 0x202e}, {0x2060, 0x206f}, {0x2800, 0x2800}, {0x3164, 0x3164}, {0xfe00, 0xfe0f}, {0xfeff, 0xfeff},
+		{0xffa0, 0xffa0}, {0xfff0, 0xfff8}, {0x1bca0, 0x1bca3}, {0x1d173, 0x1d17a}, {0xe0000, 0xe0fff},
+	}
+	for _, rg := range ranges {
+		for r := rg[0]; r <= rg[1]; r++ {
+			if got := accountNameKey("a" + string(r) + "b"); got != "ab" {
+				t.Fatalf("U+%04X not dropped from the key: %q", r, got)
+			}
+		}
+	}
+}
+
+func TestRenameAllowsVariationSelectorEmojiNames(t *testing.T) {
+	h := renameHarness(t)
+	got, err := h.service.Rename(context.Background(), renameInput("Rheina\u2764\ufe0f"))
+	if err != nil || got.Status != StatusRenamed || h.repository.updatedName != "Rheina\u2764\ufe0f" {
+		t.Fatalf("result = %+v, err = %v, stored %+q", got, err, h.repository.updatedName)
+	}
+}
+
+func TestRenameFullWidthStoredNameCollidesWithPlainName(t *testing.T) {
+	h := renameHarness(t)
+	h.repository.otherNames = []string{"\uff24\uff41\uff44\uff44\uff59 \uff3a\uff45\uff49\uff41"}
+	_, err := h.service.Rename(context.Background(), renameInput("Daddy Zeia"))
+	var validation *serviceidentity.ValidationError
+	if !errors.As(err, &validation) || validation.Reason != collisionReason || h.repository.namesCalls != 1 {
+		t.Fatalf("err = %v, names calls = %d", err, h.repository.namesCalls)
 	}
 }

@@ -114,20 +114,43 @@ func normalizeAccountName(raw string) (string, error) {
 	return name, nil
 }
 
+// isForbiddenNameRune rejects control, format, private-use, surrogate and line/paragraph separator
+// characters, plus the invisible fillers that have no legitimate use in a person's name and only
+// serve to fake spaces. Variation selectors are deliberately allowed (U+FE0F is part of ordinary
+// emoji); they are only dropped from the comparison key.
 func isForbiddenNameRune(r rune) bool {
-	return r == utf8.RuneError || unicode.In(r, unicode.Cc, unicode.Cf, unicode.Co, unicode.Cs, unicode.Zl, unicode.Zp)
+	switch r {
+	case utf8.RuneError, 0x034f, 0x115f, 0x1160, 0x17b4, 0x17b5, 0x2800, 0x3164, 0xffa0:
+		return true
+	}
+	if r >= 0x180b && r <= 0x180f {
+		return true
+	}
+	return unicode.In(r, unicode.Cc, unicode.Cf, unicode.Co, unicode.Cs, unicode.Zl, unicode.Zp)
+}
+
+// isInvisibleNameRune reports characters that render as nothing (Default_Ignorable_Code_Point plus
+// the braille blank), so they must not influence a name comparison.
+func isInvisibleNameRune(r rune) bool {
+	switch r {
+	case 0x034f, 0x115f, 0x1160, 0x17b4, 0x17b5, 0x2800, 0x3164, 0xffa0:
+		return true
+	}
+	if r >= 0x180b && r <= 0x180f {
+		return true
+	}
+	return unicode.In(r, unicode.Cf, unicode.Cc, unicode.Variation_Selector, unicode.Other_Default_Ignorable_Code_Point)
 }
 
 // accountNameKey is the identity of a display name for impersonation checks: compatibility
-// normalization (full-width forms, NBSP and other spaces), collapsed spaces, no format or control
-// characters, case folded. Both sides of every comparison must go through it.
+// normalization (full-width forms, NBSP and other spaces), invisible characters dropped, THEN spaces
+// collapsed (so a stored "a <ZWSP> b" equals "a b"), case folded. Both sides of every comparison must go through it.
 func accountNameKey(name string) string {
-	name = strings.Join(strings.Fields(norm.NFKC.String(name)), " ")
 	name = strings.Map(func(r rune) rune {
-		if unicode.In(r, unicode.Cf, unicode.Cc) {
+		if isInvisibleNameRune(r) {
 			return -1
 		}
 		return r
-	}, name)
-	return cases.Fold().String(name)
+	}, norm.NFKC.String(name))
+	return cases.Fold().String(strings.Join(strings.Fields(name), " "))
 }
