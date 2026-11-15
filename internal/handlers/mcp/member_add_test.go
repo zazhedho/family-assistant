@@ -337,6 +337,9 @@ func TestMemberAddSchemaInputsAreStrings(t *testing.T) {
 	if desc := fmt.Sprint(props["phone"].(map[string]any)["description"]); !strings.Contains(desc, "0812-3456-7890") {
 		t.Fatalf("phone description lacks an example: %q", desc)
 	}
+	if desc := strings.ToLower(fmt.Sprint(props["space"].(map[string]any)["description"])); !strings.Contains(desc, "always pass") || !strings.Contains(desc, "personal space") {
+		t.Fatalf("space description lacks the always-pass rule: %q", desc)
+	}
 	if desc := fmt.Sprint(props["role_name"].(map[string]any)["description"]); !strings.Contains(desc, "space_admin") || !strings.Contains(desc, "space_member") || !strings.Contains(desc, "space_viewer") {
 		t.Fatalf("role_name description = %q", desc)
 	}
@@ -350,6 +353,7 @@ func TestMemberAddDescriptionIsTheBotManual(t *testing.T) {
 		"without confirm_name", "show", "explicit yes", "never chain", "exactly", "never guess",
 		"not found", "must dm the bot", "already a member", "immediately", "space_member",
 		"invitation_create", "no account yet",
+		"always pass space", "personal space", "does not mean the person is unregistered",
 	} {
 		if !strings.Contains(description, phrase) {
 			t.Errorf("description lacks %q:\n%s", phrase, info.description)

@@ -29,7 +29,7 @@ type InvitationCreateOutput struct {
 }
 
 type MemberAddByPhoneInput struct {
-	Space       string `json:"space,omitempty" jsonschema:"shared Space UUID or exact name"`
+	Space       string `json:"space,omitempty" jsonschema:"the shared Space's UUID or exact name; in a private chat ALWAYS pass it, because blank selects the sender's Personal Space which is never a shared Space and fails with not found"`
 	Phone       string `json:"phone" jsonschema:"the person's WhatsApp number exactly as the owner gave it, for example 0812-3456-7890 or 6281234567890; never guess or complete a number"`
 	RoleName    string `json:"role_name,omitempty" jsonschema:"space_admin, space_member, or space_viewer; blank means space_member"`
 	ConfirmName string `json:"confirm_name,omitempty" jsonschema:"leave blank on the first call; on the second call set it to exactly the display_name the preview returned, only after the owner said yes"`
@@ -57,7 +57,8 @@ const (
 		"Only after the owner says yes, call again with confirm_name set to EXACTLY that display_name. " +
 		"Never guess or complete a phone number; use only what the owner typed. " +
 		"The person is added with the chosen role_name (space_admin, space_member or space_viewer; default space_member). " +
-		"On a 'not found' error tell the owner that the person must DM the bot and complete registration first, or that the number is wrong. " +
+		"In a private chat ALWAYS pass space (the shared Space's name or UUID): leaving it blank selects the sender's Personal Space, which is never a shared Space, and the call then fails with 'not found'. A 'not found' with a blank space does NOT mean the person is unregistered. " +
+		"On a 'not found' error with space set, tell the owner that the person must DM the bot and complete registration first, or that the number is wrong. " +
 		"On a 'conflict' error tell the owner the person is already a member of this Space. " +
 		"For someone who has no account yet, use invitation_create (a bearer invitation) instead."
 )
