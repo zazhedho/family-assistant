@@ -92,6 +92,12 @@ func AccountRename(ctx context.Context, registrar interfaceonboarding.ServiceOnb
 		if errors.Is(err, domainidentity.ErrIdentityNotFound) {
 			return AccountRenameOutput{}, MapToolError(serviceidentity.ErrUnauthenticated)
 		}
+		// Rename returns the identity ValidationError, which MapToolError reduces to a
+		// bare "invalid input". Its reasons are server-written constants (never the
+		// attempted name), so show field and reason so the bot can ask for another name.
+		if validation, ok := errors.AsType[*serviceidentity.ValidationError](err); ok {
+			return AccountRenameOutput{}, &MCPError{Code: "invalid_input", Message: invalidInputMessage(validation.Field, validation.Reason), cause: err}
+		}
 		return AccountRenameOutput{}, MapToolError(err)
 	}
 	return AccountRenameOutput{Status: result.Status, Name: result.Name}, nil
@@ -105,7 +111,9 @@ const accountRenameDescription = "Renames ONLY the account of the person who is 
 	"If the name is already used by another member in any of their Spaces it is refused: ask for a different name. " +
 	"Past records show the new name, because attribution uses the account's current name. " +
 	"Space names (including their Personal Space label) are NOT renamed. " +
-	"There is no undo except renaming again. Returns {status: renamed|unchanged, name}."
+	"There is no undo except renaming again. " +
+	"If the call returns `authentication required`, the sender has no account yet: continue with `account_link` and, if that finds none, the registration flow (`account_register`) in a private chat. " +
+	"Returns {status: renamed|unchanged, name}."
 
 func registerAccountTools(server *mcpsdk.Server, registrar interfaceonboarding.ServiceOnboardingInterface) {
 	addTool(server, &mcpsdk.Tool{
@@ -120,6 +128,8 @@ func registerAccountTools(server *mcpsdk.Server, registrar interfaceonboarding.S
 	}, func(ctx context.Context, _ struct{}) (AccountRegisterOutput, error) {
 		return AccountLink(ctx, registrar)
 	})
+	// Registered only with a registrar, like other tools whose service is optional: without one
+	// the tool would be advertised to the bot but could only ever fail.
 	if registrar != nil {
 		addTool(server, &mcpsdk.Tool{
 			Name:        "account_rename",

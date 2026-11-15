@@ -14,6 +14,7 @@ import (
 	"family-assistant/internal/dto"
 	interfaceonboarding "family-assistant/internal/interfaces/onboarding"
 	serviceauthorization "family-assistant/internal/services/authorization"
+	serviceidentity "family-assistant/internal/services/identity"
 	"family-assistant/pkg/config"
 )
 
@@ -157,12 +158,21 @@ func TestAccountRenameThroughSDKUnlinkedCaller(t *testing.T) {
 	}
 }
 
+// The reasons below are copied verbatim from internal/services/onboarding/rename.go,
+// which returns them as *serviceidentity.ValidationError (not the authorization type).
+// If the service wording changes, update them here.
+var renameServiceReasons = []string{
+	"is already used by another member of your Spaces",
+	"must contain 3 to 100 characters",
+	"contains characters that are not allowed",
+}
+
 func TestAccountRenameValidationErrorNamesFieldAndNeverTheName(t *testing.T) {
-	for _, reason := range []string{"must be 3 to 100 characters", "is already used by another member of your spaces"} {
+	for i, reason := range renameServiceReasons {
 		t.Run(reason, func(t *testing.T) {
-			service := &registrarStub{renameErr: &serviceauthorization.ValidationError{Field: "name", Reason: reason}}
+			service := &registrarStub{renameErr: &serviceidentity.ValidationError{Field: "name", Reason: reason}}
 			server := newAccountRenameServer(t, service)
-			resp := callAccountRename(t, server, map[string]any{"name": renameAttemptedName}, directIdentity("nonce-rename-invalid-"+reason[:4]))
+			resp := callAccountRename(t, server, map[string]any{"name": renameAttemptedName}, directIdentity(fmt.Sprintf("nonce-rename-invalid-%d", i)))
 			if resp.Result == nil || !resp.Result.IsError {
 				t.Fatalf("response = %+v", resp)
 			}
@@ -172,6 +182,22 @@ func TestAccountRenameValidationErrorNamesFieldAndNeverTheName(t *testing.T) {
 			}
 			if strings.Contains(text, "Zorblax") || strings.Contains(text, "Quimby") {
 				t.Fatalf("error echoes the attempted name: %q", text)
+			}
+		})
+	}
+}
+
+func TestAccountRenameDirectValidationErrorsKeepTheirReason(t *testing.T) {
+	wrapped := fmt.Errorf("rename: %w", &serviceidentity.ValidationError{Field: "name", Reason: renameServiceReasons[0]})
+	for name, serviceErr := range map[string]error{
+		"identity type":      wrapped,
+		"authorization type": &serviceauthorization.ValidationError{Field: "name", Reason: renameServiceReasons[0]},
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := AccountRename(renameTestContext(), &registrarStub{renameErr: serviceErr}, AccountRenameInput{Name: renameAttemptedName})
+			assertMCPCode(t, err, "invalid_input")
+			if err.Error() != "invalid input: name "+renameServiceReasons[0] {
+				t.Fatalf("message = %q", err.Error())
 			}
 		})
 	}
@@ -269,6 +295,10 @@ func TestAccountRenameDescriptionIsTheBotManual(t *testing.T) {
 		"not renamed",
 		"no undo",
 		"renaming again",
+		"authentication required",
+		"no account yet",
+		"`account_link`",
+		"`account_register`",
 	} {
 		if !strings.Contains(description, phrase) {
 			t.Errorf("description lacks %q:\n%s", phrase, info.description)
