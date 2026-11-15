@@ -420,3 +420,20 @@ func TestAddMemberMissingPersonalOrInactiveSpaceIsNotFound(t *testing.T) {
 		t.Fatal("blank role id accepted")
 	}
 }
+
+func TestAddMemberPassesThroughNonDuplicateInsertError(t *testing.T) {
+	db, mock := newInvitationMockDB(t)
+	repo := NewRepository(db)
+	now := time.Date(2026, 9, 20, 11, 0, 0, 0, time.UTC)
+	boom := errors.New("connection reset")
+	mock.ExpectBegin()
+	mock.ExpectQuery(`SELECT .*FROM "spaces".*FOR UPDATE`).WithArgs("space-1", domainspace.TypeShared, domainspace.StatusActive, 1).
+		WillReturnRows(spaceRows("space-1", domainspace.TypeShared, domainspace.StatusActive))
+	mock.ExpectExec(`INSERT INTO "space_members"`).WillReturnError(boom)
+	mock.ExpectRollback()
+
+	_, err := repo.AddMember(context.Background(), "space-1", "user-2", "role-member", now)
+	if !errors.Is(err, boom) || errors.Is(err, domaininvitation.ErrMembershipConflict) {
+		t.Fatalf("error = %v, want the original insert error", err)
+	}
+}

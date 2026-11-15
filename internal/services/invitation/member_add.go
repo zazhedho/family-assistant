@@ -10,11 +10,13 @@ import (
 	"family-assistant/internal/dto"
 	serviceauthorization "family-assistant/internal/services/authorization"
 	"family-assistant/utils"
+	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
 
 const (
 	memberAuditResource = "space_member"
+	memberPreviewAction = "member_preview"
 	minMemberPhoneLen   = 9
 	maxMemberPhoneLen   = 15
 	phoneTailLen        = 3
@@ -49,9 +51,17 @@ func normalizeMemberPhone(raw string) (string, error) {
 // preview (no write, no audit); with a confirm_name that does not equal the
 // account's display name (trimmed, case-insensitive) it fails on confirm_name.
 //
-// Accepted exposure: an owner/admin can learn whether a verified account exists
-// for a number, and its display name, only via the preview. Unknown and
-// unverified numbers return the same not-found error.
+// Accepted exposure: any registered user who owns a shared Space can resolve a
+// verified phone number to its account's display name through the preview (and
+// learn the last 3 digits only in the output). This is accepted for a household
+// deployment gated by the Hermes allowlist. Every successful preview is audited
+// (ids only: actor, space, target user, role; never the phone or the name) so such
+// lookups are detectable. Unknown and unverified numbers return the same
+// not-found error. A PERSONAL or inactive Space is reported as not found.
+//
+// Duplicate detection follows the unique index on space_members, exactly as in
+// Accept: an existing member (any status) conflicts, while a soft-deleted former
+// member gets a fresh row.
 func (s *service) AddMemberByPhone(ctx context.Context, actorUserID string, input dto.MemberAddByPhoneInput) (*dto.MemberAddResult, error) {
 	actorUserID = strings.TrimSpace(actorUserID)
 	spaceID := strings.TrimSpace(input.SpaceID)
@@ -61,7 +71,7 @@ func (s *service) AddMemberByPhone(ctx context.Context, actorUserID string, inpu
 		return nil, err
 	}
 
-	actor, err := s.invitationActor(ctx, actorUserID, spaceID, createPermission)
+	actor, err := s.invitationActorWith(ctx, actorUserID, spaceID, createPermission, ErrNotFound)
 	if err != nil {
 		return fail("", "", err)
 	}
@@ -98,6 +108,7 @@ func (s *service) AddMemberByPhone(ctx context.Context, actorUserID string, inpu
 	}}
 	confirm := strings.TrimSpace(input.ConfirmName)
 	if confirm == "" {
+		s.writeMemberAudit(ctx, memberPreviewAction, "", spaceID, actor.ID, actorUserID, roleName, target.ID, "Previewed member by phone")
 		return result, nil
 	}
 	if result.Preview.DisplayName == "" || !strings.EqualFold(confirm, result.Preview.DisplayName) {
@@ -111,24 +122,36 @@ func (s *service) AddMemberByPhone(ctx context.Context, actorUserID string, inpu
 	if err != nil {
 		return fail(actor.ID, target.ID, err)
 	}
-	event := s.newAuditEvent(ctx, auditEventInput{
-		action:     domainaudit.ActionCreate,
-		resource:   memberAuditResource,
-		resourceID: member.ID,
-		spaceID:    spaceID,
-		memberID:   actor.ID,
-		userID:     actorUserID,
-		roleName:   roleName,
-		targetUser: target.ID,
-	})
-	event.Status = domainaudit.StatusSuccess
-	event.Message = "Added space member by phone"
-	s.writeAudit(ctx, event)
+	s.writeMemberAudit(ctx, domainaudit.ActionCreate, member.ID, spaceID, actor.ID, actorUserID, roleName, target.ID, "Added space member by phone")
 	result.Added, result.Member = true, member
 	return result, nil
 }
 
+func (s *service) writeMemberAudit(ctx context.Context, action, resourceID, spaceID, memberID, actorUserID, roleName, targetUserID, message string) {
+	event := s.newAuditEvent(ctx, auditEventInput{
+		action:     action,
+		resource:   memberAuditResource,
+		resourceID: resourceID,
+		spaceID:    spaceID,
+		memberID:   memberID,
+		userID:     actorUserID,
+		roleName:   roleName,
+		targetUser: targetUserID,
+	})
+	event.Status = domainaudit.StatusSuccess
+	event.Message = message
+	s.writeAudit(ctx, event)
+}
+
+// writeMemberAddFailure never echoes caller-controlled strings: the role is
+// recorded only if it is an allowed target role and the space only if it is a UUID.
 func (s *service) writeMemberAddFailure(ctx context.Context, spaceID, memberID, actorUserID, roleName, targetUserID string, err error) {
+	if !validTargetRole(roleName) {
+		roleName = ""
+	}
+	if _, parseErr := uuid.Parse(spaceID); parseErr != nil {
+		spaceID = ""
+	}
 	event := s.newAuditEvent(ctx, auditEventInput{
 		action:     domainaudit.ActionCreate,
 		resource:   memberAuditResource,

@@ -350,6 +350,12 @@ func (s *service) Revoke(ctx context.Context, userID, spaceID, invitationID stri
 }
 
 func (s *service) invitationActor(ctx context.Context, userID, spaceID, permission string) (*domainspace.ResolvedMembership, error) {
+	return s.invitationActorWith(ctx, userID, spaceID, permission, ErrForbidden)
+}
+
+// invitationActorWith is invitationActor with a caller-chosen error for a
+// PERSONAL or inactive Space.
+func (s *service) invitationActorWith(ctx context.Context, userID, spaceID, permission string, nonSharedErr error) (*domainspace.ResolvedMembership, error) {
 	userID = strings.TrimSpace(userID)
 	spaceID = strings.TrimSpace(spaceID)
 	if userID == "" {
@@ -372,7 +378,7 @@ func (s *service) invitationActor(ctx context.Context, userID, spaceID, permissi
 		return nil, ErrNotFound
 	}
 	if actor.SpaceType != domainspace.TypeShared || actor.Status != domainspace.StatusActive {
-		return nil, ErrForbidden
+		return nil, nonSharedErr
 	}
 	ok, err := s.hasPermission(ctx, actor.RoleID, permission)
 	if err != nil {

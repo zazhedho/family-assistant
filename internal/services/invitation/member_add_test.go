@@ -82,7 +82,7 @@ func TestNormalizeMemberPhone(t *testing.T) {
 	}
 }
 
-func TestMemberAddPreviewHasNoWriteAndNoAudit(t *testing.T) {
+func TestMemberAddPreviewHasNoWrite(t *testing.T) {
 	repo, audit := targetRepo(), &invitationAuditStub{}
 	svc := memberAddService(repo, ownerMembership(), nil, audit)
 	for _, confirm := range []string{"", "   "} {
@@ -98,8 +98,11 @@ func TestMemberAddPreviewHasNoWriteAndNoAudit(t *testing.T) {
 			t.Fatalf("preview = %+v, want %+v", res.Preview, want)
 		}
 	}
-	if repo.addCalls != 0 || len(audit.events) != 0 {
-		t.Fatalf("preview wrote: addCalls=%d audit=%d", repo.addCalls, len(audit.events))
+	if repo.addCalls != 0 {
+		t.Fatalf("preview wrote a membership: addCalls=%d", repo.addCalls)
+	}
+	if len(audit.events) != 2 {
+		t.Fatalf("want one preview audit per preview, got %d", len(audit.events))
 	}
 	if repo.findUserPhone != memberAddPhone {
 		t.Fatalf("lookup phone = %q", repo.findUserPhone)
@@ -184,7 +187,7 @@ func TestMemberAddAuthorization(t *testing.T) {
 		want       error
 	}{
 		{"viewer or member without permission", viewer, nil, ErrForbidden},
-		{"personal space", personal, nil, ErrForbidden},
+		{"personal space", personal, nil, ErrNotFound},
 		{"non member (nil)", nil, nil, ErrNotFound},
 		{"non member (record not found)", nil, gorm.ErrRecordNotFound, ErrNotFound},
 		{"member of another space", otherSpace, nil, ErrNotFound},
@@ -272,5 +275,124 @@ func TestMemberAddSpaceVanishedMapsToNotFound(t *testing.T) {
 	_, err := memberAddService(repo, ownerMembership(), nil, &invitationAuditStub{}).AddMemberByPhone(context.Background(), "user-owner", memberAddInput(memberAddName))
 	if !errors.Is(err, ErrNotFound) {
 		t.Fatalf("error = %v, want not found", err)
+	}
+}
+
+func TestMemberAddPreviewAuditsIDsOnly(t *testing.T) {
+	repo, audit := targetRepo(), &invitationAuditStub{}
+	svc := memberAddService(repo, ownerMembership(), nil, audit)
+	if _, err := svc.AddMemberByPhone(context.Background(), "user-owner", memberAddInput("")); err != nil {
+		t.Fatalf("preview: %v", err)
+	}
+	if repo.addCalls != 0 || len(audit.events) != 1 {
+		t.Fatalf("addCalls=%d audit=%d", repo.addCalls, len(audit.events))
+	}
+	event := audit.events[0]
+	if event.Action != "member_preview" || event.Status != domainaudit.StatusSuccess || event.Resource != "space_member" || event.ActorMemberID != "member-owner" || event.ActorUserID != "user-owner" {
+		t.Fatalf("event = %+v", event)
+	}
+	if event.Metadata["space_id"] != "space-1" || event.Metadata["target_user_id"] != memberAddTargetID || event.Metadata["role"] != "space_member" {
+		t.Fatalf("metadata = %+v", event.Metadata)
+	}
+	encoded, _ := json.Marshal(event)
+	for _, secret := range []string{"2763", "6100", "0895", memberAddPhone, memberAddName, "Siti", "Nurhaliza"} {
+		if strings.Contains(string(encoded), secret) {
+			t.Fatalf("preview audit leaked %q: %s", secret, encoded)
+		}
+	}
+}
+
+func TestMemberAddPersonalSpaceReturnsSameNotFoundAsMissing(t *testing.T) {
+	personal := ownerMembership()
+	personal.SpaceType = domainspace.TypePersonal
+	audit := &invitationAuditStub{}
+	_, err := memberAddService(targetRepo(), personal, nil, audit).AddMemberByPhone(context.Background(), "user-owner", memberAddInput(memberAddName))
+	if !errors.Is(err, ErrNotFound) {
+		t.Fatalf("error = %v, want exactly ErrNotFound", err)
+	}
+	if len(audit.events) != 1 || audit.events[0].ErrorMessage != "not_found" {
+		t.Fatalf("audit = %+v", audit.events)
+	}
+}
+
+func TestMemberAddFailureAuditCategoryOnForbiddenAndNotFound(t *testing.T) {
+	member := &domainspace.ResolvedMembership{ID: "member-m", SpaceID: "space-1", SpaceType: domainspace.TypeShared, RoleID: "role-member", Status: domainspace.StatusActive}
+	for _, tc := range []struct {
+		name       string
+		membership *domainspace.ResolvedMembership
+		want       string
+	}{{"space_member role", member, "forbidden"}, {"non member", nil, "not_found"}} {
+		repo, audit := targetRepo(), &invitationAuditStub{}
+		svc := memberAddService(repo, tc.membership, nil, audit)
+		if _, err := svc.AddMemberByPhone(context.Background(), "user-x", memberAddInput(memberAddName)); err == nil {
+			t.Fatalf("%s: no error", tc.name)
+		}
+		if repo.findUserCalls != 0 || repo.addCalls != 0 {
+			t.Fatalf("%s: reached repo", tc.name)
+		}
+		if len(audit.events) != 1 || audit.events[0].Status != domainaudit.StatusFailed || audit.events[0].ErrorMessage != tc.want {
+			t.Fatalf("%s: audit = %+v", tc.name, audit.events)
+		}
+	}
+}
+
+func TestMemberAddSpaceAdminActorCanAdd(t *testing.T) {
+	admin := &domainspace.ResolvedMembership{ID: "member-admin", SpaceID: "space-1", SpaceName: "Keluarga", SpaceType: domainspace.TypeShared, RoleID: "role-admin", Status: domainspace.StatusActive}
+	repo := targetRepo()
+	svc := NewService(
+		repo,
+		&invitationSpaceRepositoryStub{membership: admin},
+		&invitationRoleRepositoryStub{roles: map[string]domainrole.Role{"space_member": {Id: "role-member", Name: "space_member"}}},
+		&invitationPermissionRepositoryStub{permissions: map[string][]domainpermission.Permission{"role-admin": {{Resource: "invitations", Action: "create"}}}},
+		&invitationAuditStub{},
+		config.InvitationConfig{TTL: time.Hour},
+	)
+	res, err := svc.AddMemberByPhone(context.Background(), "user-admin", memberAddInput(memberAddName))
+	if err != nil || !res.Added || repo.addCalls != 1 {
+		t.Fatalf("admin add: res=%+v err=%v adds=%d", res, err, repo.addCalls)
+	}
+}
+
+func TestMemberAddConfirmNameNeverMatchesWeirdInputs(t *testing.T) {
+	cases := []struct{ account, confirm string }{
+		{"", "x"},
+		{"   ", "x"},
+		{memberAddName, "Siti\u200bNurhaliza"},
+		{memberAddName, "Siti Nurhaliza\u200b"},
+		{"Jose", "Jos\u00e9"},
+		{"Jos\u00e9", "Jose"},
+	}
+	for _, tc := range cases {
+		repo := &invitationRepositoryStub{foundUser: &domaininvitation.UserRef{ID: memberAddTargetID, Name: tc.account}}
+		_, err := memberAddService(repo, ownerMembership(), nil, &invitationAuditStub{}).AddMemberByPhone(context.Background(), "user-owner", memberAddInput(tc.confirm))
+		var validationErr *serviceauthorization.ValidationError
+		if !errors.As(err, &validationErr) || validationErr.Field != "confirm_name" || repo.addCalls != 0 {
+			t.Fatalf("account %q confirm %q: err=%v adds=%d", tc.account, tc.confirm, err, repo.addCalls)
+		}
+	}
+}
+
+func TestMemberAddFailureAuditDoesNotEchoCallerControlledStrings(t *testing.T) {
+	repo, audit := targetRepo(), &invitationAuditStub{}
+	svc := memberAddService(repo, nil, nil, audit)
+	in := dto.MemberAddByPhoneInput{SpaceID: "evil-space-<script>", Phone: "0895", RoleName: "evil-role", ConfirmName: "x"}
+	if _, err := svc.AddMemberByPhone(context.Background(), "user-x", in); err == nil {
+		t.Fatal("want error")
+	}
+	if len(audit.events) != 1 {
+		t.Fatalf("audit = %+v", audit.events)
+	}
+	encoded, _ := json.Marshal(audit.events[0])
+	if strings.Contains(string(encoded), "evil") {
+		t.Fatalf("audit echoed caller string: %s", encoded)
+	}
+
+	// A well-formed UUID space id and a valid role are kept.
+	audit2 := &invitationAuditStub{}
+	svc = memberAddService(repo, nil, nil, audit2)
+	in = dto.MemberAddByPhoneInput{SpaceID: "0b6f1e0e-1d4f-4f5e-8f55-2f6a0c1e9a11", Phone: "0895", RoleName: "space_member"}
+	_, _ = svc.AddMemberByPhone(context.Background(), "user-x", in)
+	if audit2.events[0].Metadata["space_id"] != in.SpaceID || audit2.events[0].Metadata["role"] != "space_member" {
+		t.Fatalf("metadata = %+v", audit2.events[0].Metadata)
 	}
 }
