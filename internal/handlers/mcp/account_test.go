@@ -19,6 +19,11 @@ type registrarStub struct {
 	err       error
 	calls     int
 	linkCalls int
+
+	renameInput  dto.AccountRenameInput
+	renameResult dto.AccountRenameResult
+	renameErr    error
+	renameCalls  int
 }
 
 func (s *registrarStub) Register(_ context.Context, input dto.AccountRegistrationInput) (dto.AccountRegistrationResult, error) {
@@ -33,8 +38,10 @@ func (s *registrarStub) LinkExisting(_ context.Context, input dto.AccountLinkInp
 	return s.result, s.err
 }
 
-func (s *registrarStub) Rename(context.Context, dto.AccountRenameInput) (dto.AccountRenameResult, error) {
-	return dto.AccountRenameResult{}, s.err
+func (s *registrarStub) Rename(_ context.Context, input dto.AccountRenameInput) (dto.AccountRenameResult, error) {
+	s.renameCalls++
+	s.renameInput = input
+	return s.renameResult, s.renameErr
 }
 
 func TestAccountRegisterUsesOnlyTrustedExternalRequest(t *testing.T) {
