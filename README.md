@@ -287,8 +287,10 @@ X-Hermes-Channel: whatsapp
 ```
 
 The endpoint is `http://127.0.0.1:8081/mcp` by default. With scheduled messages
-disabled, it exposes these **27 tools**; enabling the feature adds six
-more, for 33 total. Hermes adds its MCP server prefix to tool names:
+disabled (`SCHEDULED_MESSAGES_ENABLED=false`), it exposes these **28 tools**;
+enabling the feature adds six more, for 34 total. When finance is enabled, its
+19 `finance_*` tools are additional, for 53 in production (28 + 6 + 19).
+Hermes adds its MCP server prefix to tool names:
 
 | Tool | Purpose |
 | --- | --- |
@@ -314,6 +316,7 @@ more, for 33 total. Hermes adds its MCP server prefix to tool names:
 | `activity_list` | Search note text and list activities with kind/time filters. |
 | `activity_update` | Update an activity's kind, note, or event time. |
 | `activity_delete` | Soft-delete an activity. |
+| `feeding_leftover_report` | Record leftover/finished feeding amounts (the only way to record them). |
 | `reminder_create` | Create a reminder, optionally assigned to a member. |
 | `reminder_list` | List reminders with status/time filters. |
 | `reminder_complete` | Mark the task completed. |
@@ -345,7 +348,15 @@ refused with `dm_required`).
   person is unregistered.
 - Audit rows hold ids only (Space, actor, target user, role). Successful
   previews are audited too. The phone number and display name are never
-  stored in audit rows or logs.
+  stored in audit rows or logs. A successful add is stored with
+  `action = 'create'`, `resource = 'space_member'` and message "Added space
+  member by phone". The code writes the preview as `member_preview`, but the
+  audit service humanizes the action, so the row says `member preview`: query
+  previews with `action = 'member preview' AND resource = 'space_member'` and
+  adds with `action = 'create' AND resource = 'space_member'`. Failed adds
+  (including an existing member) are recorded with `action = 'create'` and an
+  `error_message` category; an existing member is `internal`, as for invitation
+  accept.
 - Accepted exposure: any user who owns a shared Space can resolve a verified
   phone number to a display name. This is accepted for a household deployment
   gated by the Hermes allowlist, and previews are audited.
@@ -359,7 +370,7 @@ people who have no account yet.
 ### Scheduled messages: opt-in rollout
 
 `SCHEDULED_MESSAGES_ENABLED` defaults to `false`. While disabled, the scheduled-message
-worker and six tools below are absent; the existing 27 tools (including
+worker and six tools below are absent; the existing 28 tools (including
 `space_channel_bind`) and reminder lane are unaffected. Apply migration 12 before enabling the feature. Fixed messages do not need
 an AI generator; AI-generated content does.
 
@@ -583,12 +594,12 @@ The request's `model` value does not select or isolate a profile.
    hermes mcp test family_assistant
    ```
 
-   Verify the MCP catalog now has all 33 tools and the scheduled-message worker
+   Verify the MCP catalog now has all 34 tools and the scheduled-message worker
    started. Use your configured MCP server name if it differs from `family_assistant`.
-   The Hermes connection test must succeed: raw `tools/list` returning 33 entries
+   The Hermes connection test must succeed: raw `tools/list` returning 34 entries
    does not prove the client accepts their schemas. If discovery fails, disable
-   the lane and restore the 27-tool catalog before investigating the reported error.
-   Restart/reconnect Hermes if it cached the earlier 27-tool catalog, then repeat
+   the lane and restore the 28-tool catalog before investigating the reported error.
+   Restart/reconnect Hermes if it cached the earlier 28-tool catalog, then repeat
    the connection test.
    To disable the lane, set the flag back to `false` and recreate the backend;
    retain migration 12 and its history tables.
