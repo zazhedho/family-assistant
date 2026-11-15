@@ -287,15 +287,16 @@ X-Hermes-Channel: whatsapp
 ```
 
 The endpoint is `http://127.0.0.1:8081/mcp` by default. With scheduled messages
-disabled (`SCHEDULED_MESSAGES_ENABLED=false`), it exposes these **28 tools**;
-enabling the feature adds six more, for 34 total. When finance is enabled, its
-19 `finance_*` tools are additional, for 53 in production (28 + 6 + 19).
+disabled (`SCHEDULED_MESSAGES_ENABLED=false`), it exposes these **29 tools**;
+enabling the feature adds six more, for 35 total. When finance is enabled, its
+19 `finance_*` tools are additional, for 54 in production (29 + 6 + 19).
 Hermes adds its MCP server prefix to tool names:
 
 | Tool | Purpose |
 | --- | --- |
 | `account_register` | Register with name, birth date, and explicit consent; create the Personal Space and mark the WhatsApp number verified. This is the only registration path (no web UI). Private chat only. |
 | `account_link` | Link an existing account whose verified phone number matches the signed WhatsApp number. |
+| `account_rename` | Rename the sender's own account (display name only). Private chat only. See [Renaming your account](#renaming-your-account). |
 | `identity_link` | Link using a one-time code issued through an authenticated web/API session (in practice admin-assisted). Private chat only. |
 | `identity_revoke` | Revoke the current external identity link. |
 | `space_create` | Create a shared Space. |
@@ -370,7 +371,7 @@ people who have no account yet.
 ### Scheduled messages: opt-in rollout
 
 `SCHEDULED_MESSAGES_ENABLED` defaults to `false`. While disabled, the scheduled-message
-worker and six tools below are absent; the existing 28 tools (including
+worker and six tools below are absent; the existing 29 tools (including
 `space_channel_bind`) and reminder lane are unaffected. Apply migration 12 before enabling the feature. Fixed messages do not need
 an AI generator; AI-generated content does.
 
@@ -594,12 +595,12 @@ The request's `model` value does not select or isolate a profile.
    hermes mcp test family_assistant
    ```
 
-   Verify the MCP catalog now has all 34 tools and the scheduled-message worker
+   Verify the MCP catalog now has all 35 tools and the scheduled-message worker
    started. Use your configured MCP server name if it differs from `family_assistant`.
-   The Hermes connection test must succeed: raw `tools/list` returning 34 entries
+   The Hermes connection test must succeed: raw `tools/list` returning 35 entries
    does not prove the client accepts their schemas. If discovery fails, disable
-   the lane and restore the 28-tool catalog before investigating the reported error.
-   Restart/reconnect Hermes if it cached the earlier 28-tool catalog, then repeat
+   the lane and restore the 29-tool catalog before investigating the reported error.
+   Restart/reconnect Hermes if it cached the earlier 29-tool catalog, then repeat
    the connection test.
    To disable the lane, set the flag back to `false` and recreate the backend;
    retain migration 12 and its history tables.
@@ -760,6 +761,37 @@ unverified account, `account_register` returns `phone_already_registered`
 without changing or revealing anything about the other account; the user
 should contact the admin.
 
+The same name rules as renaming now apply at registration: names containing
+control or hidden characters, `<` or `>`, or joined emoji sequences are
+rejected, and stored names are normalized to Unicode NFC.
+
+### Renaming your account
+
+`account_rename` lets any registered person change the display name of their
+**own** account, from a private chat only (a group chat is refused with
+`dm_required`). There is no user or phone argument: the account renamed is
+always the one linked to the signed WhatsApp identity of the sender, so nobody
+can rename someone else. An unlinked sender gets `authentication required`.
+
+- Rules: 3 to 100 characters after normalization. The text is cleaned and shown
+  in Title Case. Control, hidden, and invisible characters and `<` `>` are
+  rejected. Emoji are allowed, but joined emoji sequences (family or couple
+  emojis) are not.
+- Impersonation guard: a name equal to the name of another active member of any
+  Space the person shares is refused. The comparison ignores case, spacing,
+  invisible characters, and Unicode look-alike forms such as full-width letters
+  or accent encodings. Cross-script look-alikes (for example a Cyrillic letter
+  that resembles a Latin one) are not detected.
+- A name equal to the current name returns status `unchanged` and writes nothing;
+  a successful change returns `renamed`.
+- Validation failures reach the bot with their reason (`invalid input: name ...`)
+  so it can ask for another name.
+- Audit: a success event records the before and after names; a failure records
+  only a category. The attempted name is never stored in audit failures or logged.
+- The Personal Space label (`<name>'s Space`) is not renamed. Past records show
+  the new name because attribution uses the current account name.
+- No migration is needed: only `users.name` (and `updated_at`) changes.
+
 `identity_link` remains the migration fallback for a different phone number and
 consumes a one-time code issued through an authenticated web/API session
 (`POST /api/hermes/link-codes`), which WhatsApp-only users cannot do themselves,
@@ -778,7 +810,7 @@ Shared chats (groups, threads, and channels) differ from DMs in several ways:
   assistant should ask which Space to use. Explicit selectors, including
   Personal, are honored. Activities recorded in a group before this change live
   in the members' Personal Spaces.
-- `account_register`, `identity_link`, `invitation_create`, and
+- `account_register`, `account_rename`, `identity_link`, `invitation_create`, and
   `member_add_by_phone` are refused in
   non-DM chats with code `dm_required` ("must be done in a private chat"),
   because their input or output (such as an invitation token) must not enter a
