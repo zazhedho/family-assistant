@@ -61,10 +61,13 @@ func (s *Service) Rename(ctx context.Context, input dto.AccountRenameInput) (dto
 	if err != nil {
 		return dto.AccountRenameResult{}, s.failRename(ctx, channel, provider, userID, err)
 	}
-	key := accountNameKey(name)
-	if key == accountNameKey(account.Name) {
+	// Unchanged is decided on the STORED form (name is already NFC, collapsed and title-cased), so
+	// adding or fixing accents on one's own name is a real rename. The key is only for the guard
+	// against OTHER members; the caller's own account is excluded by the repository query.
+	if name == norm.NFC.String(account.Name) {
 		return dto.AccountRenameResult{Status: StatusUnchanged, Name: account.Name}, nil
 	}
+	key := accountNameKey(name)
 
 	others, err := s.repository.OtherMemberNames(ctx, userID)
 	if err != nil {

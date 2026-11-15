@@ -287,6 +287,8 @@ func TestAccountRenameDescriptionIsTheBotManual(t *testing.T) {
 		"nothing changes",
 		"already used by another member in any of their spaces",
 		"ask for a different name",
+		"differ only by accents, dotless i, case, spacing or invisible characters",
+		"spelling looks different",
 		"past records show the new name",
 		"current name",
 		"space names",

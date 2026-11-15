@@ -783,9 +783,10 @@ can rename someone else. An unlinked sender gets `authentication required`.
   letters), and diacritics and dotless-i look-alikes on Latin letters, so `Jose`
   and `José` count as the same name. Cross-script look-alikes (for example a
   Cyrillic letter that resembles a Latin one) are not detected.
-- The character rules and the impersonation guard apply to `account_rename` and
-  to registration only. They do not apply to the REST user update
-  (`PUT /api/user`), which only strips HTML and applies Title Case.
+- The character rules apply to `account_rename` and to registration; the
+  impersonation guard runs only in `account_rename`. Neither applies to the REST
+  user updates (`PUT /api/user` and `PUT /api/user/:id`), which only strip HTML
+  and apply Title Case.
 - A name equal to the current name returns status `unchanged` and writes nothing;
   a successful change returns `renamed`.
 - Validation failures reach the bot with their reason (`invalid input: name ...`)

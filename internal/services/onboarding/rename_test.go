@@ -537,3 +537,31 @@ func TestRenameStoresTheNameAsTypedNotTheComparisonKey(t *testing.T) {
 		t.Fatalf("result = %+v, err = %v, stored %+q", got, err, h.repository.updatedName)
 	}
 }
+
+func TestRenameAddingOrFixingAccentsOnOwnNameIsRenamed(t *testing.T) {
+	for _, tc := range [][2]string{
+		{"Jose", "Jos\u00e9"}, {"Zoe", "Zo\u00eb"}, {"Isik", "I\u015f\u0131k"}, {"Viet", "Vi\u1ec7t"},
+		{"Jos\u00e9", "Jose"}, {"Budi", "Bud\u0131"},
+	} {
+		h := renameHarness(t)
+		h.repository.renameUser = domainonboarding.UserRef{ID: "user-1", Name: tc[0]}
+		// the fake returns only OTHER members: the caller's own name never counts as a collision
+		h.repository.otherNames = []string{"Somebody Else"}
+		got, err := h.service.Rename(context.Background(), renameInput(tc[1]))
+		if err != nil || got.Status != StatusRenamed || got.Name != tc[1] || h.repository.updateCalls != 1 || h.repository.updatedName != tc[1] {
+			t.Fatalf("%q -> %q: result = %+v, err = %v, updates = %d, stored %+q", tc[0], tc[1], got, err, h.repository.updateCalls, h.repository.updatedName)
+		}
+	}
+}
+
+func TestRenameToAccentedVariantOfAnotherMembersNameIsStillRejected(t *testing.T) {
+	h := renameHarness(t)
+	h.repository.renameUser = domainonboarding.UserRef{ID: "user-1", Name: "Onty Zeia"}
+	h.repository.otherNames = []string{"Jose Zeia"}
+	_, err := h.service.Rename(context.Background(), renameInput("Jos\u00e9 Zeia"))
+	var validation *serviceidentity.ValidationError
+	if !errors.As(err, &validation) || validation.Reason != ReasonNameTaken || h.repository.namesCalls != 1 {
+		t.Fatalf("err = %v, names calls = %d", err, h.repository.namesCalls)
+	}
+	assertNoWrites(t, h)
+}

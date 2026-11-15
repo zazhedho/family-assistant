@@ -114,6 +114,7 @@ const accountRenameDescription = "Renames ONLY the account of the person who is 
 	"The name follows the registration rules: 3 to 100 characters, no hidden or control characters, no < or >; emoji are fine but joined emoji sequences are not. Names are shown in Title Case. " +
 	"If the name is the same as their current one, nothing changes (status `unchanged`); say nothing changed. " +
 	"If the name is already used by another member in any of their Spaces it is refused: ask for a different name. " +
+	"Names that differ only by accents, dotless i, case, spacing or invisible characters count as the same name, so that refusal can happen even when the spelling looks different: tell the user plainly and ask for a different name. " +
 	"Past records show the new name, because attribution uses the account's current name. " +
 	"Space names (including their Personal Space label) are NOT renamed. " +
 	"There is no undo except renaming again. " +
