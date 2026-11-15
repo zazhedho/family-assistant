@@ -43,11 +43,10 @@ type repositoryStub struct {
 	renameUser    domainonboarding.UserRef
 	renameFindErr error
 	renameFinds   int
-	taken         bool
-	takenErr      error
-	takenCalls    int
-	takenUserID   string
-	takenName     string
+	otherNames    []string
+	namesErr      error
+	namesCalls    int
+	namesUserID   string
 	updateErr     error
 	updateCalls   int
 	updatedID     string
@@ -65,11 +64,10 @@ func (r *repositoryStub) FindAccountForRename(_ context.Context, _, _ string) (d
 	return r.renameUser, nil
 }
 
-func (r *repositoryStub) NameTakenInSharedSpaces(_ context.Context, userID, name string) (bool, error) {
-	r.takenCalls++
-	r.takenUserID = userID
-	r.takenName = name
-	return r.taken, r.takenErr
+func (r *repositoryStub) OtherMemberNames(_ context.Context, userID string) ([]string, error) {
+	r.namesCalls++
+	r.namesUserID = userID
+	return r.otherNames, r.namesErr
 }
 
 func (r *repositoryStub) UpdateUserName(_ context.Context, userID, name string, _ time.Time) error {

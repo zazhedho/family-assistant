@@ -14,6 +14,6 @@ type RepoOnboardingInterface interface {
 	LinkExternalIdentity(context.Context, domainidentity.ExternalIdentity) error
 	Create(context.Context, domainonboarding.Registration) error
 	FindAccountForRename(ctx context.Context, provider, externalID string) (domainonboarding.UserRef, error)
-	NameTakenInSharedSpaces(ctx context.Context, userID, normalizedName string) (bool, error)
+	OtherMemberNames(ctx context.Context, userID string) ([]string, error)
 	UpdateUserName(ctx context.Context, userID, name string, now time.Time) error
 }

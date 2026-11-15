@@ -133,32 +133,28 @@ func (r *Repository) FindAccountForRename(ctx context.Context, provider, externa
 	return user, err
 }
 
-// nameTakenSQL reports whether another active member of any Space the caller belongs to already
-// uses the name. Stored names are compared case-insensitively with invisible characters removed and
-// whitespace collapsed, so legacy names cannot be imitated by formatting tricks.
-const nameTakenSQL = `SELECT EXISTS (
-	SELECT 1
-	FROM space_members mine
-	JOIN space_members theirs ON theirs.space_id = mine.space_id
-	JOIN users u ON u.id = theirs.user_id
-	JOIN spaces s ON s.id = mine.space_id
-	WHERE mine.user_id = ? AND mine.status = 'ACTIVE' AND mine.deleted_at IS NULL
-	  AND theirs.user_id <> mine.user_id AND theirs.status = 'ACTIVE' AND theirs.deleted_at IS NULL
-	  AND u.deleted_at IS NULL AND s.deleted_at IS NULL
-	  AND lower(btrim(regexp_replace(regexp_replace(u.name, '[\u200B-\u200F\u202A-\u202E\u2060-\u2064\uFEFF]', '', 'g'), '\s+', ' ', 'g'))) = lower(?)
-) AS taken`
+// otherMemberNamesSQL returns the distinct display names of the other active members of every live
+// Space the caller is an active member of. Names are compared in Go (service accountNameKey), never
+// in SQL, so the comparison does not depend on collation or database functions.
+const otherMemberNamesSQL = `SELECT DISTINCT u.name
+FROM space_members mine
+JOIN space_members theirs ON theirs.space_id = mine.space_id
+JOIN users u ON u.id = theirs.user_id
+JOIN spaces s ON s.id = mine.space_id
+WHERE mine.user_id = ? AND mine.status = 'ACTIVE' AND mine.deleted_at IS NULL
+  AND theirs.user_id <> mine.user_id AND theirs.status = 'ACTIVE' AND theirs.deleted_at IS NULL
+  AND u.deleted_at IS NULL AND s.deleted_at IS NULL`
 
-func (r *Repository) NameTakenInSharedSpaces(ctx context.Context, userID, normalizedName string) (bool, error) {
+func (r *Repository) OtherMemberNames(ctx context.Context, userID string) ([]string, error) {
 	userID = strings.TrimSpace(userID)
-	normalizedName = strings.TrimSpace(normalizedName)
-	if userID == "" || normalizedName == "" {
-		return false, errors.New("user id and name are required")
+	if userID == "" {
+		return nil, errors.New("user id is required")
 	}
-	var taken bool
-	if err := r.DB.WithContext(ctx).Raw(nameTakenSQL, userID, normalizedName).Scan(&taken).Error; err != nil {
-		return false, err
+	var names []string
+	if err := r.DB.WithContext(ctx).Raw(otherMemberNamesSQL, userID).Scan(&names).Error; err != nil {
+		return nil, err
 	}
-	return taken, nil
+	return names, nil
 }
 
 // UpdateUserName sets users.name and users.updated_at and nothing else, for exactly one live user.

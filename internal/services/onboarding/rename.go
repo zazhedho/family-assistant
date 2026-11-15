@@ -12,6 +12,9 @@ import (
 	"family-assistant/internal/dto"
 	serviceidentity "family-assistant/internal/services/identity"
 	"family-assistant/utils"
+
+	"golang.org/x/text/cases"
+	"golang.org/x/text/unicode/norm"
 )
 
 const (
@@ -23,6 +26,9 @@ const (
 
 // Rename changes the display name of the account linked to the caller's signed external identity.
 // The target account is never an input: it is resolved from the identity alone.
+//
+// Concurrent renames of two members to the same NEW name are possible because no unique constraint
+// exists; they cannot impersonate an already existing name, which is checked beforehand.
 func (s *Service) Rename(ctx context.Context, input dto.AccountRenameInput) (dto.AccountRenameResult, error) {
 	provider := domainidentity.NormalizeProvider(input.Provider)
 	externalID := strings.TrimSpace(input.ExternalID)
@@ -47,16 +53,19 @@ func (s *Service) Rename(ctx context.Context, input dto.AccountRenameInput) (dto
 	if err != nil {
 		return dto.AccountRenameResult{}, s.failRename(ctx, channel, provider, userID, err)
 	}
-	if currentName := strings.Join(strings.Fields(account.Name), " "); strings.EqualFold(name, currentName) {
+	key := accountNameKey(name)
+	if key == accountNameKey(account.Name) {
 		return dto.AccountRenameResult{Status: StatusUnchanged, Name: account.Name}, nil
 	}
 
-	taken, err := s.repository.NameTakenInSharedSpaces(ctx, userID, name)
+	others, err := s.repository.OtherMemberNames(ctx, userID)
 	if err != nil {
 		return dto.AccountRenameResult{}, s.failRename(ctx, channel, provider, userID, err)
 	}
-	if taken {
-		return dto.AccountRenameResult{}, s.failRename(ctx, channel, provider, userID, &serviceidentity.ValidationError{Field: "name", Reason: "is already used by another member of your Spaces"})
+	for _, other := range others {
+		if accountNameKey(other) == key {
+			return dto.AccountRenameResult{}, s.failRename(ctx, channel, provider, userID, &serviceidentity.ValidationError{Field: "name", Reason: "is already used by another member of your Spaces"})
+		}
 	}
 
 	now := s.now().UTC()
@@ -85,15 +94,17 @@ func (s *Service) failRename(ctx context.Context, channel, provider, userID stri
 }
 
 // normalizeAccountName is the single place that turns a requested display name into the stored
-// form, for registration and rename alike. Forbidden characters are rejected both before and after
-// HTML stripping so entity-encoded control or invisible characters cannot slip through.
+// form (NFC, collapsed spaces), for registration and rename alike. Forbidden characters are rejected
+// both before and after HTML stripping so entity-encoded control or invisible characters cannot slip
+// through. Format characters (Cf) include the zero width joiner, so ZWJ emoji and flag sequences are
+// rejected in registration as well.
 func normalizeAccountName(raw string) (string, error) {
 	invalid := &serviceidentity.ValidationError{Field: "name", Reason: "contains characters that are not allowed"}
 	raw = strings.TrimSpace(raw)
 	if !utf8.ValidString(raw) || strings.ContainsFunc(raw, isForbiddenNameRune) {
 		return "", invalid
 	}
-	name := utils.TitleCase(utils.StripHTML(raw))
+	name := norm.NFC.String(utils.TitleCase(utils.StripHTML(raw)))
 	if strings.ContainsFunc(name, isForbiddenNameRune) || strings.ContainsAny(name, "<>") {
 		return "", invalid
 	}
@@ -105,4 +116,18 @@ func normalizeAccountName(raw string) (string, error) {
 
 func isForbiddenNameRune(r rune) bool {
 	return r == utf8.RuneError || unicode.In(r, unicode.Cc, unicode.Cf, unicode.Co, unicode.Cs, unicode.Zl, unicode.Zp)
+}
+
+// accountNameKey is the identity of a display name for impersonation checks: compatibility
+// normalization (full-width forms, NBSP and other spaces), collapsed spaces, no format or control
+// characters, case folded. Both sides of every comparison must go through it.
+func accountNameKey(name string) string {
+	name = strings.Join(strings.Fields(norm.NFKC.String(name)), " ")
+	name = strings.Map(func(r rune) rune {
+		if unicode.In(r, unicode.Cf, unicode.Cc) {
+			return -1
+		}
+		return r
+	}, name)
+	return cases.Fold().String(name)
 }

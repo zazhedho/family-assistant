@@ -91,8 +91,8 @@ func TestRenameWritesOnceAndAuditsBeforeAfter(t *testing.T) {
 	if h.repository.updateCalls != 1 || h.repository.updatedID != "user-1" || h.repository.updatedName != "Rheina Putri" {
 		t.Fatalf("update = %d %q %q", h.repository.updateCalls, h.repository.updatedID, h.repository.updatedName)
 	}
-	if h.repository.takenUserID != "user-1" || h.repository.takenName != "Rheina Putri" {
-		t.Fatalf("collision check = %q %q", h.repository.takenUserID, h.repository.takenName)
+	if h.repository.namesUserID != "user-1" {
+		t.Fatalf("other member names requested for %q", h.repository.namesUserID)
 	}
 	if len(h.audit.events) != 1 {
 		t.Fatalf("audit events = %#v", h.audit.events)
@@ -133,7 +133,7 @@ func TestRenameUnlinkedIdentityIsRejected(t *testing.T) {
 		t.Fatalf("err = %v, want ErrIdentityNotFound", err)
 	}
 	assertNoWrites(t, h)
-	if h.repository.takenCalls != 0 {
+	if h.repository.namesCalls != 0 {
 		t.Fatalf("collision checked for unlinked caller")
 	}
 	if len(h.audit.events) != 1 || h.audit.events[0].Status != domainaudit.StatusFailed || h.audit.events[0].ErrorMessage != "not_linked" {
@@ -167,14 +167,33 @@ func TestRenameRejectsInvalidNamesWithoutWriting(t *testing.T) {
 	}
 }
 
-func TestRenameRejectsNameUsedInSharedSpaces(t *testing.T) {
-	for _, name := range []string{"Daddy Zeia", "daddy zeia", "DADDY ZEIA", "  Daddy    Zeia  ", "Daddy\u200bZeia"} {
+func sharedNames() []string {
+	return []string{
+		"Daddy Zeia",
+		"Jos\u00e9 Zeia",        // NFC
+		"Zoe\u0308 Putri",       // NFD
+		"Mommy\u00adZeia",       // stored with a soft hyphen
+		"Double   Spaced  Name", // stored with repeated spaces
+		"Fullwidth Kid",
+	}
+}
+
+func TestRenameRejectsAdversarialSpellingsOfSharedMemberNames(t *testing.T) {
+	attempts := []string{
+		"Daddy Zeia", "daddy zeia", "DADDY ZEIA", "  Daddy    Zeia  ", "Daddy\u00a0Zeia", "Daddy\u2003Zeia", "Daddy\u3000Zeia",
+		"\uff24\uff41\uff44\uff44\uff59 \uff3a\uff45\uff49\uff41",
+		"Jos\u00e9 Zeia", "Jose\u0301 Zeia", "JOSE\u0301 ZEIA",
+		"Zo\u00eb Putri", "Zoe\u0308 Putri", "zo\u00cb putri",
+		"MommyZeia", "Mommy Zeia\u00ad",
+		"Double Spaced Name", "double  spaced   name",
+	}
+	for _, attempt := range attempts {
 		h := renameHarness(t)
-		h.repository.taken = true
-		_, err := h.service.Rename(context.Background(), renameInput(name))
+		h.repository.otherNames = sharedNames()
+		_, err := h.service.Rename(context.Background(), renameInput(attempt))
 		var validation *serviceidentity.ValidationError
 		if !errors.As(err, &validation) || validation.Field != "name" {
-			t.Fatalf("%q: err = %v", name, err)
+			t.Fatalf("%+q: err = %v, want ValidationError on name", attempt, err)
 		}
 		if strings.Contains(strings.ToLower(validation.Reason), "daddy") {
 			t.Fatalf("reason echoes name: %q", validation.Reason)
@@ -183,18 +202,72 @@ func TestRenameRejectsNameUsedInSharedSpaces(t *testing.T) {
 	}
 }
 
-func TestRenameAllowsNameUsedOnlyOutsideSharedSpaces(t *testing.T) {
+func TestRenameRejectsInsertedZeroWidthBeforeComparison(t *testing.T) {
 	h := renameHarness(t)
-	h.repository.taken = false
-	got, err := h.service.Rename(context.Background(), renameInput("Daddy Zeia"))
-	if err != nil || got.Status != StatusRenamed || h.repository.updateCalls != 1 {
-		t.Fatalf("result = %+v, err = %v, updates = %d", got, err, h.repository.updateCalls)
+	h.repository.otherNames = sharedNames()
+	_, err := h.service.Rename(context.Background(), renameInput("Daddy\u200bZeia"))
+	var validation *serviceidentity.ValidationError
+	if !errors.As(err, &validation) || validation.Field != "name" || h.repository.namesCalls != 0 {
+		t.Fatalf("err = %v, names calls = %d", err, h.repository.namesCalls)
+	}
+	assertNoWrites(t, h)
+}
+
+func TestRenameAllowsNamesNotUsedInSharedSpaces(t *testing.T) {
+	for _, name := range []string{"Daddy Zeiah", "Rheina Putri", "Fullwidth"} {
+		h := renameHarness(t)
+		h.repository.otherNames = sharedNames()
+		got, err := h.service.Rename(context.Background(), renameInput(name))
+		if err != nil || got.Status != StatusRenamed || h.repository.updateCalls != 1 {
+			t.Fatalf("%q: result = %+v, err = %v, updates = %d", name, got, err, h.repository.updateCalls)
+		}
+	}
+	// a name held by an account that is NOT returned (not in a shared Space) is allowed
+	h := renameHarness(t)
+	h.repository.otherNames = []string{"Somebody Else"}
+	if got, err := h.service.Rename(context.Background(), renameInput("Daddy Zeia")); err != nil || got.Status != StatusRenamed {
+		t.Fatalf("result = %+v, err = %v", got, err)
+	}
+}
+
+func TestRenameStoresNFCWithCollapsedSpaces(t *testing.T) {
+	h := renameHarness(t)
+	got, err := h.service.Rename(context.Background(), renameInput("  jose\u0301   garcia\u00a0 "))
+	if err != nil || h.repository.updatedName != "Jos\u00e9 Garcia" || got.Name != h.repository.updatedName {
+		t.Fatalf("result = %+v, err = %v, stored %+q", got, err, h.repository.updatedName)
+	}
+}
+
+func TestRenameSameNameInOtherFormIsUnchanged(t *testing.T) {
+	h := renameHarness(t)
+	h.repository.renameUser = domainonboarding.UserRef{ID: "user-1", Name: "Jos\u00e9 Zeia"}
+	for _, name := range []string{"Jose\u0301 Zeia", "JOS\u00c9  ZEIA", "jos\u00e9\u00a0zeia"} {
+		got, err := h.service.Rename(context.Background(), renameInput(name))
+		if err != nil || got.Status != StatusUnchanged {
+			t.Fatalf("%+q: result = %+v, err = %v", name, got, err)
+		}
+	}
+	assertNoWrites(t, h)
+}
+
+func TestAccountNameKeyIgnoresFormattingAndCase(t *testing.T) {
+	want := accountNameKey("Daddy Zeia")
+	for _, v := range []string{"DADDY ZEIA", " daddy\u3000zeia ", "\uff24\uff41\uff44\uff44\uff59 \uff3a\uff45\uff49\uff41", "Dad\u200bdy  Zeia"} {
+		if accountNameKey(v) != want {
+			t.Fatalf("%+q key = %q, want %q", v, accountNameKey(v), want)
+		}
+	}
+	if accountNameKey("Jose\u0301") != accountNameKey("Jos\u00e9") {
+		t.Fatal("NFD and NFC keys differ")
+	}
+	if accountNameKey("Daddy Zeia") == accountNameKey("Daddy Zeiah") {
+		t.Fatal("different names share a key")
 	}
 }
 
 func TestRenameCollisionCheckErrorBlocksWrite(t *testing.T) {
 	h := renameHarness(t)
-	h.repository.takenErr = errors.New("db down")
+	h.repository.namesErr = errors.New("db down")
 	if _, err := h.service.Rename(context.Background(), renameInput("Rheina Putri")); err == nil {
 		t.Fatal("expected error")
 	}
@@ -215,9 +288,9 @@ func TestRenameUpdateErrorIsReportedAndNotAuditedAsSuccess(t *testing.T) {
 func TestRenameFailureAuditNeverContainsAttemptedName(t *testing.T) {
 	attempted := "Secret Attempt Name"
 	cases := map[string]func(*serviceHarness){
-		"collision": func(h *serviceHarness) { h.repository.taken = true },
+		"collision": func(h *serviceHarness) { h.repository.otherNames = []string{"secret attempt name"} },
 		"update":    func(h *serviceHarness) { h.repository.updateErr = errors.New("write failed for " + attempted) },
-		"taken":     func(h *serviceHarness) { h.repository.takenErr = errors.New("check failed for " + attempted) },
+		"taken":     func(h *serviceHarness) { h.repository.namesErr = errors.New("check failed for " + attempted) },
 	}
 	for label, setup := range cases {
 		h := renameHarness(t)
@@ -248,7 +321,7 @@ func TestRenameFailureAuditNeverContainsAttemptedName(t *testing.T) {
 	}
 }
 
-func TestRenameIgnoresRepositoryAbsence(t *testing.T) {
+func TestRenameWithoutRepositoryFailsClosed(t *testing.T) {
 	service := NewService(nil, nil, nil)
 	if _, err := service.Rename(context.Background(), renameInput("Rheina Putri")); err == nil {
 		t.Fatal("expected error with nil repository")
@@ -263,5 +336,34 @@ func TestRegisterSharesNameRulesWithRename(t *testing.T) {
 	var validation *serviceidentity.ValidationError
 	if !errors.As(err, &validation) || validation.Field != "name" || h.repository.createCalls != 0 {
 		t.Fatalf("err = %v, creates = %d", err, h.repository.createCalls)
+	}
+}
+
+func TestRegisterStoresNFCName(t *testing.T) {
+	h := newServiceHarness(t)
+	input := validInput()
+	input.Name = "jose\u0301 alvarez"
+	if _, err := h.service.Register(context.Background(), input); err != nil || h.repository.created.User.Name != "Jos\u00e9 Alvarez" {
+		t.Fatalf("name = %+q, err = %v", h.repository.created.User.Name, err)
+	}
+}
+
+func TestNormalizeAccountNameKeepsValidSpecialNames(t *testing.T) {
+	for raw, want := range map[string]string{"rheina\U0001f98b": "Rheina\U0001f98b", "o'neil": "O'neil", "\u00f1andu\u0301": "\u00d1and\u00fa", "mcdonald": "Mcdonald"} {
+		got, err := normalizeAccountName(raw)
+		if err != nil || got != want {
+			t.Fatalf("%+q: got %+q, err %v, want %+q", raw, got, err, want)
+		}
+	}
+}
+
+func TestLinkExistingFailureAuditCategoryNotLinked(t *testing.T) {
+	h := newServiceHarness(t)
+	_, err := h.service.LinkExisting(context.Background(), dto.AccountLinkInput{Provider: "hermes", ExternalID: "628123456789@s.whatsapp.net", Channel: "whatsapp"})
+	if !errors.Is(err, domainidentity.ErrIdentityNotFound) {
+		t.Fatalf("err = %v", err)
+	}
+	if len(h.audit.events) != 1 || h.audit.events[0].ErrorMessage != "not_linked" {
+		t.Fatalf("audit = %#v", h.audit.events)
 	}
 }

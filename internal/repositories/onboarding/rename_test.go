@@ -56,48 +56,35 @@ func TestFindAccountForRenameBlankIdentityIsNotFoundWithoutQuery(t *testing.T) {
 	}
 }
 
-func nameTakenQuery() string {
-	return `SELECT EXISTS.*FROM space_members mine.*JOIN space_members theirs ON theirs.space_id = mine.space_id.*JOIN users u ON u.id = theirs.user_id.*JOIN spaces s ON s.id = mine.space_id.*mine.user_id = \$1.*mine.status = 'ACTIVE'.*mine.deleted_at IS NULL.*theirs.user_id <> mine.user_id.*theirs.status = 'ACTIVE'.*theirs.deleted_at IS NULL.*u.deleted_at IS NULL.*s.deleted_at IS NULL.*lower\(.*u.name.*\) = lower\(\$2\)`
+func otherMemberNamesQuery() string {
+	return `SELECT DISTINCT u.name.*FROM space_members mine.*JOIN space_members theirs ON theirs.space_id = mine.space_id.*JOIN users u ON u.id = theirs.user_id.*JOIN spaces s ON s.id = mine.space_id.*mine.user_id = \$1.*mine.status = 'ACTIVE'.*mine.deleted_at IS NULL.*theirs.user_id <> mine.user_id.*theirs.status = 'ACTIVE'.*theirs.deleted_at IS NULL.*u.deleted_at IS NULL.*s.deleted_at IS NULL`
 }
 
-func TestNameTakenInSharedSpacesReportsTaken(t *testing.T) {
+func TestOtherMemberNamesReturnsNames(t *testing.T) {
 	db, mock := newOnboardingMockDB(t)
 	repo := NewRepository(db)
-	mock.ExpectQuery(nameTakenQuery()).
-		WithArgs("user-1", "Daddy Zeia").
-		WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(true))
+	mock.ExpectQuery(otherMemberNamesQuery()).
+		WithArgs("user-1").
+		WillReturnRows(sqlmock.NewRows([]string{"name"}).AddRow("Daddy Zeia").AddRow("Mommy Zeia"))
 
-	taken, err := repo.NameTakenInSharedSpaces(context.Background(), " user-1 ", " Daddy Zeia ")
-	if err != nil || !taken {
-		t.Fatalf("taken = %v, err = %v", taken, err)
+	names, err := repo.OtherMemberNames(context.Background(), " user-1 ")
+	if err != nil || len(names) != 2 || names[0] != "Daddy Zeia" || names[1] != "Mommy Zeia" {
+		t.Fatalf("names = %v, err = %v", names, err)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)
 	}
 }
 
-func TestNameTakenInSharedSpacesReportsFree(t *testing.T) {
+func TestOtherMemberNamesPropagatesErrorAndBlankUserFails(t *testing.T) {
 	db, mock := newOnboardingMockDB(t)
 	repo := NewRepository(db)
-	mock.ExpectQuery(nameTakenQuery()).
-		WithArgs("user-1", "Rheina Putri").
-		WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(false))
-
-	taken, err := repo.NameTakenInSharedSpaces(context.Background(), "user-1", "Rheina Putri")
-	if err != nil || taken {
-		t.Fatalf("taken = %v, err = %v", taken, err)
-	}
-}
-
-func TestNameTakenInSharedSpacesPropagatesErrorAndBlankInputIsTaken(t *testing.T) {
-	db, mock := newOnboardingMockDB(t)
-	repo := NewRepository(db)
-	mock.ExpectQuery(nameTakenQuery()).WithArgs("user-1", "Rheina Putri").WillReturnError(errors.New("db down"))
-	if _, err := repo.NameTakenInSharedSpaces(context.Background(), "user-1", "Rheina Putri"); err == nil {
+	mock.ExpectQuery(otherMemberNamesQuery()).WithArgs("user-1").WillReturnError(errors.New("db down"))
+	if _, err := repo.OtherMemberNames(context.Background(), "user-1"); err == nil {
 		t.Fatal("expected error")
 	}
-	if _, err := repo.NameTakenInSharedSpaces(context.Background(), "", "Rheina Putri"); err == nil {
-		t.Fatal("blank user id must error, not report free")
+	if _, err := repo.OtherMemberNames(context.Background(), " "); err == nil {
+		t.Fatal("blank user id must error, not return no names")
 	}
 }
 
