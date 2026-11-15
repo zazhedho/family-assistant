@@ -14,4 +14,5 @@ type ServiceInvitationInterface interface {
 	Accept(context.Context, string, domainuser.Users) (*domainspace.Member, error)
 	List(context.Context, string, string) ([]domaininvitation.Invitation, error)
 	Revoke(context.Context, string, string, string) (*domaininvitation.Invitation, error)
+	AddMemberByPhone(context.Context, string, dto.MemberAddByPhoneInput) (*dto.MemberAddResult, error)
 }

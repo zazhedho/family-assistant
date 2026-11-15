@@ -40,6 +40,17 @@ type invitationRepositoryStub struct {
 	revokeID    string
 	revokeSpace string
 	revokeAt    time.Time
+
+	foundUser     *domaininvitation.UserRef
+	findUserErr   error
+	findUserCalls int
+	findUserPhone string
+	addedMember   *domainspace.Member
+	addMemberErr  error
+	addCalls      int
+	addSpaceID    string
+	addUserID     string
+	addRoleID     string
 }
 
 var _ interfaceinvitation.ServiceInvitationInterface = (*service)(nil)
@@ -78,6 +89,27 @@ func (s *invitationRepositoryStub) ListPending(_ context.Context, spaceID string
 func (s *invitationRepositoryStub) RevokePending(_ context.Context, spaceID, invitationID string, revokedAt time.Time) error {
 	s.revokeSpace, s.revokeID, s.revokeAt = spaceID, invitationID, revokedAt
 	return s.revokeErr
+}
+
+func (s *invitationRepositoryStub) FindUserByVerifiedPhone(_ context.Context, phone string) (*domaininvitation.UserRef, error) {
+	s.findUserCalls++
+	s.findUserPhone = phone
+	if s.findUserErr != nil {
+		return nil, s.findUserErr
+	}
+	return s.foundUser, nil
+}
+
+func (s *invitationRepositoryStub) AddMember(_ context.Context, spaceID, userID, roleID string, now time.Time) (*domainspace.Member, error) {
+	s.addCalls++
+	s.addSpaceID, s.addUserID, s.addRoleID = spaceID, userID, roleID
+	if s.addMemberErr != nil {
+		return nil, s.addMemberErr
+	}
+	if s.addedMember != nil {
+		return s.addedMember, nil
+	}
+	return &domainspace.Member{ID: "member-new", SpaceID: spaceID, UserID: userID, RoleID: roleID, Status: domainspace.StatusActive, CreatedAt: now}, nil
 }
 
 type invitationSpaceRepositoryStub struct {

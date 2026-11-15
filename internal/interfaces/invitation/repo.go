@@ -5,6 +5,7 @@ import (
 	"time"
 
 	domaininvitation "family-assistant/internal/domain/invitation"
+	domainspace "family-assistant/internal/domain/space"
 )
 
 type RepoInvitationInterface interface {
@@ -12,4 +13,6 @@ type RepoInvitationInterface interface {
 	Accept(context.Context, string, string, string, time.Time) (*domaininvitation.Acceptance, error)
 	ListPending(context.Context, string) ([]domaininvitation.Invitation, error)
 	RevokePending(context.Context, string, string, time.Time) error
+	FindUserByVerifiedPhone(context.Context, string) (*domaininvitation.UserRef, error)
+	AddMember(context.Context, string, string, string, time.Time) (*domainspace.Member, error)
 }

@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	domainidentity "family-assistant/internal/domain/identity"
 	domaininvitation "family-assistant/internal/domain/invitation"
 	domainspace "family-assistant/internal/domain/space"
 
@@ -319,5 +320,103 @@ func TestRevokePendingScopesSpaceAndUpdatesLifecycleFields(t *testing.T) {
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestFindUserByVerifiedPhoneFiltersVerifiedAndNotDeleted(t *testing.T) {
+	db, mock := newInvitationMockDB(t)
+	repo := NewRepository(db)
+	mock.ExpectQuery(`SELECT .*FROM users u.*phone = \$1.*phone_verified_at IS NOT NULL.*deleted_at IS NULL`).
+		WithArgs("6289561002763", 1).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "name"}).AddRow("user-9", "Siti"))
+
+	user, err := repo.FindUserByVerifiedPhone(context.Background(), " 6289561002763 ")
+	if err != nil {
+		t.Fatalf("find: %v", err)
+	}
+	if user == nil || user.ID != "user-9" || user.Name != "Siti" {
+		t.Fatalf("user = %#v", user)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("sql expectations: %v", err)
+	}
+}
+
+func TestFindUserByVerifiedPhoneMapsMissingToIdentityNotFound(t *testing.T) {
+	db, mock := newInvitationMockDB(t)
+	repo := NewRepository(db)
+	mock.ExpectQuery(`SELECT .*FROM users u`).WithArgs("6289561002763", 1).WillReturnRows(sqlmock.NewRows([]string{"id", "name"}))
+
+	if _, err := repo.FindUserByVerifiedPhone(context.Background(), "6289561002763"); !errors.Is(err, domainidentity.ErrIdentityNotFound) {
+		t.Fatalf("error = %v, want identity not found", err)
+	}
+	if _, err := repo.FindUserByVerifiedPhone(context.Background(), "  "); !errors.Is(err, domainidentity.ErrIdentityNotFound) {
+		t.Fatalf("blank phone error = %v, want identity not found", err)
+	}
+}
+
+func TestAddMemberLocksSharedActiveSpaceAndInsertsActiveMember(t *testing.T) {
+	db, mock := newInvitationMockDB(t)
+	repo := NewRepository(db)
+	now := time.Date(2026, 9, 20, 11, 0, 0, 0, time.UTC)
+	mock.ExpectBegin()
+	mock.ExpectQuery(`SELECT .*FROM "spaces".*id = \$1.*type = \$2.*status = \$3.*deleted_at IS NULL.*FOR UPDATE`).
+		WithArgs("space-1", domainspace.TypeShared, domainspace.StatusActive, 1).
+		WillReturnRows(spaceRows("space-1", domainspace.TypeShared, domainspace.StatusActive))
+	mock.ExpectExec(`INSERT INTO "space_members"`).
+		WithArgs(sqlmock.AnyArg(), "space-1", "user-2", "role-member", domainspace.StatusActive, now, sqlmock.AnyArg(), nil).
+		WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectCommit()
+
+	member, err := repo.AddMember(context.Background(), "space-1", "user-2", "role-member", now)
+	if err != nil {
+		t.Fatalf("add member: %v", err)
+	}
+	if member == nil || member.ID == "" || member.SpaceID != "space-1" || member.UserID != "user-2" || member.RoleID != "role-member" || member.Status != domainspace.StatusActive {
+		t.Fatalf("member = %#v", member)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("sql expectations: %v", err)
+	}
+}
+
+func TestAddMemberMapsDuplicateToConflictAndRollsBack(t *testing.T) {
+	db, mock := newInvitationMockDB(t)
+	repo := NewRepository(db)
+	now := time.Date(2026, 9, 20, 11, 0, 0, 0, time.UTC)
+	mock.ExpectBegin()
+	mock.ExpectQuery(`SELECT .*FROM "spaces".*FOR UPDATE`).WithArgs("space-1", domainspace.TypeShared, domainspace.StatusActive, 1).
+		WillReturnRows(spaceRows("space-1", domainspace.TypeShared, domainspace.StatusActive))
+	mock.ExpectExec(`INSERT INTO "space_members"`).WillReturnError(gorm.ErrDuplicatedKey)
+	mock.ExpectRollback()
+
+	if _, err := repo.AddMember(context.Background(), "space-1", "user-2", "role-member", now); !errors.Is(err, domaininvitation.ErrMembershipConflict) {
+		t.Fatalf("error = %v, want conflict", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("sql expectations: %v", err)
+	}
+}
+
+func TestAddMemberMissingPersonalOrInactiveSpaceIsNotFound(t *testing.T) {
+	db, mock := newInvitationMockDB(t)
+	repo := NewRepository(db)
+	now := time.Date(2026, 9, 20, 11, 0, 0, 0, time.UTC)
+	mock.ExpectBegin()
+	mock.ExpectQuery(`SELECT .*FROM "spaces".*FOR UPDATE`).WithArgs("space-1", domainspace.TypeShared, domainspace.StatusActive, 1).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "name", "type", "category", "status", "created_by_user_id", "created_at", "updated_at", "deleted_at"}))
+	mock.ExpectRollback()
+
+	if _, err := repo.AddMember(context.Background(), "space-1", "user-2", "role-member", now); !errors.Is(err, gorm.ErrRecordNotFound) {
+		t.Fatalf("error = %v, want record not found", err)
+	}
+	if _, err := repo.AddMember(context.Background(), " ", "user-2", "role-member", now); err == nil {
+		t.Fatal("blank space id accepted")
+	}
+	if _, err := repo.AddMember(context.Background(), "space-1", "", "role-member", now); err == nil {
+		t.Fatal("blank user id accepted")
+	}
+	if _, err := repo.AddMember(context.Background(), "space-1", "user-2", "", now); err == nil {
+		t.Fatal("blank role id accepted")
 	}
 }

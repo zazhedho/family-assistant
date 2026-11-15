@@ -67,6 +67,8 @@ type auditEventInput struct {
 	userID     string
 	roleName   string
 	emailBound bool
+	resource   string
+	targetUser string
 }
 
 type auditProvenanceKey struct{}
@@ -434,12 +436,19 @@ func (s *service) newAuditEvent(ctx context.Context, input auditEventInput) doma
 	if input.roleName != "" {
 		metadata["role"] = input.roleName
 	}
+	if input.targetUser != "" {
+		metadata["target_user_id"] = input.targetUser
+	}
+	resource := input.resource
+	if resource == "" {
+		resource = "space_invitation"
+	}
 	if scope.IsImpersonated && strings.TrimSpace(scope.UserID) != actorUserID {
 		metadata = utils.MergeMetadata(metadata, map[string]any{"subject_user_id": input.userID})
 	}
 	return domainaudit.AuditEvent{
 		Action:        input.action,
-		Resource:      "space_invitation",
+		Resource:      resource,
 		ResourceID:    input.resourceID,
 		ActorUserID:   actorUserID,
 		ActorMemberID: input.memberID,

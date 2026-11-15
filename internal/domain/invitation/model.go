@@ -52,3 +52,9 @@ type Acceptance struct {
 }
 
 type AcceptResult = Acceptance
+
+// UserRef is the minimal registered-account view used to add a member by phone.
+type UserRef struct {
+	ID   string `gorm:"column:id"`
+	Name string `gorm:"column:name"`
+}

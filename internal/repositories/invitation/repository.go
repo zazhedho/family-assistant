@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	domainidentity "family-assistant/internal/domain/identity"
 	domaininvitation "family-assistant/internal/domain/invitation"
 	domainspace "family-assistant/internal/domain/space"
 	interfaceinvitation "family-assistant/internal/interfaces/invitation"
@@ -66,32 +67,8 @@ func (r *Repository) Accept(ctx context.Context, tokenHash, userID, normalizedEm
 			return domaininvitation.ErrInvalidInvitation
 		}
 
-		var space domainspace.Space
-		err = tx.Clauses(clause.Locking{Strength: "UPDATE"}).
-			Where("id = ? AND type = ? AND status = ? AND deleted_at IS NULL", invitation.SpaceID, domainspace.TypeShared, domainspace.StatusActive).
-			Take(&space).Error
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return domaininvitation.ErrInvalidInvitation
-		}
+		member, err := addActiveMember(ctx, tx, invitation.SpaceID, userID, invitation.RoleID, now, domaininvitation.ErrInvalidInvitation)
 		if err != nil {
-			return err
-		}
-		if space.Type != domainspace.TypeShared || space.Status != domainspace.StatusActive || space.DeletedAt.Valid {
-			return domaininvitation.ErrInvalidInvitation
-		}
-
-		member := &domainspace.Member{
-			ID:        utils.CreateUUID(),
-			SpaceID:   invitation.SpaceID,
-			UserID:    strings.TrimSpace(userID),
-			RoleID:    invitation.RoleID,
-			Status:    domainspace.StatusActive,
-			CreatedAt: now,
-		}
-		if err := tx.WithContext(ctx).Create(member).Error; err != nil {
-			if errors.Is(err, gorm.ErrDuplicatedKey) {
-				return domaininvitation.ErrMembershipConflict
-			}
 			return err
 		}
 
@@ -120,6 +97,84 @@ func (r *Repository) Accept(ctx context.Context, tokenHash, userID, normalizedEm
 		return nil, err
 	}
 	return acceptance, nil
+}
+
+// addActiveMember locks the SHARED, ACTIVE Space row FOR UPDATE and inserts an
+// ACTIVE membership. errSpaceUnavailable is returned when the Space is missing,
+// PERSONAL, inactive or deleted; a duplicate membership maps to
+// ErrMembershipConflict. It is shared by Accept and AddMember.
+func addActiveMember(ctx context.Context, tx *gorm.DB, spaceID, userID, roleID string, now time.Time, errSpaceUnavailable error) (*domainspace.Member, error) {
+	var space domainspace.Space
+	err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+		Where("id = ? AND type = ? AND status = ? AND deleted_at IS NULL", spaceID, domainspace.TypeShared, domainspace.StatusActive).
+		Take(&space).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, errSpaceUnavailable
+	}
+	if err != nil {
+		return nil, err
+	}
+	if space.Type != domainspace.TypeShared || space.Status != domainspace.StatusActive || space.DeletedAt.Valid {
+		return nil, errSpaceUnavailable
+	}
+
+	member := &domainspace.Member{
+		ID:        utils.CreateUUID(),
+		SpaceID:   spaceID,
+		UserID:    strings.TrimSpace(userID),
+		RoleID:    roleID,
+		Status:    domainspace.StatusActive,
+		CreatedAt: now,
+	}
+	if err := tx.WithContext(ctx).Create(member).Error; err != nil {
+		if errors.Is(err, gorm.ErrDuplicatedKey) {
+			return nil, domaininvitation.ErrMembershipConflict
+		}
+		return nil, err
+	}
+	return member, nil
+}
+
+// FindUserByVerifiedPhone applies the same rule as onboarding.FindByPhone: only a
+// verified, non-deleted account is found.
+func (r *Repository) FindUserByVerifiedPhone(ctx context.Context, phone string) (*domaininvitation.UserRef, error) {
+	phone = strings.TrimSpace(phone)
+	if phone == "" {
+		return nil, domainidentity.ErrIdentityNotFound
+	}
+	var user domaininvitation.UserRef
+	err := r.DB.WithContext(ctx).
+		Table("users u").
+		Select("u.id::text AS id, u.name AS name").
+		Where("u.phone = ? AND u.phone_verified_at IS NOT NULL AND u.deleted_at IS NULL", phone).
+		Take(&user).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, domainidentity.ErrIdentityNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &user, nil
+}
+
+// AddMember adds an existing account to a SHARED, ACTIVE Space in one
+// transaction, with the same Space lock and duplicate handling as Accept but no
+// invitation row. A missing or non-shared Space yields gorm.ErrRecordNotFound.
+func (r *Repository) AddMember(ctx context.Context, spaceID, userID, roleID string, now time.Time) (*domainspace.Member, error) {
+	spaceID, userID, roleID = strings.TrimSpace(spaceID), strings.TrimSpace(userID), strings.TrimSpace(roleID)
+	if spaceID == "" || userID == "" || roleID == "" {
+		return nil, errors.New("space, user and role are required")
+	}
+	var member *domainspace.Member
+	err := r.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var err error
+		member, err = addActiveMember(ctx, tx, spaceID, userID, roleID, now, gorm.ErrRecordNotFound)
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+	return member, nil
 }
 
 func (r *Repository) ListPending(ctx context.Context, spaceID string) ([]domaininvitation.Invitation, error) {

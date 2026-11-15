@@ -179,4 +179,8 @@ func TestInvitationToolsRequireLinkedActor(t *testing.T) {
 	}
 }
 
+func (s *mcpInvitationServiceStub) AddMemberByPhone(context.Context, string, dto.MemberAddByPhoneInput) (*dto.MemberAddResult, error) {
+	return nil, nil
+}
+
 var _ interfaceinvitation.ServiceInvitationInterface = (*mcpInvitationServiceStub)(nil)

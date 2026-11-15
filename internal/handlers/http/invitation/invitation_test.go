@@ -55,6 +55,10 @@ func (s *invitationServiceStub) Revoke(context.Context, string, string, string) 
 	return nil, nil
 }
 
+func (s *invitationServiceStub) AddMemberByPhone(context.Context, string, dto.MemberAddByPhoneInput) (*dto.MemberAddResult, error) {
+	return nil, nil
+}
+
 type invitationUserRepositoryStub struct {
 	user       domainuser.Users
 	err        error
