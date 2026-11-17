@@ -21,15 +21,17 @@ import (
 )
 
 const (
-	createPermission       = "spaces:create"
-	listPermission         = "spaces:list"
-	membersPermission      = "members:list"
-	updatePermission       = "spaces:update"
-	archivePermission      = "spaces:delete"
-	memberUpdatePermission = "members:update"
-	memberDeletePermission = "members:delete"
-	spaceOwnerRole         = "space_owner"
-	requiredReason         = "is required"
+	createPermission        = "spaces:create"
+	listPermission          = "spaces:list"
+	membersPermission       = "members:list"
+	updatePermission        = "spaces:update"
+	archivePermission       = "spaces:delete"
+	memberUpdatePermission  = "members:update"
+	memberDeletePermission  = "members:delete"
+	spaceOwnerRole          = "space_owner"
+	spaceEditorRoleName     = "space_editor"
+	invalidMemberRoleReason = "must be one of space_admin, space_member, space_editor, space_viewer"
+	requiredReason          = "is required"
 )
 
 var (
@@ -340,7 +342,7 @@ func (s *service) UpdateMemberRole(ctx context.Context, userID, spaceID, memberI
 	}
 	roleName := strings.TrimSpace(input.Role)
 	if !validMemberRole(roleName) {
-		err = &serviceauthorization.ValidationError{Field: "role", Reason: "must be one of space_admin, space_member, space_viewer"}
+		err = &serviceauthorization.ValidationError{Field: "role", Reason: invalidMemberRoleReason}
 		s.writeFailure(ctx, domainaudit.ActionUpdate, spaceID, actor.ID, userID, err)
 		return nil, err
 	}
@@ -468,7 +470,7 @@ func (s *service) activeMember(ctx context.Context, spaceID, memberID string) (*
 
 func validMemberRole(role string) bool {
 	switch role {
-	case "space_admin", "space_member", "space_viewer":
+	case "space_admin", "space_member", spaceEditorRoleName, "space_viewer":
 		return true
 	default:
 		return false

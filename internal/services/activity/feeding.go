@@ -177,7 +177,7 @@ func (s *service) ReportFeedingLeftover(ctx context.Context, actor domainidentit
 		},
 		ReportedAt: selector.MessageAt,
 		Now:        time.Now().UTC(),
-		CanMutate:  func(activity *domainactivity.Activity) bool { return canMutateActivity(role, memberID, activity) },
+		CanMutate:  func(activity *domainactivity.Activity) bool { return canUpdateActivity(role, memberID, activity) },
 	})
 	if err != nil {
 		return nil, feedingReportError(err)

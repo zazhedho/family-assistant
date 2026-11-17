@@ -27,9 +27,11 @@ import (
 )
 
 const (
-	createPermission = "invitations:create"
-	listPermission   = "invitations:list"
-	deletePermission = "invitations:delete"
+	createPermission        = "invitations:create"
+	listPermission          = "invitations:list"
+	deletePermission        = "invitations:delete"
+	spaceEditorRoleName     = "space_editor"
+	invalidTargetRoleReason = "must be one of space_admin, space_member, space_editor, space_viewer"
 )
 
 var (
@@ -121,7 +123,7 @@ func (s *service) Create(ctx context.Context, userID string, input dto.Invitatio
 		return nil, "", err
 	}
 	if !validTargetRole(roleName) {
-		err = &serviceauthorization.ValidationError{Field: "role_name", Reason: "must be one of space_admin, space_member, space_viewer"}
+		err = &serviceauthorization.ValidationError{Field: "role_name", Reason: invalidTargetRoleReason}
 		s.writeFailure(ctx, spaceID, roleName, userID, err)
 		return nil, "", err
 	}
@@ -392,7 +394,7 @@ func (s *service) invitationActorWith(ctx context.Context, userID, spaceID, perm
 
 func validTargetRole(roleName string) bool {
 	switch roleName {
-	case "space_admin", "space_member", "space_viewer":
+	case "space_admin", "space_member", spaceEditorRoleName, "space_viewer":
 		return true
 	default:
 		return false

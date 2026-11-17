@@ -21,13 +21,14 @@ import (
 )
 
 const (
-	createPermission = "activities:create"
-	listPermission   = "activities:list"
-	updatePermission = "activities:update"
-	deletePermission = "activities:delete"
-	requiredReason   = "is required"
-	defaultLimit     = 50
-	maxLimit         = 100
+	createPermission    = "activities:create"
+	listPermission      = "activities:list"
+	updatePermission    = "activities:update"
+	deletePermission    = "activities:delete"
+	spaceEditorRoleName = "space_editor"
+	requiredReason      = "is required"
+	defaultLimit        = 50
+	maxLimit            = 100
 )
 
 type auditStore interface {
@@ -182,7 +183,7 @@ func (s *service) Update(ctx context.Context, actor domainidentity.ActorContext,
 	// Read, check and write against one row locked FOR UPDATE, so concurrent
 	// updates and feeding reports never validate a stale copy.
 	prepare := func(current *domainactivity.Activity) (domainactivity.UpdateFields, error) {
-		if !canMutateActivity(actorMember.RoleName, actorMember.ID, current) {
+		if !canUpdateActivity(actorMember.RoleName, actorMember.ID, current) {
 			return domainactivity.UpdateFields{}, serviceauthorization.ErrForbidden
 		}
 		fields, err := activityUpdateFields(input)
@@ -245,7 +246,7 @@ func (s *service) Delete(ctx context.Context, actor domainidentity.ActorContext,
 	if activity == nil {
 		return nil, serviceauthorization.ErrNotFound
 	}
-	if !canMutateActivity(actorMember.RoleName, actorMember.ID, activity) {
+	if !canDeleteActivity(actorMember.RoleName, actorMember.ID, activity) {
 		return nil, serviceauthorization.ErrForbidden
 	}
 	now := time.Now().UTC()
@@ -319,11 +320,22 @@ func activityMember(members []domainspace.ResolvedMembership, memberID, userID s
 	return nil
 }
 
-func canMutateActivity(role, memberID string, activity *domainactivity.Activity) bool {
+func canUpdateActivity(role, memberID string, activity *domainactivity.Activity) bool {
+	switch strings.ToLower(strings.TrimSpace(role)) {
+	case "space_owner", "space_admin", spaceEditorRoleName:
+		return true
+	case "space_member":
+		return strings.TrimSpace(activity.CreatedByMemberID) == strings.TrimSpace(memberID)
+	default:
+		return false
+	}
+}
+
+func canDeleteActivity(role, memberID string, activity *domainactivity.Activity) bool {
 	switch strings.ToLower(strings.TrimSpace(role)) {
 	case "space_owner", "space_admin":
 		return true
-	case "space_member":
+	case "space_member", spaceEditorRoleName:
 		return strings.TrimSpace(activity.CreatedByMemberID) == strings.TrimSpace(memberID)
 	default:
 		return false

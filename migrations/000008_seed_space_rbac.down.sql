@@ -7,7 +7,8 @@ BEGIN
             '11111111-1111-4111-8111-000000000001',
             '11111111-1111-4111-8111-000000000002',
             '11111111-1111-4111-8111-000000000003',
-            '11111111-1111-4111-8111-000000000004'
+            '11111111-1111-4111-8111-000000000004',
+            '11111111-1111-4111-8111-000000000005'
         )
     ) OR EXISTS (
         SELECT 1
@@ -16,7 +17,8 @@ BEGIN
             '11111111-1111-4111-8111-000000000001',
             '11111111-1111-4111-8111-000000000002',
             '11111111-1111-4111-8111-000000000003',
-            '11111111-1111-4111-8111-000000000004'
+            '11111111-1111-4111-8111-000000000004',
+            '11111111-1111-4111-8111-000000000005'
         )
     ) THEN
         RAISE EXCEPTION 'cannot roll back Space RBAC while seeded roles are referenced';
@@ -32,6 +34,7 @@ WHERE rp.id = md5('space-rbac:' || r.name || ':' || p.name)::uuid
       (r.name = 'space_owner' AND p.name IN ('list_spaces', 'view_spaces', 'create_spaces', 'update_spaces', 'delete_spaces', 'list_members', 'view_members', 'update_members', 'delete_members', 'create_invitations', 'list_invitations', 'delete_invitations', 'list_reminders', 'view_reminders', 'create_reminders', 'update_reminders', 'delete_reminders', 'list_activities', 'create_activities', 'update_activities', 'delete_activities'))
       OR (r.name = 'space_admin' AND p.name IN ('list_spaces', 'view_spaces', 'update_spaces', 'delete_spaces', 'list_members', 'view_members', 'update_members', 'delete_members', 'create_invitations', 'list_invitations', 'delete_invitations', 'list_reminders', 'view_reminders', 'create_reminders', 'update_reminders', 'delete_reminders', 'list_activities', 'create_activities', 'update_activities', 'delete_activities'))
       OR (r.name = 'space_member' AND p.name IN ('list_spaces', 'view_spaces', 'list_members', 'view_members', 'list_reminders', 'view_reminders', 'create_reminders', 'update_reminders', 'delete_reminders', 'list_activities', 'create_activities', 'update_activities', 'delete_activities'))
+      OR (r.name = 'space_editor' AND p.name IN ('list_spaces', 'view_spaces', 'list_members', 'view_members', 'list_reminders', 'view_reminders', 'create_reminders', 'update_reminders', 'delete_reminders', 'list_activities', 'create_activities', 'update_activities', 'delete_activities'))
       OR (r.name = 'space_viewer' AND p.name IN ('list_spaces', 'view_spaces', 'list_members', 'view_members', 'list_reminders', 'view_reminders', 'list_activities'))
   );
 
@@ -72,5 +75,6 @@ WHERE id IN (
     '11111111-1111-4111-8111-000000000001',
     '11111111-1111-4111-8111-000000000002',
     '11111111-1111-4111-8111-000000000003',
-    '11111111-1111-4111-8111-000000000004'
+    '11111111-1111-4111-8111-000000000004',
+    '11111111-1111-4111-8111-000000000005'
 );

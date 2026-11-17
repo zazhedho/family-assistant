@@ -36,7 +36,7 @@ type SpaceArchiveInput struct {
 type MemberUpdateRoleInput struct {
 	Space    string `json:"space,omitempty" jsonschema:"Space UUID or exact user-facing name"`
 	MemberID string `json:"member_id" jsonschema:"member UUID"`
-	Role     string `json:"role" jsonschema:"space_admin, space_member, or space_viewer"`
+	Role     string `json:"role" jsonschema:"space_admin, space_member, space_editor, or space_viewer"`
 }
 
 type MemberRemoveInput struct {

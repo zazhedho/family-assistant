@@ -305,7 +305,7 @@ Hermes adds its MCP server prefix to tool names:
 | `space_get_members` | List active members of a Space (names and roles; no emails or internal IDs). |
 | `space_update` | Update shared Space details. |
 | `space_archive` | Archive a shared Space. |
-| `member_update_role` | Change a shared Space member's role. |
+| `member_update_role` | Change a shared Space member's role, including `space_editor`. |
 | `member_remove` | Remove a shared Space member. |
 | `invitation_create` | Issue an expiring invitation. Private chat only. |
 | `member_add_by_phone` | Add an already-registered person to a shared Space by phone, with a two-step name confirmation. Private chat only. |
@@ -341,12 +341,14 @@ refused with `dm_required`).
   that to the owner; after an explicit yes it calls again with `confirm_name`
   set to exactly that display name (trimmed, case-insensitive). A missing or
   mismatched name is a validation error and adds nobody.
-- `role_name` is `space_member` (default), `space_viewer`, or `space_admin`;
+- `role_name` is `space_member` (default), `space_viewer`, `space_admin`, or
+  `space_editor`;
   never `space_owner`.
 - In a private chat always pass `space` (the shared Space's name or UUID). A
   blank `space` selects the sender's Personal Space, which is never shared, and
   fails with `not found`, so `not found` with a blank `space` does not mean the
   person is unregistered.
+
 - Audit rows hold ids only (Space, actor, target user, role). Successful
   previews are audited too. The phone number and display name are never
   stored in audit rows or logs. A successful add is stored with
@@ -364,6 +366,49 @@ refused with `dm_required`).
 - Failures: `not found` means a wrong number, a person who has not registered
   yet, or a blank `space` in a private chat; `conflict` means the person is
   already a member of the Space.
+
+### Space editor role
+
+`space_editor` inherits `space_member` permissions. It can update any
+activity in its Space, including feeding reports, but can delete only activities
+it created. Reminder permissions stay the same as `space_member`. Space owners
+and admins can assign this role with `member_update_role` or when adding a
+member. Migration 000008 seeds the role for fresh installs. Existing databases
+must apply the seed SQL directly because completed migrations do not run again;
+existing members are not reassigned.
+
+On an existing database, run this once to add the role and copy the current
+`space_member` permissions (including finance permissions when enabled):
+
+```sql
+BEGIN;
+
+INSERT INTO roles (id, name, display_name, description, is_system)
+VALUES (
+    '11111111-1111-4111-8111-000000000005',
+    'space_editor',
+    'Space Editor',
+    'Member access with cross-member activity updates',
+    TRUE
+)
+ON CONFLICT (name) DO UPDATE SET
+    display_name = EXCLUDED.display_name,
+    description = EXCLUDED.description,
+    is_system = EXCLUDED.is_system,
+    deleted_at = NULL,
+    updated_at = CURRENT_TIMESTAMP;
+
+INSERT INTO role_permissions (id, role_id, permission_id)
+SELECT md5('space-rbac:' || editor.name || ':' || p.name)::uuid, editor.id, p.id
+FROM roles editor
+JOIN roles member ON member.name = 'space_member' AND member.deleted_at IS NULL
+JOIN role_permissions member_permissions ON member_permissions.role_id = member.id
+JOIN permissions p ON p.id = member_permissions.permission_id AND p.deleted_at IS NULL
+WHERE editor.name = 'space_editor' AND editor.deleted_at IS NULL
+ON CONFLICT DO NOTHING;
+
+COMMIT;
+```
 
 Bearer invitations (`invitation_create`, `invitation_accept`) still exist for
 people who have no account yet.

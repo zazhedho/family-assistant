@@ -120,9 +120,9 @@ func TestFinanceMigrationSeedsPermissions(t *testing.T) {
 		"'finance', 'Finance', '/finance', 'bi-wallet2', 910",
 		"ON CONFLICT (name) DO UPDATE",
 		"ON CONFLICT DO NOTHING;",
-		// owner/admin: all five; member: list, create, update; viewer: list only.
+		// owner/admin: all five; member/editor: list, create, update; viewer: list only.
 		"p.name IN ('list_finance', 'create_finance', 'update_finance', 'delete_finance', 'manage_finance') AND p.deleted_at IS NULL\nWHERE r.name IN ('space_owner', 'space_admin')",
-		"p.name IN ('list_finance', 'create_finance', 'update_finance') AND p.deleted_at IS NULL\nWHERE r.name = 'space_member'",
+		"p.name IN ('list_finance', 'create_finance', 'update_finance') AND p.deleted_at IS NULL\nWHERE r.name IN ('space_member', 'space_editor')",
 		"p.name IN ('list_finance') AND p.deleted_at IS NULL\nWHERE r.name = 'space_viewer'",
 	} {
 		if !strings.Contains(up, required) {

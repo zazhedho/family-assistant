@@ -425,6 +425,24 @@ func TestReportFeedingLeftoverAuthorizesAndAudits(t *testing.T) {
 		}
 	})
 
+	t.Run("space editor can report another member's feeding", func(t *testing.T) {
+		repo, spaces, audit := ownerSetup(nil)
+		spaces.members[0].RoleName = testSpaceEditorRole
+		other := feeding
+		other.CreatedByMemberID = "member-2"
+		repo.reportTarget = &other
+		repo.reportResult = &domainactivity.FeedingReportResult{Activity: other, Changed: true}
+		service := activityService(repo, spaces, audit)
+
+		got, err := service.ReportFeedingLeftover(context.Background(), activityActor(testSpace, "member-1", "activities:update"), feedingInput())
+		if err != nil {
+			t.Fatalf("report another member's feeding: %v", err)
+		}
+		if got == nil || !got.Changed || repo.reportCalls != 1 {
+			t.Fatalf("result = %+v, report calls = %d", got, repo.reportCalls)
+		}
+	})
+
 	t.Run("non-member", func(t *testing.T) {
 		repo, spaces, audit := ownerSetup(nil)
 		spaces.members[0].SpaceID = "space-2"

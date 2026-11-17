@@ -29,6 +29,13 @@ var spaceGrants = map[string]map[string][]string{
 		"activities": {"list", "create", "update", "delete"},
 		"finance":    {"list", "create", "update"},
 	},
+	"space_editor": {
+		"spaces":     {"list", "view"},
+		"members":    {"list", "view"},
+		"reminders":  {"list", "view", "create", "update", "delete"},
+		"activities": {"list", "create", "update", "delete"},
+		"finance":    {"list", "create", "update"},
+	},
 	"space_viewer": {
 		"spaces":     {"list", "view"},
 		"members":    {"list", "view"},
@@ -38,7 +45,7 @@ var spaceGrants = map[string]map[string][]string{
 	},
 }
 
-var spaceRoleOrder = []string{"space_owner", "space_admin", "space_member", "space_viewer"}
+var spaceRoleOrder = []string{"space_owner", "space_admin", "space_member", "space_editor", "space_viewer"}
 var spaceResourceOrder = []string{"spaces", "members", "invitations", "reminders", "activities", "finance"}
 
 type spaceRole struct {
@@ -49,6 +56,7 @@ var spaceRoles = []spaceRole{
 	{ID: "11111111-1111-4111-8111-000000000001", Name: "space_owner", DisplayName: "Space Owner", Description: "Full access to a Space"},
 	{ID: "11111111-1111-4111-8111-000000000002", Name: "space_admin", DisplayName: "Space Admin", Description: "Administrative access to a Space"},
 	{ID: "11111111-1111-4111-8111-000000000003", Name: "space_member", DisplayName: "Space Member", Description: "Member access to a Space"},
+	{ID: "11111111-1111-4111-8111-000000000005", Name: "space_editor", DisplayName: "Space Editor", Description: "Member access with cross-member activity updates"},
 	{ID: "11111111-1111-4111-8111-000000000004", Name: "space_viewer", DisplayName: "Space Viewer", Description: "Read-only access to a Space"},
 }
 
@@ -129,7 +137,7 @@ func RenderSpaceSQL() (string, error) {
 }
 
 // renderSpaceSQL renders the seed, omitting the resources in skip. Migration
-// 000008 is frozen and predates later resources, so its test skips them.
+// 000008 omits finance because migration 000013 seeds that resource.
 func renderSpaceSQL(skip map[string]bool) (string, error) {
 	sections := []string{renderSpaceRoles()}
 	for _, module := range spaceModules {

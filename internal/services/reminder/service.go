@@ -22,11 +22,12 @@ import (
 )
 
 const (
-	createPermission = "reminders:create"
-	listPermission   = "reminders:list"
-	updatePermission = "reminders:update"
-	deletePermission = "reminders:delete"
-	requiredReason   = "is required"
+	createPermission    = "reminders:create"
+	listPermission      = "reminders:list"
+	updatePermission    = "reminders:update"
+	deletePermission    = "reminders:delete"
+	spaceEditorRoleName = "space_editor"
+	requiredReason      = "is required"
 )
 
 var ErrConflict = errors.New("conflict")
@@ -495,7 +496,7 @@ func canComplete(role, memberID string, reminder *domainreminder.Reminder) bool 
 	switch strings.ToLower(strings.TrimSpace(role)) {
 	case "space_owner", "space_admin":
 		return true
-	case "space_member":
+	case "space_member", spaceEditorRoleName:
 		if strings.TrimSpace(reminder.CreatedByMemberID) == strings.TrimSpace(memberID) {
 			return true
 		}
@@ -509,7 +510,7 @@ func canMutate(role, memberID string, reminder *domainreminder.Reminder) bool {
 	switch strings.ToLower(strings.TrimSpace(role)) {
 	case "space_owner", "space_admin":
 		return true
-	case "space_member":
+	case "space_member", spaceEditorRoleName:
 		return strings.TrimSpace(reminder.CreatedByMemberID) == strings.TrimSpace(memberID)
 	default:
 		return false

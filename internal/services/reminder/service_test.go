@@ -27,6 +27,7 @@ const (
 	creatorID       = "member-creator"
 	assigneeID      = "member-assignee"
 	reminderID      = "00000000-0000-0000-0000-000000000101"
+	spaceEditorRole = "space_editor"
 )
 
 type reminderRepositoryStub struct {
@@ -601,6 +602,20 @@ func TestCompleteMemberCanCompleteOwnReminder(t *testing.T) {
 	}
 }
 
+func TestCompleteSpaceEditorCanCompleteOwnReminder(t *testing.T) {
+	reminder := &domainreminder.Reminder{ID: reminderID, SpaceID: sharedSpaceID, CreatedByMemberID: assigneeID, Status: domainreminder.StatusPending}
+	repo := &reminderRepositoryStub{found: reminder}
+	spaces := &spaceRepositoryStub{members: []domainspace.ResolvedMembership{
+		membership(sharedSpaceID, assigneeID, spaceEditorRole, "user-2"),
+	}}
+	service := newReminderService(repo, spaces, nil)
+	actor := actor(sharedSpaceID, domainspace.TypeShared, assigneeID, spaceEditorRole, "reminders:update")
+
+	if _, err := service.Complete(context.Background(), actor, sharedSpaceID, reminderID); err != nil {
+		t.Fatalf("editor complete own reminder: %v", err)
+	}
+}
+
 func TestCompleteRejectsUnrelatedMemberAndViewer(t *testing.T) {
 	tests := []struct {
 		name  string
@@ -722,6 +737,26 @@ func TestUpdateMemberCannotMutateAnotherMembersReminder(t *testing.T) {
 	}
 	if repo.updated {
 		t.Fatal("unauthorized member updated reminder")
+	}
+}
+
+func TestUpdateSpaceEditorCannotMutateAnotherMembersReminder(t *testing.T) {
+	reminder := &domainreminder.Reminder{ID: reminderID, SpaceID: sharedSpaceID, CreatedByMemberID: assigneeID, Status: domainreminder.StatusPending}
+	repo := &reminderRepositoryStub{found: reminder}
+	spaces := &spaceRepositoryStub{members: []domainspace.ResolvedMembership{
+		membership(sharedSpaceID, creatorID, spaceEditorRole, "user-1"),
+		membership(sharedSpaceID, assigneeID, "space_member", "user-2"),
+	}}
+	service := newReminderService(repo, spaces, nil)
+	actor := actor(sharedSpaceID, domainspace.TypeShared, creatorID, spaceEditorRole, "reminders:update")
+	title := "Nope"
+
+	_, err := service.Update(context.Background(), actor, sharedSpaceID, reminderID, dto.ReminderUpdateInput{Title: &title})
+	if !errors.Is(err, authorization.ErrForbidden) {
+		t.Fatalf("update error = %v, want forbidden", err)
+	}
+	if repo.updated {
+		t.Fatal("editor updated another member's reminder")
 	}
 }
 

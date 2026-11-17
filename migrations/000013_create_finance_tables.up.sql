@@ -225,7 +225,7 @@ INSERT INTO role_permissions (id, role_id, permission_id)
 SELECT md5('space-rbac:' || r.name || ':' || p.name)::uuid, r.id, p.id
 FROM roles r
 JOIN permissions p ON p.resource = 'finance' AND p.name IN ('list_finance', 'create_finance', 'update_finance') AND p.deleted_at IS NULL
-WHERE r.name = 'space_member' AND r.deleted_at IS NULL
+WHERE r.name IN ('space_member', 'space_editor') AND r.deleted_at IS NULL
 ON CONFLICT DO NOTHING;
 
 INSERT INTO role_permissions (id, role_id, permission_id)

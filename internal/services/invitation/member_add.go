@@ -76,7 +76,7 @@ func (s *service) AddMemberByPhone(ctx context.Context, actorUserID string, inpu
 		return fail("", "", err)
 	}
 	if !validTargetRole(roleName) {
-		return fail(actor.ID, "", &serviceauthorization.ValidationError{Field: "role_name", Reason: "must be one of space_admin, space_member, space_viewer"})
+		return fail(actor.ID, "", &serviceauthorization.ValidationError{Field: "role_name", Reason: invalidTargetRoleReason})
 	}
 	phone, err := normalizeMemberPhone(input.Phone)
 	if err != nil {

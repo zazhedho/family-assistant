@@ -14,7 +14,7 @@ func TestRenderSpaceSQLSeedsSpaceRBAC(t *testing.T) {
 		t.Fatalf("render space seed: %v", err)
 	}
 
-	for _, role := range []string{"space_owner", "space_admin", "space_member", "space_viewer"} {
+	for _, role := range []string{"space_owner", "space_admin", "space_member", "space_editor", "space_viewer"} {
 		if !strings.Contains(sql, "'"+role+"'") {
 			t.Errorf("role %q missing", role)
 		}
@@ -88,6 +88,12 @@ func TestRenderSpaceSQLUsesExactGrantMatrix(t *testing.T) {
 			"reminders":  {"list", "view", "create", "update", "delete"},
 			"activities": {"list", "create", "update", "delete"},
 		},
+		"space_editor": {
+			"spaces":     {"list", "view"},
+			"members":    {"list", "view"},
+			"reminders":  {"list", "view", "create", "update", "delete"},
+			"activities": {"list", "create", "update", "delete"},
+		},
 		"space_viewer": {
 			"spaces":     {"list", "view"},
 			"members":    {"list", "view"},
@@ -95,8 +101,8 @@ func TestRenderSpaceSQLUsesExactGrantMatrix(t *testing.T) {
 			"activities": {"list"},
 		},
 	}
-	if got := strings.Count(sql, "INSERT INTO role_permissions"); got != 22 {
-		t.Fatalf("grant statements: got %d, want 22", got)
+	if got := strings.Count(sql, "INSERT INTO role_permissions"); got != 27 {
+		t.Fatalf("grant statements: got %d, want 27", got)
 	}
 
 	for role, resources := range want {
@@ -117,7 +123,7 @@ func TestRenderSpaceSQLUsesExactGrantMatrix(t *testing.T) {
 }
 
 func TestSpaceSeedMigrationUsesRenderedSeed(t *testing.T) {
-	// Migration 000008 is applied and frozen; finance is seeded by 000013.
+	// Finance permissions are added by migration 000013.
 	want, err := renderSpaceSQL(map[string]bool{"finance": true})
 	if err != nil {
 		t.Fatalf("render space seed: %v", err)
@@ -145,6 +151,7 @@ func TestFinanceGrantsMatchPolicy(t *testing.T) {
 		"space_owner":  {"list", "create", "update", "delete", "manage"},
 		"space_admin":  {"list", "create", "update", "delete", "manage"},
 		"space_member": {"list", "create", "update"},
+		"space_editor": {"list", "create", "update"},
 		"space_viewer": {"list"},
 	}
 	for role, actions := range want {

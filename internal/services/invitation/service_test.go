@@ -187,6 +187,7 @@ func invitationService(repo *invitationRepositoryStub, audit *invitationAuditStu
 		&invitationRoleRepositoryStub{roles: map[string]domainrole.Role{
 			"space_admin":  {Id: "role-admin", Name: "space_admin"},
 			"space_member": {Id: "role-member", Name: "space_member"},
+			"space_editor": {Id: "role-editor", Name: "space_editor"},
 			"space_viewer": {Id: "role-viewer", Name: "space_viewer"},
 		}},
 		&invitationPermissionRepositoryStub{permissions: map[string][]domainpermission.Permission{
@@ -300,7 +301,7 @@ func TestCreateInvitationScopesMembershipLookupToAuthenticatedUserAndSpace(t *te
 }
 
 func TestCreateInvitationAllowsOnlyNonOwnerTargetRoles(t *testing.T) {
-	for _, role := range []string{"space_admin", "space_member", "space_viewer"} {
+	for _, role := range []string{"space_admin", "space_editor", "space_member", "space_viewer"} {
 		t.Run(role, func(t *testing.T) {
 			repo := &invitationRepositoryStub{}
 			service := invitationService(repo, &invitationAuditStub{})

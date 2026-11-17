@@ -21,6 +21,8 @@ import (
 
 var _ interfacespace.ServiceSpaceInterface = (*service)(nil)
 
+const testSpaceEditorRole = "space_editor"
+
 type spaceRepositoryStub struct {
 	memberships     []domainspace.ResolvedMembership
 	membership      *domainspace.ResolvedMembership
@@ -522,6 +524,25 @@ func TestUpdateMemberRoleAcceptsAllowedRole(t *testing.T) {
 		t.Fatalf("update member role: %v", err)
 	}
 	if updated == nil || updated.RoleName != "space_viewer" || updated.RoleID != "role-viewer" || repo.updatedMemberID != "member-2" {
+		t.Fatalf("unexpected role update: member=%+v repo=%+v", updated, repo)
+	}
+}
+
+func TestUpdateMemberRoleAcceptsSpaceEditor(t *testing.T) {
+	actor := sharedSpaceMembership("role-admin", "space-1", "user-1")
+	target := sharedSpaceMembership("role-member", "space-1", "user-2")
+	target.ID = "member-2"
+	repo := &spaceRepositoryStub{membership: &actor, listed: []domainspace.ResolvedMembership{target}}
+	roles := &roleRepositoryStub{role: domainrole.Role{Id: "role-editor", Name: testSpaceEditorRole}}
+	service := NewService(repo, roles, &permissionRepositoryStub{byRole: map[string][]domainpermission.Permission{
+		"role-admin": {permission("members", "update")},
+	}}, &spaceAuditStub{}).(*service)
+
+	updated, err := service.UpdateMemberRole(context.Background(), "user-1", "space-1", "member-2", dto.MemberRoleUpdateInput{Role: testSpaceEditorRole})
+	if err != nil {
+		t.Fatalf("update member role: %v", err)
+	}
+	if updated == nil || updated.RoleName != testSpaceEditorRole || updated.RoleID != "role-editor" || repo.updatedMemberID != "member-2" {
 		t.Fatalf("unexpected role update: member=%+v repo=%+v", updated, repo)
 	}
 }

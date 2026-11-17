@@ -36,7 +36,7 @@ func CanRead(target TargetKind, role, actorMemberID, creatorMemberID, recipientM
 		return isSpaceOwnerOrAdmin(role) || actorMemberID == creatorMemberID || actorMemberID == recipientMemberID
 	case TargetGroup:
 		switch role {
-		case "space_owner", "space_admin", "space_member", "space_viewer":
+		case "space_owner", "space_admin", "space_member", "space_editor", "space_viewer":
 			return true
 		default:
 			return false

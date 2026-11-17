@@ -16,6 +16,8 @@ import (
 	"gorm.io/gorm"
 )
 
+const testSpaceEditorRole = "space_editor"
+
 type activityRepositoryStub struct {
 	created  *domainactivity.Activity
 	listed   []domainactivity.Activity
@@ -287,6 +289,58 @@ func TestUpdateActivityMemberCannotMutateAnotherMemberActivity(t *testing.T) {
 	}
 	if repo.updated {
 		t.Fatal("unauthorized member updated activity")
+	}
+}
+
+func TestUpdateSpaceEditorCanPatchAnotherMembersActivity(t *testing.T) {
+	repo := &activityRepositoryStub{found: &domainactivity.Activity{ID: "activity-1", SpaceID: "space-1", CreatedByMemberID: "member-2", Kind: "note", Note: "old"}}
+	spaces := &activitySpaceRepositoryStub{members: []domainspace.ResolvedMembership{
+		{ID: "member-1", SpaceID: "space-1", UserID: "user-1", RoleName: testSpaceEditorRole, Status: domainspace.StatusActive},
+		{ID: "member-2", SpaceID: "space-1", UserID: "user-2", RoleName: "space_member", Status: domainspace.StatusActive},
+	}}
+	service := activityService(repo, spaces, &activityAuditStub{})
+	actor := activityActor("space-1", "member-1", "activities:update")
+	note := "updated by editor"
+
+	got, err := service.Update(context.Background(), actor, "space-1", "activity-1", dto.ActivityUpdateInput{Note: &note})
+	if err != nil {
+		t.Fatalf("update another member's activity: %v", err)
+	}
+	if !repo.updated || repo.update.Note == nil || *repo.update.Note != note || got == nil || got.Note != note {
+		t.Fatalf("update=%#v result=%#v", repo, got)
+	}
+}
+
+func TestDeleteSpaceEditorCanDeleteOwnActivity(t *testing.T) {
+	repo := &activityRepositoryStub{found: &domainactivity.Activity{ID: "activity-1", SpaceID: "space-1", CreatedByMemberID: "member-1", Kind: "note", Note: "own"}}
+	spaces := &activitySpaceRepositoryStub{members: []domainspace.ResolvedMembership{{
+		ID: "member-1", SpaceID: "space-1", UserID: "user-1", RoleName: testSpaceEditorRole, Status: domainspace.StatusActive,
+	}}}
+	service := activityService(repo, spaces, &activityAuditStub{})
+	actor := activityActor("space-1", "member-1", "activities:delete")
+
+	if _, err := service.Delete(context.Background(), actor, "space-1", "activity-1"); err != nil {
+		t.Fatalf("delete own activity: %v", err)
+	}
+	if !repo.deleted {
+		t.Fatal("editor could not delete own activity")
+	}
+}
+
+func TestDeleteSpaceEditorCannotDeleteAnotherMembersActivity(t *testing.T) {
+	repo := &activityRepositoryStub{found: &domainactivity.Activity{ID: "activity-1", SpaceID: "space-1", CreatedByMemberID: "member-2", Kind: "note", Note: "other"}}
+	spaces := &activitySpaceRepositoryStub{members: []domainspace.ResolvedMembership{{
+		ID: "member-1", SpaceID: "space-1", UserID: "user-1", RoleName: testSpaceEditorRole, Status: domainspace.StatusActive,
+	}}}
+	service := activityService(repo, spaces, &activityAuditStub{})
+	actor := activityActor("space-1", "member-1", "activities:delete")
+
+	_, err := service.Delete(context.Background(), actor, "space-1", "activity-1")
+	if !errors.Is(err, authorization.ErrForbidden) {
+		t.Fatalf("delete error = %v, want forbidden", err)
+	}
+	if repo.deleted {
+		t.Fatal("editor deleted another member's activity")
 	}
 }
 

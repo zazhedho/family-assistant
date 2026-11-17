@@ -340,8 +340,11 @@ func TestMemberAddSchemaInputsAreStrings(t *testing.T) {
 	if desc := strings.ToLower(fmt.Sprint(props["space"].(map[string]any)["description"])); !strings.Contains(desc, "always pass") || !strings.Contains(desc, "personal space") {
 		t.Fatalf("space description lacks the always-pass rule: %q", desc)
 	}
-	if desc := fmt.Sprint(props["role_name"].(map[string]any)["description"]); !strings.Contains(desc, "space_admin") || !strings.Contains(desc, "space_member") || !strings.Contains(desc, "space_viewer") {
-		t.Fatalf("role_name description = %q", desc)
+	desc := fmt.Sprint(props["role_name"].(map[string]any)["description"])
+	for _, role := range []string{"space_admin", "space_member", "space_editor", "space_viewer"} {
+		if !strings.Contains(desc, role) {
+			t.Fatalf("role_name description %q lacks %q", desc, role)
+		}
 	}
 }
 

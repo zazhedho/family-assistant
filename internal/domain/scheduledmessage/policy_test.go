@@ -108,6 +108,7 @@ func TestCanRead(t *testing.T) {
 		{name: "owner can read DM", target: TargetDM, role: "space_owner", actor: "owner", creator: "creator", recipient: "recipient", want: true},
 		{name: "unrelated member cannot read private DM content", target: TargetDM, role: "space_member", actor: "other", creator: "creator", recipient: "recipient", want: false},
 		{name: "group member can read", target: TargetGroup, role: "space_member", actor: "member", creator: "creator", want: true},
+		{name: "space editor can read group schedule", target: TargetGroup, role: "space_editor", actor: "editor", creator: "creator", want: true},
 		{name: "group viewer can read", target: TargetGroup, role: "space_viewer", actor: "viewer", creator: "creator", want: true},
 		{name: "unknown group role cannot read", target: TargetGroup, role: "some_role", actor: "member", creator: "creator", want: false},
 	}
