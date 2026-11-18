@@ -318,7 +318,7 @@ func TestCompleteRemovesReminderFromDueIndex(t *testing.T) {
 	}}
 	index := &reminderIndexWriterStub{}
 	service := NewReminderService(repo, spaces, authorization.NewAuthorizer(), nil, index)
-	actor := actor(sharedSpaceID, domainspace.TypeShared, creatorID, "space_owner", "reminders:update")
+	actor := actor(sharedSpaceID, domainspace.TypeShared, creatorID, "space_owner", "reminders:complete")
 
 	if _, err := service.Complete(context.Background(), actor, sharedSpaceID, reminderID); err != nil {
 		t.Fatalf("complete reminder: %v", err)
@@ -445,7 +445,7 @@ func TestCompleteOwnerCanCompleteAnyReminderInSpace(t *testing.T) {
 		membership(sharedSpaceID, assigneeID, "space_member", "user-2"),
 	}}
 	service := newReminderService(repo, spaces, nil)
-	actor := actor(sharedSpaceID, domainspace.TypeShared, creatorID, "space_owner", "reminders:update")
+	actor := actor(sharedSpaceID, domainspace.TypeShared, creatorID, "space_owner", "reminders:complete")
 
 	got, err := service.Complete(context.Background(), actor, sharedSpaceID, reminderID)
 	if err != nil {
@@ -466,7 +466,7 @@ func TestCompleteSentReminder(t *testing.T) {
 		membership(sharedSpaceID, creatorID, "space_owner", "user-1"),
 	}}
 	service := newReminderService(repo, spaces, nil)
-	actor := actor(sharedSpaceID, domainspace.TypeShared, creatorID, "space_owner", "reminders:update")
+	actor := actor(sharedSpaceID, domainspace.TypeShared, creatorID, "space_owner", "reminders:complete")
 
 	got, err := service.Complete(context.Background(), actor, sharedSpaceID, reminderID)
 	if err != nil || got.Status != domainreminder.StatusCompleted || !repo.completed {
@@ -560,7 +560,7 @@ func TestCompleteAuditsSanitizedSuccessMetadata(t *testing.T) {
 	}}
 	audit := &auditStoreStub{}
 	service := newReminderService(repo, spaces, audit)
-	actor := actor(sharedSpaceID, domainspace.TypeShared, creatorID, "space_admin", "reminders:update")
+	actor := actor(sharedSpaceID, domainspace.TypeShared, creatorID, "space_admin", "reminders:complete")
 
 	if _, err := service.Complete(context.Background(), actor, sharedSpaceID, reminderID); err != nil {
 		t.Fatalf("complete reminder: %v", err)
@@ -581,7 +581,7 @@ func TestCompleteMemberCanCompleteAssignedReminder(t *testing.T) {
 		membership(sharedSpaceID, assigneeID, "space_member", "user-2"),
 	}}
 	service := newReminderService(repo, spaces, nil)
-	actor := actor(sharedSpaceID, domainspace.TypeShared, assigneeID, "space_member", "reminders:update")
+	actor := actor(sharedSpaceID, domainspace.TypeShared, assigneeID, "space_member", "reminders:complete")
 
 	if _, err := service.Complete(context.Background(), actor, sharedSpaceID, reminderID); err != nil {
 		t.Fatalf("assigned member complete: %v", err)
@@ -595,7 +595,7 @@ func TestCompleteMemberCanCompleteOwnReminder(t *testing.T) {
 		membership(sharedSpaceID, assigneeID, "space_member", "user-2"),
 	}}
 	service := newReminderService(repo, spaces, nil)
-	actor := actor(sharedSpaceID, domainspace.TypeShared, assigneeID, "space_member", "reminders:update")
+	actor := actor(sharedSpaceID, domainspace.TypeShared, assigneeID, "space_member", "reminders:complete")
 
 	if _, err := service.Complete(context.Background(), actor, sharedSpaceID, reminderID); err != nil {
 		t.Fatalf("own member complete: %v", err)
@@ -609,7 +609,7 @@ func TestCompleteSpaceEditorCanCompleteOwnReminder(t *testing.T) {
 		membership(sharedSpaceID, assigneeID, spaceEditorRole, "user-2"),
 	}}
 	service := newReminderService(repo, spaces, nil)
-	actor := actor(sharedSpaceID, domainspace.TypeShared, assigneeID, spaceEditorRole, "reminders:update")
+	actor := actor(sharedSpaceID, domainspace.TypeShared, assigneeID, spaceEditorRole, "reminders:complete")
 
 	if _, err := service.Complete(context.Background(), actor, sharedSpaceID, reminderID); err != nil {
 		t.Fatalf("editor complete own reminder: %v", err)
@@ -623,11 +623,11 @@ func TestCompleteRejectsUnrelatedMemberAndViewer(t *testing.T) {
 	}{
 		{
 			name:  "unrelated member",
-			actor: actor(sharedSpaceID, domainspace.TypeShared, "member-other", "space_member", "reminders:update"),
+			actor: actor(sharedSpaceID, domainspace.TypeShared, "member-other", "space_member", "reminders:complete"),
 		},
 		{
 			name:  "viewer",
-			actor: actor(sharedSpaceID, domainspace.TypeShared, "member-viewer", "space_viewer", "reminders:update"),
+			actor: actor(sharedSpaceID, domainspace.TypeShared, "member-viewer", "space_viewer", "reminders:complete"),
 		},
 	}
 	for _, tt := range tests {
@@ -664,8 +664,8 @@ func TestCompleteRejectsInactiveActorAndCrossSpaceResourceAsNotFound(t *testing.
 		actor domainidentity.ActorContext
 		space string
 	}{
-		{name: "inactive actor", actor: actor(sharedSpaceID, domainspace.TypeShared, "member-inactive", "space_member", "reminders:update"), space: sharedSpaceID},
-		{name: "cross space", actor: actor(sharedSpaceID, domainspace.TypeShared, creatorID, "space_owner", "reminders:update"), space: "space-other"},
+		{name: "inactive actor", actor: actor(sharedSpaceID, domainspace.TypeShared, "member-inactive", "space_member", "reminders:complete"), space: sharedSpaceID},
+		{name: "cross space", actor: actor(sharedSpaceID, domainspace.TypeShared, creatorID, "space_owner", "reminders:complete"), space: "space-other"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -689,7 +689,7 @@ func TestCompleteStatusRaceReturnsConflict(t *testing.T) {
 		membership(sharedSpaceID, creatorID, "space_owner", "user-1"),
 	}}
 	service := newReminderService(repo, spaces, nil)
-	actor := actor(sharedSpaceID, domainspace.TypeShared, creatorID, "space_owner", "reminders:update")
+	actor := actor(sharedSpaceID, domainspace.TypeShared, creatorID, "space_owner", "reminders:complete")
 
 	_, err := service.Complete(context.Background(), actor, sharedSpaceID, reminderID)
 	if !errors.Is(err, ErrConflict) {
@@ -740,7 +740,26 @@ func TestUpdateMemberCannotMutateAnotherMembersReminder(t *testing.T) {
 	}
 }
 
-func TestUpdateSpaceEditorCannotMutateAnotherMembersReminder(t *testing.T) {
+func TestUpdateMemberCannotMutateOwnReminder(t *testing.T) {
+	reminder := &domainreminder.Reminder{ID: reminderID, SpaceID: sharedSpaceID, CreatedByMemberID: creatorID, Status: domainreminder.StatusPending}
+	repo := &reminderRepositoryStub{found: reminder}
+	spaces := &spaceRepositoryStub{members: []domainspace.ResolvedMembership{
+		membership(sharedSpaceID, creatorID, "space_member", "user-1"),
+	}}
+	service := newReminderService(repo, spaces, nil)
+	actor := actor(sharedSpaceID, domainspace.TypeShared, creatorID, "space_member", "reminders:update")
+	title := "Nope"
+
+	_, err := service.Update(context.Background(), actor, sharedSpaceID, reminderID, dto.ReminderUpdateInput{Title: &title})
+	if !errors.Is(err, authorization.ErrForbidden) {
+		t.Fatalf("update error = %v, want forbidden", err)
+	}
+	if repo.updated {
+		t.Fatal("member updated own reminder")
+	}
+}
+
+func TestUpdateSpaceEditorCanMutateAnotherMembersReminder(t *testing.T) {
 	reminder := &domainreminder.Reminder{ID: reminderID, SpaceID: sharedSpaceID, CreatedByMemberID: assigneeID, Status: domainreminder.StatusPending}
 	repo := &reminderRepositoryStub{found: reminder}
 	spaces := &spaceRepositoryStub{members: []domainspace.ResolvedMembership{
@@ -749,14 +768,50 @@ func TestUpdateSpaceEditorCannotMutateAnotherMembersReminder(t *testing.T) {
 	}}
 	service := newReminderService(repo, spaces, nil)
 	actor := actor(sharedSpaceID, domainspace.TypeShared, creatorID, spaceEditorRole, "reminders:update")
-	title := "Nope"
+	title := "Updated by editor"
 
-	_, err := service.Update(context.Background(), actor, sharedSpaceID, reminderID, dto.ReminderUpdateInput{Title: &title})
-	if !errors.Is(err, authorization.ErrForbidden) {
-		t.Fatalf("update error = %v, want forbidden", err)
+	got, err := service.Update(context.Background(), actor, sharedSpaceID, reminderID, dto.ReminderUpdateInput{Title: &title})
+	if err != nil {
+		t.Fatalf("editor update error = %v", err)
 	}
-	if repo.updated {
-		t.Fatal("editor updated another member's reminder")
+	if !repo.updated || got == nil || got.Title != title {
+		t.Fatalf("editor update result = %#v, repository updated=%v", got, repo.updated)
+	}
+}
+
+func TestDeleteMemberCannotDeleteOwnReminder(t *testing.T) {
+	reminder := &domainreminder.Reminder{ID: reminderID, SpaceID: sharedSpaceID, CreatedByMemberID: creatorID, Status: domainreminder.StatusPending}
+	repo := &reminderRepositoryStub{found: reminder}
+	spaces := &spaceRepositoryStub{members: []domainspace.ResolvedMembership{
+		membership(sharedSpaceID, creatorID, "space_member", "user-1"),
+	}}
+	service := newReminderService(repo, spaces, nil)
+	actor := actor(sharedSpaceID, domainspace.TypeShared, creatorID, "space_member", "reminders:delete")
+
+	_, err := service.Delete(context.Background(), actor, sharedSpaceID, reminderID)
+	if !errors.Is(err, authorization.ErrForbidden) {
+		t.Fatalf("delete error = %v, want forbidden", err)
+	}
+	if repo.deleted {
+		t.Fatal("member deleted own reminder")
+	}
+}
+
+func TestDeleteSpaceEditorCannotDeleteReminder(t *testing.T) {
+	reminder := &domainreminder.Reminder{ID: reminderID, SpaceID: sharedSpaceID, CreatedByMemberID: creatorID, Status: domainreminder.StatusPending}
+	repo := &reminderRepositoryStub{found: reminder}
+	spaces := &spaceRepositoryStub{members: []domainspace.ResolvedMembership{
+		membership(sharedSpaceID, creatorID, spaceEditorRole, "user-1"),
+	}}
+	service := newReminderService(repo, spaces, nil)
+	actor := actor(sharedSpaceID, domainspace.TypeShared, creatorID, spaceEditorRole, "reminders:delete")
+
+	_, err := service.Delete(context.Background(), actor, sharedSpaceID, reminderID)
+	if !errors.Is(err, authorization.ErrForbidden) {
+		t.Fatalf("delete error = %v, want forbidden", err)
+	}
+	if repo.deleted {
+		t.Fatal("editor deleted reminder")
 	}
 }
 
@@ -786,7 +841,7 @@ func TestCompleteTerminalReminderReturnsConflict(t *testing.T) {
 		membership(sharedSpaceID, creatorID, "space_owner", "user-1"),
 	}}
 	service := newReminderService(repo, spaces, nil)
-	actor := actor(sharedSpaceID, domainspace.TypeShared, creatorID, "space_owner", "reminders:update")
+	actor := actor(sharedSpaceID, domainspace.TypeShared, creatorID, "space_owner", "reminders:complete")
 
 	_, err := service.Complete(context.Background(), actor, sharedSpaceID, reminderID)
 	if !errors.Is(err, ErrConflict) {
@@ -804,7 +859,7 @@ func TestCompletePropagatesReminderLookupError(t *testing.T) {
 		membership(sharedSpaceID, creatorID, "space_owner", "user-1"),
 	}}
 	service := newReminderService(repo, spaces, nil)
-	actor := actor(sharedSpaceID, domainspace.TypeShared, creatorID, "space_owner", "reminders:update")
+	actor := actor(sharedSpaceID, domainspace.TypeShared, creatorID, "space_owner", "reminders:complete")
 
 	_, err := service.Complete(context.Background(), actor, sharedSpaceID, reminderID)
 	if !errors.Is(err, lookupErr) {
@@ -820,7 +875,7 @@ func TestCompleteUnauthorizedMemberCannotLearnTerminalState(t *testing.T) {
 		membership(sharedSpaceID, "member-other", "space_member", "user-1"),
 	}}
 	service := newReminderService(repo, spaces, nil)
-	actor := actor(sharedSpaceID, domainspace.TypeShared, "member-other", "space_member", "reminders:update")
+	actor := actor(sharedSpaceID, domainspace.TypeShared, "member-other", "space_member", "reminders:complete")
 
 	_, err := service.Complete(context.Background(), actor, sharedSpaceID, reminderID)
 	if !errors.Is(err, authorization.ErrForbidden) {

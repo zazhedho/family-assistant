@@ -26,6 +26,7 @@ const (
 	listPermission      = "reminders:list"
 	updatePermission    = "reminders:update"
 	deletePermission    = "reminders:delete"
+	completePermission  = "reminders:complete"
 	spaceEditorRoleName = "space_editor"
 	requiredReason      = "is required"
 )
@@ -230,7 +231,7 @@ func (s *service) Complete(ctx context.Context, actor domainidentity.ActorContex
 		event.ErrorMessage = failureCategory(err)
 		s.writeAudit(ctx, event)
 	}()
-	if err := s.authorize.Authorize(ctx, actor, updatePermission, domainauthorization.Resource{SpaceID: spaceID}); err != nil {
+	if err := s.authorize.Authorize(ctx, actor, completePermission, domainauthorization.Resource{SpaceID: spaceID}); err != nil {
 		return nil, err
 	}
 	members, err := s.spaces.ListActiveMembers(ctx, spaceID)
@@ -312,7 +313,7 @@ func (s *service) Update(ctx context.Context, actor domainidentity.ActorContext,
 	if reminder == nil {
 		return nil, authorization.ErrNotFound
 	}
-	if !canMutate(actorMember.RoleName, actorMember.ID, reminder) {
+	if !canUpdateReminder(actorMember.RoleName) {
 		return nil, authorization.ErrForbidden
 	}
 	if reminder.Status != domainreminder.StatusPending {
@@ -378,7 +379,7 @@ func (s *service) Delete(ctx context.Context, actor domainidentity.ActorContext,
 	if reminder == nil {
 		return nil, authorization.ErrNotFound
 	}
-	if !canMutate(actorMember.RoleName, actorMember.ID, reminder) {
+	if !canDeleteReminder(actorMember.RoleName) {
 		return nil, authorization.ErrForbidden
 	}
 	status := reminder.Status
@@ -506,12 +507,19 @@ func canComplete(role, memberID string, reminder *domainreminder.Reminder) bool 
 	}
 }
 
-func canMutate(role, memberID string, reminder *domainreminder.Reminder) bool {
+func canUpdateReminder(role string) bool {
+	switch strings.ToLower(strings.TrimSpace(role)) {
+	case "space_owner", "space_admin", spaceEditorRoleName:
+		return true
+	default:
+		return false
+	}
+}
+
+func canDeleteReminder(role string) bool {
 	switch strings.ToLower(strings.TrimSpace(role)) {
 	case "space_owner", "space_admin":
 		return true
-	case "space_member", spaceEditorRoleName:
-		return strings.TrimSpace(reminder.CreatedByMemberID) == strings.TrimSpace(memberID)
 	default:
 		return false
 	}

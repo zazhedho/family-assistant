@@ -31,10 +31,10 @@ WHERE rp.id = md5('space-rbac:' || r.name || ':' || p.name)::uuid
   AND rp.role_id = r.id
   AND rp.permission_id = p.id
   AND (
-      (r.name = 'space_owner' AND p.name IN ('list_spaces', 'view_spaces', 'create_spaces', 'update_spaces', 'delete_spaces', 'list_members', 'view_members', 'update_members', 'delete_members', 'create_invitations', 'list_invitations', 'delete_invitations', 'list_reminders', 'view_reminders', 'create_reminders', 'update_reminders', 'delete_reminders', 'list_activities', 'create_activities', 'update_activities', 'delete_activities'))
-      OR (r.name = 'space_admin' AND p.name IN ('list_spaces', 'view_spaces', 'update_spaces', 'delete_spaces', 'list_members', 'view_members', 'update_members', 'delete_members', 'create_invitations', 'list_invitations', 'delete_invitations', 'list_reminders', 'view_reminders', 'create_reminders', 'update_reminders', 'delete_reminders', 'list_activities', 'create_activities', 'update_activities', 'delete_activities'))
-      OR (r.name = 'space_member' AND p.name IN ('list_spaces', 'view_spaces', 'list_members', 'view_members', 'list_reminders', 'view_reminders', 'create_reminders', 'update_reminders', 'delete_reminders', 'list_activities', 'create_activities', 'update_activities', 'delete_activities'))
-      OR (r.name = 'space_editor' AND p.name IN ('list_spaces', 'view_spaces', 'list_members', 'view_members', 'list_reminders', 'view_reminders', 'create_reminders', 'update_reminders', 'delete_reminders', 'list_activities', 'create_activities', 'update_activities', 'delete_activities'))
+      (r.name = 'space_owner' AND p.name IN ('list_spaces', 'view_spaces', 'create_spaces', 'update_spaces', 'delete_spaces', 'list_members', 'view_members', 'update_members', 'delete_members', 'create_invitations', 'list_invitations', 'delete_invitations', 'list_reminders', 'view_reminders', 'create_reminders', 'complete_reminders', 'update_reminders', 'delete_reminders', 'list_activities', 'create_activities', 'update_activities', 'delete_activities'))
+      OR (r.name = 'space_admin' AND p.name IN ('list_spaces', 'view_spaces', 'update_spaces', 'delete_spaces', 'list_members', 'view_members', 'update_members', 'delete_members', 'create_invitations', 'list_invitations', 'delete_invitations', 'list_reminders', 'view_reminders', 'create_reminders', 'complete_reminders', 'update_reminders', 'delete_reminders', 'list_activities', 'create_activities', 'update_activities', 'delete_activities'))
+      OR (r.name = 'space_member' AND p.name IN ('list_spaces', 'view_spaces', 'list_members', 'view_members', 'list_reminders', 'view_reminders', 'create_reminders', 'complete_reminders', 'update_reminders', 'delete_reminders', 'list_activities', 'create_activities', 'update_activities', 'delete_activities'))
+      OR (r.name = 'space_editor' AND p.name IN ('list_spaces', 'view_spaces', 'list_members', 'view_members', 'list_reminders', 'view_reminders', 'create_reminders', 'complete_reminders', 'update_reminders', 'delete_reminders', 'list_activities', 'create_activities', 'update_activities', 'delete_activities'))
       OR (r.name = 'space_viewer' AND p.name IN ('list_spaces', 'view_spaces', 'list_members', 'view_members', 'list_reminders', 'view_reminders', 'list_activities'))
   );
 
@@ -58,7 +58,8 @@ WHERE id IN (
     '33333333-3333-4333-8333-000000000016',
     '33333333-3333-4333-8333-000000000017',
     '33333333-3333-4333-8333-000000000018',
-    '33333333-3333-4333-8333-000000000019'
+    '33333333-3333-4333-8333-000000000019',
+    '33333333-3333-4333-8333-000000000034'
 );
 
 DELETE FROM menu_items

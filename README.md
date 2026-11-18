@@ -369,16 +369,20 @@ refused with `dm_required`).
 
 ### Space editor role
 
-`space_editor` inherits `space_member` permissions. It can update any
-activity in its Space, including feeding reports, but can delete only activities
-it created. Reminder permissions stay the same as `space_member`. Space owners
-and admins can assign this role with `member_update_role` or when adding a
-member. Migration 000008 seeds the role for fresh installs. Existing databases
-must apply the seed SQL directly because completed migrations do not run again;
-existing members are not reassigned.
+`space_editor` can update any activity or reminder in its Space, including
+feeding reports. It can delete only activities it created and cannot delete
+reminders. `space_member` can create reminders and complete reminders assigned
+to them or created by them, but cannot update or delete reminders. Editors keep
+the same completion rules as members; owners and admins can update, complete, or
+delete any reminder. Space owners and admins can assign this role with
+`member_update_role` or when adding a member. Migration 000008 seeds these
+permissions for fresh installs. Existing databases must apply the SQL below
+directly because completed migrations do not run again; existing members are
+not reassigned.
 
-On an existing database, run this once to add the role and copy the current
-`space_member` permissions (including finance permissions when enabled):
+On an existing database, run this transaction to add the completion permission,
+copy the other `space_member` permissions to `space_editor` (including finance
+permissions when enabled), then set the reminder permissions:
 
 ```sql
 BEGIN;
@@ -388,13 +392,28 @@ VALUES (
     '11111111-1111-4111-8111-000000000005',
     'space_editor',
     'Space Editor',
-    'Member access with cross-member activity updates',
+    'Member access with cross-member activity and reminder updates',
     TRUE
 )
 ON CONFLICT (name) DO UPDATE SET
     display_name = EXCLUDED.display_name,
     description = EXCLUDED.description,
     is_system = EXCLUDED.is_system,
+    deleted_at = NULL,
+    updated_at = CURRENT_TIMESTAMP;
+
+INSERT INTO permissions (id, name, display_name, resource, action)
+VALUES (
+    '33333333-3333-4333-8333-000000000034',
+    'complete_reminders',
+    'Complete Reminders',
+    'reminders',
+    'complete'
+)
+ON CONFLICT (name) DO UPDATE SET
+    display_name = EXCLUDED.display_name,
+    resource = EXCLUDED.resource,
+    action = EXCLUDED.action,
     deleted_at = NULL,
     updated_at = CURRENT_TIMESTAMP;
 
@@ -406,6 +425,29 @@ JOIN role_permissions member_permissions ON member_permissions.role_id = member.
 JOIN permissions p ON p.id = member_permissions.permission_id AND p.deleted_at IS NULL
 WHERE editor.name = 'space_editor' AND editor.deleted_at IS NULL
 ON CONFLICT DO NOTHING;
+
+INSERT INTO role_permissions (id, role_id, permission_id)
+SELECT md5('space-rbac:' || editor.name || ':' || p.name)::uuid, editor.id, p.id
+FROM roles editor
+JOIN permissions p ON p.name = 'update_reminders' AND p.resource = 'reminders' AND p.deleted_at IS NULL
+WHERE editor.name = 'space_editor' AND editor.deleted_at IS NULL
+ON CONFLICT DO NOTHING;
+
+INSERT INTO role_permissions (id, role_id, permission_id)
+SELECT md5('space-rbac:' || r.name || ':' || p.name)::uuid, r.id, p.id
+FROM roles r
+JOIN permissions p ON p.name = 'complete_reminders' AND p.resource = 'reminders' AND p.deleted_at IS NULL
+WHERE r.name IN ('space_owner', 'space_admin', 'space_member', 'space_editor') AND r.deleted_at IS NULL
+ON CONFLICT DO NOTHING;
+
+DELETE FROM role_permissions rp
+USING roles r, permissions p
+WHERE rp.role_id = r.id
+  AND rp.permission_id = p.id
+  AND (
+      (r.name = 'space_member' AND p.name IN ('update_reminders', 'delete_reminders'))
+      OR (r.name = 'space_editor' AND p.name = 'delete_reminders')
+  );
 
 COMMIT;
 ```

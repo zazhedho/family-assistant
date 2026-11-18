@@ -4,7 +4,7 @@ VALUES
     ('11111111-1111-4111-8111-000000000001', 'space_owner', 'Space Owner', 'Full access to a Space', TRUE),
     ('11111111-1111-4111-8111-000000000002', 'space_admin', 'Space Admin', 'Administrative access to a Space', TRUE),
     ('11111111-1111-4111-8111-000000000003', 'space_member', 'Space Member', 'Member access to a Space', TRUE),
-    ('11111111-1111-4111-8111-000000000005', 'space_editor', 'Space Editor', 'Member access with cross-member activity updates', TRUE),
+    ('11111111-1111-4111-8111-000000000005', 'space_editor', 'Space Editor', 'Member access with cross-member activity and reminder updates', TRUE),
     ('11111111-1111-4111-8111-000000000004', 'space_viewer', 'Space Viewer', 'Read-only access to a Space', TRUE)
 ON CONFLICT (name) DO UPDATE SET
     display_name = EXCLUDED.display_name,
@@ -101,6 +101,7 @@ INSERT INTO permissions (id, name, display_name, resource, action) VALUES
     ('33333333-3333-4333-8333-000000000007', 'list_reminders', 'List Reminders', 'reminders', 'list'),
     ('33333333-3333-4333-8333-000000000008', 'view_reminders', 'View Reminders', 'reminders', 'view'),
     ('33333333-3333-4333-8333-000000000009', 'create_reminders', 'Create Reminders', 'reminders', 'create'),
+    ('33333333-3333-4333-8333-000000000034', 'complete_reminders', 'Complete Reminders', 'reminders', 'complete'),
     ('33333333-3333-4333-8333-000000000010', 'update_reminders', 'Update Reminders', 'reminders', 'update'),
     ('33333333-3333-4333-8333-000000000019', 'delete_reminders', 'Delete Reminders', 'reminders', 'delete')
 ON CONFLICT (name) DO UPDATE SET
@@ -156,7 +157,7 @@ ON CONFLICT DO NOTHING;
 INSERT INTO role_permissions (id, role_id, permission_id)
 SELECT md5('space-rbac:' || r.name || ':' || p.name)::uuid, r.id, p.id
 FROM roles r
-JOIN permissions p ON p.resource = 'reminders' AND p.name IN ('list_reminders', 'view_reminders', 'create_reminders', 'update_reminders', 'delete_reminders') AND p.deleted_at IS NULL
+JOIN permissions p ON p.resource = 'reminders' AND p.name IN ('list_reminders', 'view_reminders', 'create_reminders', 'complete_reminders', 'update_reminders', 'delete_reminders') AND p.deleted_at IS NULL
 WHERE r.name IN ('space_owner') AND r.deleted_at IS NULL
 ON CONFLICT DO NOTHING;
 
@@ -191,7 +192,7 @@ ON CONFLICT DO NOTHING;
 INSERT INTO role_permissions (id, role_id, permission_id)
 SELECT md5('space-rbac:' || r.name || ':' || p.name)::uuid, r.id, p.id
 FROM roles r
-JOIN permissions p ON p.resource = 'reminders' AND p.name IN ('list_reminders', 'view_reminders', 'create_reminders', 'update_reminders', 'delete_reminders') AND p.deleted_at IS NULL
+JOIN permissions p ON p.resource = 'reminders' AND p.name IN ('list_reminders', 'view_reminders', 'create_reminders', 'complete_reminders', 'update_reminders', 'delete_reminders') AND p.deleted_at IS NULL
 WHERE r.name IN ('space_admin') AND r.deleted_at IS NULL
 ON CONFLICT DO NOTHING;
 
@@ -219,7 +220,7 @@ ON CONFLICT DO NOTHING;
 INSERT INTO role_permissions (id, role_id, permission_id)
 SELECT md5('space-rbac:' || r.name || ':' || p.name)::uuid, r.id, p.id
 FROM roles r
-JOIN permissions p ON p.resource = 'reminders' AND p.name IN ('list_reminders', 'view_reminders', 'create_reminders', 'update_reminders', 'delete_reminders') AND p.deleted_at IS NULL
+JOIN permissions p ON p.resource = 'reminders' AND p.name IN ('list_reminders', 'view_reminders', 'create_reminders', 'complete_reminders') AND p.deleted_at IS NULL
 WHERE r.name IN ('space_member') AND r.deleted_at IS NULL
 ON CONFLICT DO NOTHING;
 
@@ -247,7 +248,7 @@ ON CONFLICT DO NOTHING;
 INSERT INTO role_permissions (id, role_id, permission_id)
 SELECT md5('space-rbac:' || r.name || ':' || p.name)::uuid, r.id, p.id
 FROM roles r
-JOIN permissions p ON p.resource = 'reminders' AND p.name IN ('list_reminders', 'view_reminders', 'create_reminders', 'update_reminders', 'delete_reminders') AND p.deleted_at IS NULL
+JOIN permissions p ON p.resource = 'reminders' AND p.name IN ('list_reminders', 'view_reminders', 'create_reminders', 'complete_reminders', 'update_reminders') AND p.deleted_at IS NULL
 WHERE r.name IN ('space_editor') AND r.deleted_at IS NULL
 ON CONFLICT DO NOTHING;
 
