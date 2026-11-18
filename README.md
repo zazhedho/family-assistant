@@ -212,7 +212,7 @@ Install `integrations/hermes/whatsapp_relay/relay.py` as
 
 ```dotenv
 WHATSAPP_RELAY_LISTEN_ADDRESS=172.17.0.1
-WHATSAPP_RELAY_PORT=3011
+WHATSAPP_RELAY_PORT=2001
 WHATSAPP_RELAY_SECRET=<unique-random-secret>
 WHATSAPP_BRIDGE_TOKEN_FILE=/home/ubuntu/.hermes/whatsapp/session/.bridge-token
 WHATSAPP_BRIDGE_PORT=2000
@@ -220,7 +220,16 @@ WHATSAPP_BRIDGE_PORT=2000
 
 Use the actual Docker host-gateway address, Hermes user home, session path and
 bridge port for the host. Restrict network access to the relay to trusted Docker
-clients. Set `REMINDER_WHATSAPP_BRIDGE_URL=http://host.docker.internal:3011`
+clients. If UFW blocks container-to-host traffic, allow the backend Docker
+subnet to the relay address and port. For example, when the subnet is
+`172.19.0.0/16` and the relay listens on `172.17.0.1:2001`:
+
+```sh
+sudo ufw allow from 172.19.0.0/16 to 172.17.0.1 port 2001 proto tcp comment "Family Assistant WhatsApp relay"
+```
+
+Confirm the actual subnet with `docker network inspect` before applying the
+rule. Set `REMINDER_WHATSAPP_BRIDGE_URL=http://host.docker.internal:2001`
 and `REMINDER_WHATSAPP_BRIDGE_TOKEN` to the same secret in the backend env.
 Run `systemctl --user daemon-reload` and
 `systemctl --user enable --now hermes-wa-relay.service`, then recreate the
@@ -1018,7 +1027,8 @@ Before step 1:
    MCP_SERVER_KEY=<random bearer key>
    MCP_IDENTITY_SECRET=<different random HMAC secret>
    REMINDER_SCHEDULER_ENABLED=true
-   REMINDER_WHATSAPP_BRIDGE_URL=http://host.docker.internal:3011
+   REMINDER_WHATSAPP_BRIDGE_URL=http://host.docker.internal:2001
+   REMINDER_WHATSAPP_BRIDGE_TOKEN=<relay-secret>
    REMINDER_SCHEDULER_INTERVAL=2m
    ```
 
@@ -1026,9 +1036,9 @@ Before step 1:
    `MCP_IDENTITY_SECRET`, `JWT_KEY`, and database credentials out of Git.
    Fresh databases migrate on first container start; no manual SQL patch is needed.
 
-   The bridge URL is target-specific: use
-   `http://host.docker.internal:3011` on `vps-amd64` and
-   `http://host.docker.internal:2000` on `oci-arm64`. Keep each VPS's database,
+   The relay URL is target-specific. On `oci-arm64`, use
+   `http://host.docker.internal:2001` with the authenticated relay configured
+   above. Keep each VPS's database,
    Redis, and other environment values in that VPS's own `.env`; deployment
    checks for the file but never copies or rewrites it.
 
@@ -1145,8 +1155,8 @@ Before step 1:
    Allow only the Family Assistant Docker subnet through UFW:
    `sudo ufw allow from 172.19.0.0/16 to 172.17.0.1 port 2000 proto tcp comment 'Family Assistant Hermes bridge'`.
    Do not open port `2000` to public interfaces.
-   Verify from the backend container with
-   `docker exec family-assistant wget -qO- http://host.docker.internal:2000/health`.
+   The bridge requires authentication; verify delivery through the relay rather
+   than relying on an unauthenticated bridge health request.
 
 4. Start the backend **before activating the new identity plugin**:
 
