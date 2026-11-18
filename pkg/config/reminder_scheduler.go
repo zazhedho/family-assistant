@@ -21,6 +21,7 @@ const (
 type ReminderSchedulerConfig struct {
 	Enabled                  bool
 	WhatsAppBridgeURL        string
+	WhatsAppBridgeToken      string
 	Interval                 time.Duration
 	BatchSize                int
 	Lease                    time.Duration
@@ -33,6 +34,7 @@ func LoadReminderSchedulerConfig() ReminderSchedulerConfig {
 	return ReminderSchedulerConfig{
 		Enabled:                  utils.GetEnv("REMINDER_SCHEDULER_ENABLED", false),
 		WhatsAppBridgeURL:        strings.TrimSpace(utils.GetEnv("REMINDER_WHATSAPP_BRIDGE_URL", "")),
+		WhatsAppBridgeToken:      strings.TrimSpace(utils.GetEnv("REMINDER_WHATSAPP_BRIDGE_TOKEN", "")),
 		Interval:                 utils.GetEnv("REMINDER_SCHEDULER_INTERVAL", defaultReminderSchedulerInterval),
 		BatchSize:                utils.GetEnv("REMINDER_SCHEDULER_BATCH_SIZE", defaultReminderSchedulerBatch),
 		Lease:                    utils.GetEnv("REMINDER_SCHEDULER_LEASE", defaultReminderSchedulerLease),

@@ -171,7 +171,7 @@ MCP settings:
 
 Reminder delivery:
 - Set `REMINDER_SCHEDULER_ENABLED=true` and point `REMINDER_WHATSAPP_BRIDGE_URL` at the
-  Hermes WhatsApp bridge. The backend checks due reminders every 2 minutes by default.
+  authenticated relay described below. The backend checks due reminders every 2 minutes by default.
 - `REMINDER_SCHEDULER_INTERVAL`, `REMINDER_SCHEDULER_BATCH_SIZE`, and
   `REMINDER_SCHEDULER_LEASE` tune the poll interval, batch size, and retry lease.
 - `REMINDER_SCHEDULER_DATABASE_FALLBACK_INTERVAL` controls PostgreSQL polling during Redis
@@ -192,12 +192,41 @@ no manual schema patch is needed.
 | --- | --- |
 | `REMINDER_SCHEDULER_ENABLED` | `false` |
 | `REMINDER_WHATSAPP_BRIDGE_URL` | unset; required when enabled |
+| `REMINDER_WHATSAPP_BRIDGE_TOKEN` | unset; shared relay secret |
 | `REMINDER_SCHEDULER_INTERVAL` | `2m` |
 | `REMINDER_SCHEDULER_BATCH_SIZE` | `50` |
 | `REMINDER_SCHEDULER_LEASE` | `2m` |
 | `REMINDER_SCHEDULER_DATABASE_FALLBACK_INTERVAL` | `1m` |
 | `REMINDER_SCHEDULER_INDEX_RECONCILE_INTERVAL` | `1h` |
 | `REMINDER_SCHEDULER_INDEX_BATCH_SIZE` | `1000` |
+
+#### Hermes WhatsApp relay
+
+Hermes rotates its bridge token whenever it starts a new bridge. The relay reads
+that token for each request, verifies the bridge's `/auth-proof`, then sends to
+the local bridge. Both reminder and scheduled-message delivery use this relay.
+Install `integrations/hermes/whatsapp_relay/relay.py` as
+`~/.local/lib/family-assistant/whatsapp-relay.py` on the Hermes host and install
+`hermes-wa-relay.service` in `~/.config/systemd/user/`. Create
+`~/.config/family-assistant/whatsapp-relay.env` with mode `0600`:
+
+```dotenv
+WHATSAPP_RELAY_LISTEN_ADDRESS=172.17.0.1
+WHATSAPP_RELAY_PORT=3011
+WHATSAPP_RELAY_SECRET=<unique-random-secret>
+WHATSAPP_BRIDGE_TOKEN_FILE=/home/ubuntu/.hermes/whatsapp/session/.bridge-token
+WHATSAPP_BRIDGE_PORT=2000
+```
+
+Use the actual Docker host-gateway address, Hermes user home, session path and
+bridge port for the host. Restrict network access to the relay to trusted Docker
+clients. Set `REMINDER_WHATSAPP_BRIDGE_URL=http://host.docker.internal:3011`
+and `REMINDER_WHATSAPP_BRIDGE_TOKEN` to the same secret in the backend env.
+Run `systemctl --user daemon-reload` and
+`systemctl --user enable --now hermes-wa-relay.service`, then recreate the
+backend container to load its env. Update the installed relay file when the
+repository version changes and restart the relay service. If the bridge accepts
+a message but the response is lost, a retry may send it twice.
 
 PostgreSQL remains the source of truth. When Redis is available, the scheduler checks
 the sorted-set index `family-assistant:reminders:due` first and skips PostgreSQL claims

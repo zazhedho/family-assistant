@@ -265,7 +265,7 @@ func startReminderScheduler(
 	if !cfg.Enabled {
 		return nil, nil
 	}
-	sender, err := notificationInfra.NewWhatsAppBridge(cfg.WhatsAppBridgeURL)
+	sender, err := notificationInfra.NewWhatsAppBridge(cfg.WhatsAppBridgeURL, cfg.WhatsAppBridgeToken)
 	if err != nil {
 		return nil, err
 	}
@@ -307,7 +307,7 @@ func startScheduledMessageLane(ctx context.Context, cfg config.ScheduledMessageC
 		repository, dependencies.spaces, dependencies.authorizer, dependencies.audit, dueIndex, generator,
 		scheduledMessageService.ScheduledMessageServiceOptions{MaxTextBytes: cfg.MaxTextBytes, MaxListRows: cfg.MaxListRows},
 	)
-	sender, err := notificationInfra.NewWhatsAppBridge(cfg.Scheduler.WhatsAppBridgeURL)
+	sender, err := notificationInfra.NewWhatsAppBridge(cfg.Scheduler.WhatsAppBridgeURL, cfg.Scheduler.WhatsAppBridgeToken)
 	if err != nil {
 		return nil, err
 	}

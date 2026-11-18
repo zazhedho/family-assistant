@@ -12,6 +12,23 @@ import (
 	domainreminder "family-assistant/internal/domain/reminder"
 )
 
+func TestWhatsAppBridgeSendsRelayAuthorization(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Authorization"); got != "Bearer relay-secret" {
+			t.Errorf("Authorization = %q, want relay bearer", got)
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+	sender, err := NewWhatsAppBridge(server.URL, "relay-secret")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := sender.Send(context.Background(), domainreminder.DeliveryTarget{Provider: "whatsapp", Target: "chat-1"}, "hello"); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestWhatsAppBridgeSendsChatMessage(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost || r.URL.Path != "/send" {
@@ -28,7 +45,7 @@ func TestWhatsAppBridgeSendsChatMessage(t *testing.T) {
 	}))
 	defer server.Close()
 
-	sender, err := NewWhatsAppBridge(server.URL)
+	sender, err := NewWhatsAppBridge(server.URL, "")
 	if err != nil {
 		t.Fatalf("new sender: %v", err)
 	}
@@ -45,7 +62,7 @@ func TestWhatsAppBridgeSendHonorsCanceledContext(t *testing.T) {
 	}))
 	defer server.Close()
 
-	sender, err := NewWhatsAppBridge(server.URL)
+	sender, err := NewWhatsAppBridge(server.URL, "")
 	if err != nil {
 		t.Fatalf("new sender: %v", err)
 	}
@@ -63,7 +80,7 @@ func TestWhatsAppBridgeSendHonorsCanceledContext(t *testing.T) {
 }
 
 func TestWhatsAppBridgeRejectsUnsupportedProvider(t *testing.T) {
-	sender, err := NewWhatsAppBridge("http://127.0.0.1:1")
+	sender, err := NewWhatsAppBridge("http://127.0.0.1:1", "")
 	if err != nil {
 		t.Fatalf("new sender: %v", err)
 	}
@@ -78,7 +95,7 @@ func TestWhatsAppBridgeReturnsNonSuccess(t *testing.T) {
 	}))
 	defer server.Close()
 
-	sender, err := NewWhatsAppBridge(server.URL)
+	sender, err := NewWhatsAppBridge(server.URL, "")
 	if err != nil {
 		t.Fatalf("new sender: %v", err)
 	}

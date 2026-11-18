@@ -18,9 +18,10 @@ const whatsappBridgeTimeout = 10 * time.Second
 type WhatsAppBridge struct {
 	endpoint string
 	client   *http.Client
+	token    string
 }
 
-func NewWhatsAppBridge(baseURL string) (*WhatsAppBridge, error) {
+func NewWhatsAppBridge(baseURL, token string) (*WhatsAppBridge, error) {
 	rawURL := strings.TrimSpace(baseURL)
 	parsed, err := url.ParseRequestURI(rawURL)
 	if err != nil || parsed.Host == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") {
@@ -30,6 +31,7 @@ func NewWhatsAppBridge(baseURL string) (*WhatsAppBridge, error) {
 	return &WhatsAppBridge{
 		endpoint: parsed.String(),
 		client:   &http.Client{Timeout: whatsappBridgeTimeout},
+		token:    strings.TrimSpace(token),
 	}, nil
 }
 
@@ -59,6 +61,9 @@ func (b *WhatsAppBridge) Send(ctx context.Context, target domainreminder.Deliver
 		return fmt.Errorf("create notification request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
+	if b.token != "" {
+		req.Header.Set("Authorization", "Bearer "+b.token)
+	}
 	resp, err := b.client.Do(req) // #nosec G704 -- endpoint is operator-configured.
 	if err != nil {
 		return fmt.Errorf("send notification: %w", err)
