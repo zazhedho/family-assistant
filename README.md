@@ -1317,6 +1317,14 @@ Before step 1:
    Legacy `v1` calls still work with explicit event times; an omitted event time
    without a signed message timestamp is rejected rather than guessed.
 
+   For WhatsApp LID senders, the identity plugin verifies the phone-to-LID and
+   LID-to-phone files in the WhatsApp session directory before signing the phone
+   identity. The default directory is `~/.hermes/whatsapp/session`; set
+   `FAMILY_ASSISTANT_WHATSAPP_SESSION_DIR` in the gateway environment when the
+   WhatsApp session is elsewhere. The gateway user must be able to read the
+   session files. Missing or inconsistent mappings are rejected; the WhatsApp
+   chat ID is preserved for delivery.
+
    Review old `/root/.hermes/memories/MEMORY.md` and `USER.md` before copying
    them to another server: stale link-code or Hermes cron instructions can
    override the intended flow.

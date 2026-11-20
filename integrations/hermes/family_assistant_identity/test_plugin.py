@@ -1,6 +1,8 @@
 import os
+import tempfile
 import unittest
 from datetime import datetime, timezone
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -135,6 +137,62 @@ class FamilyAssistantIdentityPluginTest(unittest.TestCase):
                 "shared": False,
             },
         )
+
+    def test_whatsapp_lid_uses_verified_bidirectional_session_mapping(self):
+        with tempfile.TemporaryDirectory() as directory:
+            session = Path(directory)
+            (session / "lid-mapping-12345678901234_reverse.json").write_text('"628123456789"')
+            (session / "lid-mapping-628123456789.json").write_text('"12345678901234"')
+            event = SimpleNamespace(source=SimpleNamespace(
+                platform="whatsapp", user_id="12345678901234@lid",
+                chat_id="12345678901234@lid", chat_type="dm",
+            ))
+            with patch.dict(os.environ, {"FAMILY_ASSISTANT_WHATSAPP_SESSION_DIR": directory, **SECRET_ENV}):
+                plugin.capture_gateway_identity(event)
+                envelope = plugin.inject_identity("mcp_family_assistant_space_list", {})["args"][plugin.IDENTITY_ARGUMENT_NAME]
+            self.assertEqual(envelope["external_id"], "628123456789@s.whatsapp.net")
+            self.assertEqual(envelope["chat_id"], "12345678901234@lid")
+            self.assertTrue(plugin.verify_signature("identity-secret", envelope))
+
+    def test_whatsapp_lid_without_matching_session_mapping_fails_closed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            session = Path(directory)
+            (session / "lid-mapping-12345678901234_reverse.json").write_text('"628123456789"')
+            (session / "lid-mapping-628123456789.json").write_text('"99999999999999"')
+            event = SimpleNamespace(source=SimpleNamespace(
+                platform="whatsapp", user_id="12345678901234@lid", chat_id="chat", chat_type="dm",
+            ))
+            with patch.dict(os.environ, {"FAMILY_ASSISTANT_WHATSAPP_SESSION_DIR": directory, **SECRET_ENV}):
+                plugin.capture_gateway_identity(event)
+                self.assertIsNone(plugin.inject_identity("mcp_family_assistant_space_list", {}))
+
+    def test_lid_session_fallback_without_mapping_fails_closed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            with patch.dict(os.environ, {
+                "FAMILY_ASSISTANT_WHATSAPP_SESSION_DIR": directory,
+                "HERMES_SESSION_PLATFORM": "whatsapp",
+                "HERMES_SESSION_USER_ID": "12345678901234@lid",
+                "HERMES_SESSION_CHAT_ID": "12345678901234@lid",
+                "HERMES_SESSION_CHAT_TYPE": "dm",
+                **SECRET_ENV,
+            }):
+                self.assertIsNone(plugin.inject_identity("mcp_family_assistant_space_list", {}))
+
+    def test_unmapped_live_lid_does_not_reuse_stale_session_identity(self):
+        with tempfile.TemporaryDirectory() as directory:
+            event = SimpleNamespace(source=SimpleNamespace(
+                platform="whatsapp", user_id="12345678901234@lid", chat_id="chat", chat_type="dm",
+            ))
+            with patch.dict(os.environ, {
+                "FAMILY_ASSISTANT_WHATSAPP_SESSION_DIR": directory,
+                "HERMES_SESSION_PLATFORM": "whatsapp",
+                "HERMES_SESSION_USER_ID": "628123456789@s.whatsapp.net",
+                "HERMES_SESSION_CHAT_ID": "chat",
+                "HERMES_SESSION_CHAT_TYPE": "dm",
+                **SECRET_ENV,
+            }):
+                plugin.capture_gateway_identity(event)
+                self.assertIsNone(plugin.inject_identity("mcp_family_assistant_space_list", {}))
 
     def test_message_time_is_captured_signed_and_cannot_be_overridden(self):
         message_at = datetime(2026, 9, 29, 23, 59, tzinfo=timezone.utc)

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import json
 import logging
 import os
 import secrets
@@ -16,6 +17,7 @@ import time
 from contextvars import ContextVar
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
+from pathlib import Path
 from typing import Any
 
 
@@ -56,6 +58,9 @@ def capture_gateway_identity(event: Any, gateway: Any = None, **_: Any) -> None:
     chat_id = _text(getattr(source, "chat_id", "")) or external_id
     chat_type = _text(getattr(source, "chat_type", ""))
     identity = _identity(platform, external_id, chat_id, chat_type)
+    if identity is None:
+        _current_identity.set({"invalid": True})
+        return None
     identity["shared"] = _is_shared_session(source, chat_type, gateway)
     message_at = _message_timestamp(event)
     if message_at is not None:
@@ -154,7 +159,7 @@ def inject_identity(tool_name: str = "", args: dict[str, Any] | None = None, **_
 
     secret = os.environ.get(_IDENTITY_SECRET_ENV, "").strip()
     identity = _session_identity()
-    if not secret or not identity:
+    if not secret or not identity or identity.get("invalid"):
         # Family Assistant is configured to fail closed when this envelope is required.
         return None
     if identity.get("shared"):
@@ -258,7 +263,11 @@ def _text(value: Any) -> str:
     return str(value or "").strip()
 
 
-def _identity(platform: str, external_id: str, chat_id: str, chat_type: str) -> dict[str, Any]:
+def _identity(platform: str, external_id: str, chat_id: str, chat_type: str) -> dict[str, Any] | None:
+    if platform == "whatsapp" and external_id.endswith("@lid"):
+        external_id = _whatsapp_phone_for_lid(external_id)
+        if not external_id:
+            return None
     return {
         "provider": "hermes",
         "external_id": external_id if platform in _WHATSAPP_PLATFORMS else f"{platform}:{external_id}",
@@ -266,3 +275,20 @@ def _identity(platform: str, external_id: str, chat_id: str, chat_type: str) -> 
         "chat_id": chat_id,
         "chat_type": chat_type,
     }
+
+
+def _whatsapp_phone_for_lid(external_id: str) -> str:
+    lid = external_id.removesuffix("@lid")
+    if not lid.isascii() or not lid.isdecimal():
+        return ""
+    session = Path(os.environ.get("FAMILY_ASSISTANT_WHATSAPP_SESSION_DIR") or Path.home() / ".hermes/whatsapp/session")
+    try:
+        phone = json.loads((session / f"lid-mapping-{lid}_reverse.json").read_text(encoding="utf-8"))
+        if not isinstance(phone, str) or not phone.isascii() or not phone.isdecimal():
+            return ""
+        mapped_lid = json.loads((session / f"lid-mapping-{phone}.json").read_text(encoding="utf-8"))
+        if mapped_lid != lid:
+            return ""
+    except (OSError, ValueError):
+        return ""
+    return f"{phone}@s.whatsapp.net"
